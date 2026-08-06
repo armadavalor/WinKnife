@@ -603,3 +603,129 @@ check` 0 errors / 0 warnings, `npm run build` OK.
   run that reaches it; left alone because those steps never ran in the failing
   build and the brief named only the two.
 - `npm run tauri build` was not run.
+
+## 2026-08-06 — Round 3: the app did not start, and why that kept happening
+
+**What was built.** A third adversarial review returned BLOCK, and the headline
+was not a security hole: **WinKnife did not boot** on this developer machine or
+on the GitHub runner.
+
+`compile_spec` (`brain/rules.rs`) asks whether a rule's expanded walk root sits
+inside `%USERPROFILE%`, and refuses to load the pack when it does not. Windows
+hands `%TEMP%` over in 8.3 form on any account whose name does not fit 8.3 —
+`C:\Users\ARMADA~1\AppData\Local\Temp` here, `C:\Users\RUNNER~1\...` on CI —
+while `%USERPROFILE%` arrives in full. `is_inside` compared the two as component
+text, judged the temp folder to be outside the profile, and refused every
+shipped pack. `lib.rs` treats a rules-load failure as fatal by design and
+propagates it out of Tauri's `setup`, so the window never opened. It failed
+closed, so no data was ever at risk — but it was unshippable.
+
+The instruction was explicit that `requires_admin: true` on the temp rules is
+*not* the fix: that flag silences the profile-containment guard, which is a real
+safety check.
+
+**The structural fix.** Three rounds had each fixed one instance of one defect:
+**two spellings of one path compared as raw text.** `widen` treated the symptom
+in `ProtectedPaths`; `rules.rs` and `brain/mod.rs` still had it. So the fix this
+round is a module, not a patch.
+
+- **New: `core/path_compare.rs`.** The one place in the crate where two paths
+  are compared. `CanonicalPath::resolved` canonicalises through
+  `dunce::canonicalize`; `same_path`, `is_inside` and `has_traversal` are built
+  on it. A path that is not on disk cannot be canonicalised, so the longest
+  ancestor that *does* exist is canonicalised and the missing tail re-attached —
+  a tail that does not exist cannot hold a reparse point, so nothing is guessed
+  at, and `C:\` exists everywhere, so this degrades gently rather than falling
+  back to pure text. `CanonicalPath::lexical` is the text-only form, kept for
+  the one loop that cannot afford a syscall per entry.
+- The Windows path text semantics (verbatim/device/NT prefixes, trailing dot and
+  space, lexical `..`, the UNC share root that is one component) now live there
+  once. `protected.rs` delegates to them instead of holding its own copy.
+
+**Findings fixed.**
+
+- **C3 (CRITICAL, the boot failure)** — `rules.rs`. `compile_spec` now asks
+  `path_compare::is_inside`, so a short-form `%TEMP%` is correctly seen to be
+  inside a long-form `%USERPROFILE%`. `rules::is_inside` deleted.
+- **H9 (HIGH)** — `brain/mod.rs`. `classify` consulted only the lexical list
+  while the executor also canonicalised, so analyze and execute could disagree
+  about one path: `entry=LONG probe=SHORT` was rated green while the delete was
+  (correctly) refused. CLAUDE.md's hard rule has two halves and only one was
+  enforced. New `Brain::path_refusal` is gate 1 in full — lexical list, then
+  `gate_path`, then the list again on the canonical form — and it is now the
+  *single* implementation both `classify` and `core::executor` call.
+- **M13 (MEDIUM)** — `quarantine.rs::destroy`, the one function allowed to
+  delete permanently. Its root guard was `Path::starts_with`, which counts `..`
+  as an ordinary component, so `...\quarantine\..\..\Windows\System32` passed
+  it. A `Component::ParentDir` is now refused outright before the containment
+  check, and the containment check goes through `path_compare`. `take`'s
+  destination guard got the same treatment.
+- **L8 (LOW)** — `quarantine.rs`. A `create_new` `AlreadyExists` on the
+  cross-volume branch was flattened into `MoveFailure::Failed`, so `move_out`'s
+  retry loop never fired there and a restore onto a contested name errored where
+  ` (restored)` would have worked. `copy_verify_remove_inner` now returns
+  `MoveFailure` and reports `Occupied` as `Occupied`.
+- **L9 (LOW)** — `platform/guard.rs`. The `compile_fail` doctest proving
+  `arm_real_os_effects` is absent from a test build sat inside `#[cfg(test)]`,
+  and rustdoc does not collect doctests from `cfg(test)` code — `Doc-tests
+  winknife_lib` said `running 0 tests` on every green run. The claim is true;
+  the evidence was theatre. Doctest dropped, replaced by a written statement of
+  what actually enforces it (name resolution under `cfg(not(test))`,
+  `pub(crate)` for other crates, `clippy --all-targets` compiling the test
+  targets).
+
+**The process gap.** Every existing test built a `MapEnv` of fabricated values,
+so nothing had ever loaded the shipped packs against the environment the app
+really starts in — which is exactly where it did not start.
+`the_shipped_packs_load_against_the_real_process_environment` (`lib.rs`) now
+loads `rules/*.json` through `SystemEnv` and asserts the brain builds, i.e. that
+the app can boot on the machine running the test. Two companion tests pin the
+mixed-spelling shape on real directories (`lib.rs`, `rules.rs`).
+
+**Decisions taken.**
+
+- `ProtectedPaths::reason_for` deliberately stays a lexical comparison, and says
+  so in its doc comment. It runs one probe against every entry for every file
+  examined; resolving per entry would be a syscall per entry per file. Both
+  sides are resolved once elsewhere instead — `widen` resolves each entry when
+  the list is built, `path_refusal` resolves the probe before asking.
+- Glob matching (`CompiledRule::matches_path`) and the shape checks
+  (`unsafe_pattern_shape`, `plain_local_shape`) stay raw text, with a comment at
+  each explaining why: globs were compiled against the pack's own spelling and
+  would stop matching their own directory if the candidate were rewritten, and
+  "how is this written?" is a question about text that must be answered *before*
+  anything is resolved.
+- `widen` keeps its `plain_local_shape` guard. Resolving a bare drive (`C:`) or
+  the bare volume-metadata name would ask the disk about somewhere else
+  entirely.
+
+**Verification.** The boot test was written *before* any fix and run against the
+literal pre-fix tree, then re-run after — and the pre-fix run was repeated by
+stashing the whole change set, to be sure. Before: `*** LOAD FAILED *** rule
+pack windows-temp is invalid at rules.user-temp-files.requires_admin:
+%TEMP%\** expands to C:\Users\ARMADA~1\AppData\Local\Temp, which is outside the
+user profile C:\Users\ARMADA-L5-PRO`. After: passes. The nine attack spellings
+were re-probed against the final tree and are REFUSED at all four surfaces
+(`gate_path`, the lexical list, `path_refusal`, and the `classify` rating) —
+`every_attack_spelling_is_refused_by_every_surface` prints the table under
+`--nocapture`.
+
+`cargo fmt --all --check` clean, `cargo clippy --all-targets -- -D warnings`
+clean, `cargo build --release` OK, `cargo test` 302/302 green (291 unit + 8 + 3
+integration; 16 new), `npm run check` 0 errors / 0 warnings, `npm run build` OK.
+
+**Deferred / not verified.**
+
+- The same five link-dependent safety tests ran under
+  `WINKNIFE_ALLOW_SKIP_LINK_TESTS=1` (still no Developer Mode here):
+  `a_link_pointing_into_a_protected_directory_is_refused`,
+  `a_walk_root_that_resolves_into_a_protected_location_is_refused`,
+  `symlinks_are_never_followed`, `symlinks_are_never_quarantined`,
+  `a_directory_containing_a_link_is_never_moved_across_volumes`. Every
+  8.3-alias-dependent test ran for real, including the four new ones, so the
+  two-spellings machinery really was exercised.
+- `npm run tauri build` was not run.
+- The ancestor-walk fallback in `CanonicalPath::resolved` degrades to a pure
+  lexical comparison only when nothing on the way up resolves — reachable in
+  practice only for a drive this machine does not have. Left as is: it errs
+  toward over-refusal, which is the direction to be wrong in.
