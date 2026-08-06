@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::error::{CoreError, Result};
+use crate::core::path_compare;
 
 /// Directory name under the app data dir.
 pub const QUARANTINE_DIR_NAME: &str = "quarantine";
@@ -321,7 +322,13 @@ impl Quarantine {
         // is built from a uuid and an extension so it cannot escape today, but
         // the cleanup path below deletes what it wrote, and that is not a
         // guarantee to leave implicit (security review H1).
-        if !destination.starts_with(&self.root) {
+        //
+        // Through `path_compare` rather than `Path::starts_with`: the latter
+        // compares components as they were typed, so a quarantine root reached
+        // by one spelling and a destination built from another would read as an
+        // escape — and it counts `..` as an ordinary component, so a genuine
+        // escape would read as containment.
+        if !path_compare::is_inside(&self.root, &destination) {
             return Err(CoreError::Quarantine(format!(
                 "refusing to quarantine `{}` to `{}`, which is outside the quarantine root",
                 path.display(),
@@ -726,10 +733,32 @@ impl Quarantine {
         let mut report = PurgeReport::default();
 
         for item in items {
-            if !item.quarantine_path.starts_with(&self.root) {
+            // `Path::starts_with` treats `..` as an ordinary component, so
+            // `…\quarantine\..\..\Windows\System32` "starts with" the
+            // quarantine root and walked straight past this guard. `take`
+            // writes uuid-based names so nothing reaches here with a `..` in it
+            // today — but this is the one function in the crate allowed to
+            // delete user data for good, and that is not a property to leave
+            // resting on what some other function happens to write (security
+            // review M13).
+            //
+            // Refused before the containment check rather than resolved by it:
+            // a path that climbs can land anywhere, and a ledger row asking to
+            // permanently delete one is a bug worth reporting, not normalising.
+            if path_compare::has_traversal(&item.quarantine_path) {
                 tracing::error!(
                     item = %item.id,
                     path = %item.quarantine_path.display(),
+                    "refusing to purge a path that climbs with `..`"
+                );
+                report.failed_items.push(item.id.to_string());
+                continue;
+            }
+            if !path_compare::is_inside(&self.root, &item.quarantine_path) {
+                tracing::error!(
+                    item = %item.id,
+                    path = %item.quarantine_path.display(),
+                    root = %self.root.display(),
                     "refusing to purge a path outside the quarantine root"
                 );
                 report.failed_items.push(item.id.to_string());
@@ -1025,9 +1054,7 @@ fn move_path_with(from: &Path, to: &Path, rename: Rename) -> std::result::Result
     match rename(from, to) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Err(MoveFailure::Occupied),
-        Err(err) if is_cross_volume(&err) => {
-            copy_verify_remove(from, to).map_err(MoveFailure::Failed)
-        }
+        Err(err) if is_cross_volume(&err) => copy_verify_remove_inner(from, to),
         // A sharing violation or a permission error is real and must not be
         // papered over with a copy.
         Err(err) => Err(MoveFailure::Failed(CoreError::Quarantine(format!(
@@ -1103,14 +1130,33 @@ fn rename_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::rename(from, to)
 }
 
+/// Cross-volume move, reported as a [`CoreError`].
+///
+/// The shape the tests assert on. Production goes through
+/// [`copy_verify_remove_inner`], because [`move_path_with`] has to tell
+/// "occupied" apart from "failed" — see L8 on the inner function.
+#[cfg(test)]
+fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
+    copy_verify_remove_inner(from, to).map_err(|failure| failure.into_error(from, to))
+}
+
 /// Cross-volume move: copy, prove the copy is identical, then remove the source.
 ///
 /// The order matters. If verification fails the original is still there and the
 /// half-written copy is cleaned up, so a bad move costs the user nothing.
+///
+/// Returns [`MoveFailure`] rather than a plain error so an occupied destination
+/// stays distinguishable. It used to be flattened into `MoveFailure::Failed`,
+/// which meant `move_out`'s retry loop never fired on this branch: a restore
+/// onto a contested name errored out where the ` (restored)` suffix would have
+/// worked (security review L8).
 #[allow(clippy::disallowed_methods)]
-fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
+fn copy_verify_remove_inner(from: &Path, to: &Path) -> std::result::Result<(), MoveFailure> {
     let metadata = fs::symlink_metadata(from).map_err(|err| {
-        CoreError::Quarantine(format!("cannot inspect `{}`: {err}", from.display()))
+        MoveFailure::Failed(CoreError::Quarantine(format!(
+            "cannot inspect `{}`: {err}",
+            from.display()
+        )))
     })?;
 
     // What the cleanup below may touch is decided by whether *this call* made
@@ -1130,12 +1176,20 @@ fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
     let skipped_links = match copied {
         Ok(skipped) => skipped,
         Err(err) => {
+            // `create_new` refusing an occupied destination is not a failure —
+            // it is exactly the signal `move_out`'s retry loop exists for, and
+            // reporting it as one is what made a contested restore give up
+            // instead of trying ` (restored)` (security review L8).
+            let occupied = err.kind() == std::io::ErrorKind::AlreadyExists;
             cleanup_partial(to, created_destination);
-            return Err(CoreError::Quarantine(format!(
+            if occupied {
+                return Err(MoveFailure::Occupied);
+            }
+            return Err(MoveFailure::Failed(CoreError::Quarantine(format!(
                 "cannot copy `{}` to `{}`: {err}",
                 from.display(),
                 to.display()
-            )));
+            ))));
         }
     };
 
@@ -1145,7 +1199,7 @@ fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
     // original exactly where it is (security review M7).
     if !skipped_links.is_empty() {
         cleanup_partial(to, created_destination);
-        return Err(CoreError::Quarantine(format!(
+        return Err(MoveFailure::Failed(CoreError::Quarantine(format!(
             "`{}` contains links that cannot be copied to another volume ({}); \
              it was left where it is",
             from.display(),
@@ -1154,7 +1208,7 @@ fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
-        )));
+        ))));
     }
 
     let verified = if metadata.is_dir() {
@@ -1164,7 +1218,9 @@ fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
     };
     if !verified.unwrap_or(false) {
         cleanup_partial(to, created_destination);
-        return Err(CoreError::VerifyFailed(from.display().to_string()));
+        return Err(MoveFailure::Failed(CoreError::VerifyFailed(
+            from.display().to_string(),
+        )));
     }
 
     let removed = if metadata.is_dir() {
@@ -1173,10 +1229,10 @@ fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
         fs::remove_file(from)
     };
     removed.map_err(|err| {
-        CoreError::Quarantine(format!(
+        MoveFailure::Failed(CoreError::Quarantine(format!(
             "copied `{}` but could not remove the original: {err}",
             from.display()
-        ))
+        )))
     })
 }
 
@@ -1465,6 +1521,121 @@ mod tests {
         }
         fs::write(&path, bytes).expect("write");
         path
+    }
+
+    /// Security review M13: `destroy` is the one function in this crate allowed
+    /// to remove user data for good, and its root guard was
+    /// `Path::starts_with`, which counts `..` as an ordinary component — so
+    /// `…\quarantine\..\..\Windows\System32` "starts with" the quarantine root
+    /// and walked straight through.
+    ///
+    /// `take` writes uuid-based names, so nothing reaches `destroy` with a `..`
+    /// in it today. This asserts the guard rather than that fact, because the
+    /// fact belongs to a different function.
+    #[test]
+    fn purging_refuses_a_ledger_row_that_climbs_out_of_the_quarantine() {
+        let h = harness(RetentionPolicy::default());
+        let outside = write(&h.work, "precious.txt", b"do not touch");
+
+        // A row pointing back out through the quarantine root, exactly as the
+        // old guard would have accepted it.
+        let escape = h
+            .quarantine
+            .root()
+            .join("..")
+            .join("work")
+            .join("precious.txt");
+        assert!(
+            escape.starts_with(h.quarantine.root()),
+            "the premise: `Path::starts_with` says this is inside the quarantine"
+        );
+
+        let item = QuarantineItem {
+            id: Uuid::new_v4(),
+            batch_id: Uuid::new_v4(),
+            original_path: outside.clone(),
+            quarantine_path: escape,
+            size_bytes: 12,
+            quarantined_at: Utc::now() - Duration::days(30),
+            purge_after: Utc::now() - Duration::days(1),
+            restored_at: None,
+        };
+        insert_item(&h.conn, &item).expect("insert");
+
+        let report = h
+            .quarantine
+            .purge_expired(&h.conn, Utc::now())
+            .expect("purge");
+
+        assert_eq!(report.purged_items, 0, "nothing outside may be destroyed");
+        assert_eq!(report.failed_items, vec![item.id.to_string()]);
+        assert!(outside.exists(), "the user's file must survive");
+        assert_eq!(fs::read(&outside).expect("read"), b"do not touch");
+        assert!(
+            h.quarantine
+                .find_item(&h.conn, item.id)
+                .expect("find")
+                .is_some(),
+            "the row stays so the refusal is visible rather than silently forgotten"
+        );
+    }
+
+    /// The same guard, for a row that names a different place entirely.
+    #[test]
+    fn purging_refuses_a_ledger_row_pointing_outside_the_quarantine_root() {
+        let h = harness(RetentionPolicy::default());
+        let outside = write(&h.work, "elsewhere.txt", b"not ours");
+
+        let item = QuarantineItem {
+            id: Uuid::new_v4(),
+            batch_id: Uuid::new_v4(),
+            original_path: outside.clone(),
+            quarantine_path: outside.clone(),
+            size_bytes: 8,
+            quarantined_at: Utc::now() - Duration::days(30),
+            purge_after: Utc::now() - Duration::days(1),
+            restored_at: None,
+        };
+        insert_item(&h.conn, &item).expect("insert");
+
+        let report = h
+            .quarantine
+            .purge_expired(&h.conn, Utc::now())
+            .expect("purge");
+        assert_eq!(report.purged_items, 0);
+        assert_eq!(report.failed_items, vec![item.id.to_string()]);
+        assert!(outside.exists(), "the user's file must survive");
+    }
+
+    /// Security review L8: on the cross-volume branch an occupied destination
+    /// used to be flattened into `MoveFailure::Failed`, so `move_out`'s retry
+    /// loop never fired and a restore onto a contested name errored out where
+    /// the ` (restored)` suffix would have worked.
+    #[test]
+    fn a_cross_volume_move_reports_an_occupied_destination_as_occupied() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = write(dir.path(), "moving.bin", b"the quarantined copy");
+        let onto = write(dir.path(), "occupied.bin", b"the user's file");
+
+        fn always_cross_volume(_: &Path, _: &Path) -> std::io::Result<()> {
+            #[cfg(windows)]
+            const CROSS_VOLUME: i32 = 17;
+            #[cfg(not(windows))]
+            const CROSS_VOLUME: i32 = 18;
+            Err(std::io::Error::from_raw_os_error(CROSS_VOLUME))
+        }
+
+        match move_path_with(&source, &onto, always_cross_volume) {
+            Err(MoveFailure::Occupied) => {}
+            Ok(()) => panic!("the copy must refuse an occupied destination"),
+            Err(MoveFailure::Failed(err)) => panic!(
+                "an occupied destination is what the retry loop exists for, \
+                 not a failure to report: {err}"
+            ),
+        }
+
+        assert_eq!(fs::read(&onto).expect("read"), b"the user's file");
+        assert_eq!(fs::read(&source).expect("read"), b"the quarantined copy");
     }
 
     #[test]
