@@ -17,11 +17,11 @@ use tracing_subscriber::EnvFilter;
 /// Directory name under the app data dir.
 pub const LOG_DIR_NAME: &str = "logs";
 
-/// Prefix of the rotating log files, e.g. `cleanify.log.2026-08-06`.
-pub const LOG_FILE_PREFIX: &str = "cleanify.log";
+/// Prefix of the rotating log files, e.g. `winknife.log.2026-08-06`.
+pub const LOG_FILE_PREFIX: &str = "winknife.log";
 
 /// Environment variable that overrides the default filter.
-pub const FILTER_ENV: &str = "CLEANIFY_LOG";
+pub const FILTER_ENV: &str = "WINKNIFE_LOG";
 
 /// Where the logs live for a given app data directory.
 pub fn log_dir(app_data_dir: &Path) -> PathBuf {
@@ -38,7 +38,7 @@ pub fn log_dir(app_data_dir: &Path) -> PathBuf {
 pub fn init(app_data_dir: &Path) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let dir = log_dir(app_data_dir);
     if let Err(err) = std::fs::create_dir_all(&dir) {
-        eprintln!("cleanify: cannot create the log directory: {err}");
+        eprintln!("winknife: cannot create the log directory: {err}");
         return None;
     }
 
@@ -46,7 +46,7 @@ pub fn init(app_data_dir: &Path) -> Option<tracing_appender::non_blocking::Worke
     let (writer, guard) = tracing_appender::non_blocking(appender);
 
     let filter = EnvFilter::try_from_env(FILTER_ENV)
-        .unwrap_or_else(|_| EnvFilter::new("info,cleanify_lib=debug"));
+        .unwrap_or_else(|_| EnvFilter::new("info,winknife_lib=debug"));
 
     let file_layer = tracing_subscriber::fmt::layer()
         .with_writer(writer)
@@ -66,7 +66,7 @@ pub fn init(app_data_dir: &Path) -> Option<tracing_appender::non_blocking::Worke
             Some(guard)
         }
         Err(err) => {
-            eprintln!("cleanify: tracing was already initialised: {err}");
+            eprintln!("winknife: tracing was already initialised: {err}");
             None
         }
     }
@@ -79,8 +79,8 @@ mod tests {
     #[test]
     fn logs_live_beside_the_database() {
         assert_eq!(
-            log_dir(Path::new("C:\\data\\Cleanify")),
-            PathBuf::from("C:\\data\\Cleanify\\logs")
+            log_dir(Path::new("C:\\data\\WinKnife")),
+            PathBuf::from("C:\\data\\WinKnife\\logs")
         );
     }
 
@@ -95,6 +95,6 @@ mod tests {
 
     #[test]
     fn the_filter_environment_variable_is_namespaced() {
-        assert!(FILTER_ENV.starts_with("CLEANIFY_"));
+        assert!(FILTER_ENV.starts_with("WINKNIFE_"));
     }
 }

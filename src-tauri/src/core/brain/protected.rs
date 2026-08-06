@@ -552,8 +552,8 @@ mod tests {
             .with("USERPROFILE", "C:\\Users\\dev");
         ProtectedPaths::from_env(
             &env,
-            Path::new("C:\\Users\\dev\\AppData\\Roaming\\Cleanify"),
-            Path::new("C:\\Users\\dev\\AppData\\Roaming\\Cleanify\\quarantine"),
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife"),
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife\\quarantine"),
         )
     }
 
@@ -595,12 +595,12 @@ mod tests {
                 "the temp folder must stay cleanable",
             ),
             (
-                "C:\\Users\\dev\\AppData\\Roaming\\Cleanify\\cleanify.sqlite3",
+                "C:\\Users\\dev\\AppData\\Roaming\\WinKnife\\winknife.sqlite3",
                 true,
                 "our own data",
             ),
             (
-                "C:\\Users\\dev\\AppData\\Roaming\\Cleanify\\quarantine\\x\\y",
+                "C:\\Users\\dev\\AppData\\Roaming\\WinKnife\\quarantine\\x\\y",
                 true,
                 "the quarantine itself",
             ),
@@ -915,7 +915,7 @@ mod tests {
             "C:\\Users\\dev",
             "C:\\System Volume Information",
             "C:\\",
-            "C:\\Users\\dev\\AppData\\Roaming\\Cleanify\\quarantine",
+            "C:\\Users\\dev\\AppData\\Roaming\\WinKnife\\quarantine",
         ] {
             assert!(
                 protected.is_protected(Path::new(path)),

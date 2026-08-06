@@ -653,8 +653,8 @@ mod tests {
             .with("LOCALAPPDATA", "C:\\Users\\dev\\AppData\\Local");
         let protected = ProtectedPaths::from_env(
             &env,
-            Path::new("C:\\Users\\dev\\AppData\\Roaming\\Cleanify"),
-            Path::new("C:\\Users\\dev\\AppData\\Roaming\\Cleanify\\quarantine"),
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife"),
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife\\quarantine"),
         );
 
         for pack in rules::load_dir(&repo_rules_dir(), &env).expect("load") {
@@ -1077,8 +1077,8 @@ mod tests {
         let env = MapEnv::new().with("USERPROFILE", "C:\\Users\\dev");
         let protected = ProtectedPaths::from_env(
             &env,
-            Path::new("C:\\Users\\dev\\AppData\\Roaming\\Cleanify"),
-            Path::new("C:\\Users\\dev\\AppData\\Roaming\\Cleanify\\quarantine"),
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife"),
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife\\quarantine"),
         );
         for root in [
             "\\\\localhost\\C$\\Windows",

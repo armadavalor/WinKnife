@@ -1,4 +1,4 @@
-//! Cleanify — modular Windows utility.
+//! WinKnife — modular Windows utility.
 //!
 //! Analyze first, never delete without consent, everything reversible.
 //!
@@ -263,7 +263,7 @@ fn notify_warning(app: &tauri::AppHandle, minutes: i64, remaining_secs: i64) {
     use tauri_plugin_notification::NotificationExt;
 
     let body = format!(
-        "The computer is scheduled in {}. Open Cleanify to cancel.",
+        "The computer is scheduled in {}. Open WinKnife to cancel.",
         shutdown_timer::format_remaining(remaining_secs)
     );
     if let Err(err) = app
@@ -306,14 +306,14 @@ mod tray {
     use crate::core::settings;
     use crate::modules::shutdown_timer::{format_remaining, ShutdownTimer};
 
-    const TRAY_ID: &str = "cleanify-tray";
+    const TRAY_ID: &str = "winknife-tray";
     const ITEM_SHOW: &str = "show";
     const ITEM_CANCEL: &str = "cancel-timer";
     const ITEM_QUIT: &str = "quit";
 
     /// Build the tray and its menu.
     pub fn install(app: &AppHandle) -> tauri::Result<()> {
-        let show = MenuItem::with_id(app, ITEM_SHOW, "Open Cleanify", true, None::<&str>)?;
+        let show = MenuItem::with_id(app, ITEM_SHOW, "Open WinKnife", true, None::<&str>)?;
         let cancel = MenuItem::with_id(app, ITEM_CANCEL, "Cancel timer", true, None::<&str>)?;
         let quit = MenuItem::with_id(app, ITEM_QUIT, "Quit", true, None::<&str>)?;
         let menu = Menu::with_items(app, &[&show, &cancel, &quit])?;
@@ -324,7 +324,7 @@ mod tray {
                     .cloned()
                     .ok_or_else(|| tauri::Error::UnknownPath)?,
             )
-            .tooltip("Cleanify")
+            .tooltip("WinKnife")
             .menu(&menu)
             .show_menu_on_left_click(true)
             .on_menu_event(handle_menu_event)
@@ -396,8 +396,8 @@ mod tray {
             return;
         };
         let text = match remaining_secs {
-            Some(secs) => format!("Cleanify — {} left", format_remaining(secs)),
-            None => "Cleanify".to_owned(),
+            Some(secs) => format!("WinKnife — {} left", format_remaining(secs)),
+            None => "WinKnife".to_owned(),
         };
         let _: Result<(), _> = TrayIcon::set_tooltip(&tray, Some(text));
     }
@@ -410,11 +410,11 @@ mod tests {
     #[test]
     fn the_dry_run_flag_is_detected() {
         assert!(is_dry_run([
-            "cleanify.exe".to_owned(),
+            "winknife.exe".to_owned(),
             DRY_RUN_FLAG.to_owned()
         ]));
-        assert!(!is_dry_run(["cleanify.exe".to_owned()]));
-        assert!(!is_dry_run(["cleanify.exe".to_owned(), "--dry".to_owned()]));
+        assert!(!is_dry_run(["winknife.exe".to_owned()]));
+        assert!(!is_dry_run(["winknife.exe".to_owned(), "--dry".to_owned()]));
     }
 
     #[test]

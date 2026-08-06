@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/OWNER/cleanify/rules/rule-pack.schema.json",
-  "title": "Cleanify rule pack",
+  "$id": "https://github.com/armadavalor/WinKnife/rules/rule-pack.schema.json",
+  "title": "WinKnife rule pack",
   "description": "Community-editable data that drives the brain's rule engine. See docs/RULES-FORMAT.md. The Rust parser in core/brain/rules.rs is the authority; this schema exists for editor completion and CI validation, and the two are kept in step by the validate-all-packs test.",
   "type": "object",
   "additionalProperties": false,

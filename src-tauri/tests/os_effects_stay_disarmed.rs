@@ -14,8 +14,8 @@
 //! refuse — which is only a safe thing to write because arming is `pub(crate)`
 //! and no test can do it.
 
-use cleanify_lib::core::error::CoreError;
-use cleanify_lib::core::platform::{self, PowerAction};
+use winknife_lib::core::error::CoreError;
+use winknife_lib::core::platform::{self, PowerAction};
 
 /// The premise of everything below: no test process is ever armed.
 #[test]

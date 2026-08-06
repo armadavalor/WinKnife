@@ -1,4 +1,4 @@
-# Proje Planı — Windows İsviçre Çakısı (kod adı: Cleanify)
+# Proje Planı — Windows İsviçre Çakısı (kod adı: WinKnife)
 
 > Açık kaynak, kâr amacı gütmeyen (Buy Me a Coffee), portfolyo değeri yüksek bir Windows yardımcı aracı.
 > Tek cümlelik vizyon: **"Windows'un günlük sıkıcı zorluklarına tek pencereden, güvenli ve akıllı çözümler."**
@@ -139,6 +139,9 @@ Sağ-tık menüsü temizleyici, "bu dosyayı hangi program kilitledi?" çözüc�
 | **Blade&Board** | Çakı + pano; iki kelimeli, marka gibi |
 
 Önerim kısa liste: **WinBlade**, **Chaki**, **Winnife**. (GitHub'da benzersizlik kontrolünü isim seçilince yaparız.)
+
+**Karar (2026-08-06):** İsim **WinKnife** olarak kesinleşti. GitHub deposu:
+`armadavalor/WinKnife` (public, MIT).
 
 ---
 

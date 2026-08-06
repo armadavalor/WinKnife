@@ -1,10 +1,10 @@
 [package]
-name = "cleanify"
+name = "winknife"
 version = "0.1.0"
 description = "Modular Windows utility: analyze first, never delete without consent, everything reversible."
-authors = ["Cleanify contributors"]
+authors = ["WinKnife contributors"]
 license = "MIT"
-repository = "https://github.com/OWNER/cleanify"
+repository = "https://github.com/armadavalor/WinKnife"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,7 +13,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "cleanify_lib"
+name = "winknife_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

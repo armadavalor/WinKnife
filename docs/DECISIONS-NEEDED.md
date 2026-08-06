@@ -10,7 +10,7 @@ Open scope questions and contradictions found while implementing. Format:
       builder and command registration, but the Tauri v2 template puts `run()`
       in `lib.rs` (required for the `mobile_entry_point` attribute and for unit
       tests to see the crate) — kept the template layout: `main.rs` is a
-      one-line shim calling `cleanify_lib::run()`, and the builder plus
+      one-line shim calling `winknife_lib::run()`, and the builder plus
       `generate_handler!` live in `lib.rs`.
       **RESOLVED (architect, 2026-08-06): template layout accepted;
       ARCHITECTURE §1 updated to match.**
@@ -30,10 +30,10 @@ Open scope questions and contradictions found while implementing. Format:
       needed, never remove variants.**
 - [ ] 2026-08-06 (phase 0): the MIT `LICENSE` needs a copyright holder but no
       name/entity has been chosen (see `PLAN.md` §7, the product name is still
-      a codename) — used "Cleanify contributors"; update when the project name
+      a codename) — used "WinKnife contributors"; update when the project name
       and owner are final.
 - [ ] 2026-08-06 (phase 0): the CI badge in `README.md` needs a GitHub
-      owner/repo slug, which does not exist yet — used a `OWNER/cleanify`
+      owner/repo slug, which does not exist yet — used a `OWNER/winknife`
       placeholder; the workflow itself is unverified until a remote exists.
 - [x] 2026-08-06 (phase 0): `CONVENTIONS.md` requires user-facing strings to go
       through `t()`, but module display names and descriptions come from Rust
@@ -109,10 +109,12 @@ Open scope questions and contradictions found while implementing. Format:
       batch ought to read.
 
 Open items awaiting the producer (not blocking implementation):
-- LICENSE copyright holder (currently "Cleanify contributors") — decide with
+- LICENSE copyright holder (currently "WinKnife contributors") — decide with
   the final product name.
+  **RESOLVED (producer, 2026-08-06): name is WinKnife; repo is armadavalor/WinKnife.**
 - GitHub owner/repo slug for the CI badge — decide when the remote is created;
   CI stays unverified until first push.
+  **RESOLVED (producer, 2026-08-06): name is WinKnife; repo is armadavalor/WinKnife.**
 - [ ] 2026-08-06 (phase 1 remediation r2): the C2 allow-list means the gate only
       accepts `X:\...`. A future phase that wants to clean a mapped network
       drive or a genuinely remote share will have to widen `gate_path`

@@ -77,7 +77,7 @@ line, diffstat `3 files changed, 58 insertions(+)`, registry then reported
 **Deferred / not verified.**
 
 - CI is **unverified** — the project has no git remote yet, so the workflow has
-  never run and the README badge points at an `OWNER/cleanify` placeholder.
+  never run and the README badge points at an `OWNER/winknife` placeholder.
   `npm run tauri build` (installer bundling) was likewise not executed locally;
   only `cargo build --release` was.
 - The app window was not launched visually (`tauri dev` blocks the agent
@@ -89,7 +89,7 @@ line, diffstat `3 files changed, 58 insertions(+)`, registry then reported
   audit trail.
 - No `scanner.rs`, `executor.rs`, `quarantine.rs`, brain rules or `rules/*.json`
   yet; all phase 1+.
-- The product name is still the `cleanify` codename. `src/lib/branding.ts` holds
+- The product name is still the `winknife` codename. `src/lib/branding.ts` holds
   the single UI-side constant, and the README lists every other place it
   appears.
 
@@ -471,3 +471,44 @@ privilege-free companion — `take`'s refusal reads `symlink_metadata` directly,
 and mocking it means injecting a metadata probe into `Quarantine`, which is a
 design change this brief did not ask for. The copy layer's link handling *is*
 covered without privileges.
+
+## 2026-08-06 — Rename: cleanify → WinKnife
+
+**Built.** Nothing new — a mechanical, repository-wide rename. No logic or
+behaviour changed.
+
+- The project was developed under the codename `cleanify` through phase 1.
+  This commit renames every occurrence to **WinKnife**: the Cargo package and
+  lib target (`winknife`, `winknife_lib`, and every `winknife_lib::` import in
+  `src-tauri/tests/*.rs`), the Tauri `productName`/`identifier`
+  (`com.winknife.app`), the database file (`winknife.sqlite3`), the log prefix
+  and filter env var (`winknife.log`, `WINKNIFE_LOG`), the tray id, the CI
+  artifact names (`winknife-portable`, `winknife-installer`), the `APP_NAME`
+  UI constant, and every remaining prose mention across the docs.
+- **The Tauri identifier change moves the application data directory.**
+  `app_data_dir()` is keyed off `identifier`, so `com.cleanify.app` →
+  `com.winknife.app` orphans any quarantine database or log a local dev build
+  already wrote under the old path. No released version of the app ever
+  existed, so no user data is affected.
+- The GitHub repo now exists at `armadavalor/WinKnife` (public, MIT). The CI
+  badge, `Cargo.toml`'s `repository`, and the rule-pack schema's `$id` point at
+  it instead of the `OWNER/cleanify` placeholder; `LICENSE` reads "WinKnife
+  contributors". The README's rename checklist is removed — it described
+  exactly this change and is now stale by definition.
+
+**Verification.** `cargo fmt --all --check` clean, `cargo clippy --all-targets
+-- -D warnings` clean, `cargo test` 283/283 green (272 unit + 8 + 3
+integration — the same count as before the rename), `npm run check` 0 errors /
+0 warnings, `npm run build` OK.
+
+**Deferred / not verified.**
+
+- As in every prior phase, this development machine has no Developer Mode, so
+  the five link-dependent safety tests ran under
+  `WINKNIFE_ALLOW_SKIP_LINK_TESTS=1` rather than for real; CI, which never sets
+  that variable, is where they actually execute.
+- `npm run tauri build` (the installer bundle) was not run; only `cargo build`
+  (debug) built the renamed binary, confirmed at
+  `src-tauri/target/debug/winknife.exe`.
+- CI itself is still unverified — the workflow has not run against the new
+  remote yet.

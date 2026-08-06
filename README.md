@@ -1,6 +1,6 @@
-# Cleanify
+# WinKnife
 
-[![CI](https://github.com/OWNER/cleanify/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/cleanify/actions/workflows/ci.yml)
+[![CI](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml/badge.svg)](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A modular Windows "Swiss army knife" utility: disk cleaning, duplicate finding,
@@ -51,7 +51,7 @@ That is the full list from Tauri's
 ### First run
 
 ```sh
-git clone <repo> && cd cleanify
+git clone https://github.com/armadavalor/WinKnife.git && cd WinKnife
 npm install              # UI dependencies
 npm run tauri dev        # build everything and open the app
 ```
@@ -81,7 +81,7 @@ every power action a log line instead:
 
 ```sh
 npm run tauri dev -- -- --dry-run     # dev
-./target/release/cleanify.exe --dry-run
+./target/release/winknife.exe --dry-run
 ```
 
 The UI shows a banner when the flag is active. **The test suite can never
@@ -97,7 +97,7 @@ run under `cfg!(test)`, and tests only ever construct the fakes.
 | `src-tauri/src/core/` | Quarantine, executor, brain, scanner, database, platform wrappers |
 | `src-tauri/src/modules/` | One file per tool |
 | `src/routes/<module-id>/` | One folder per tool's UI |
-| `%APPDATA%\com.cleanify.app\` | Database, quarantine and rolling logs at runtime |
+| `%APPDATA%\com.winknife.app\` | Database, quarantine and rolling logs at runtime |
 
 ### Adding or editing a rule pack
 
@@ -124,22 +124,6 @@ A new tool is **2 files + 1 registry line**:
 
 The sidebar, manifests and routing follow from the registry automatically, and
 a test fails the build if a registered module has no route.
-
-## Codename
-
-`cleanify` is a **codename**; the public name is not decided yet (candidates
-are in `PLAN.md` section 7). The UI reads its display name from a single
-constant, `APP_NAME` in `src/lib/branding.ts`. Renaming the project means
-touching exactly these places:
-
-| File                            | Field                                          |
-| ------------------------------- | ---------------------------------------------- |
-| `src/lib/branding.ts`           | `APP_NAME` (all UI strings derive from it)     |
-| `src-tauri/tauri.conf.json`     | `productName`, `identifier`, window `title`    |
-| `src-tauri/Cargo.toml`          | `package.name`, `lib.name`                     |
-| `src-tauri/src/main.rs`         | the `<crate>_lib::run()` call                  |
-| `package.json`                  | `name`                                         |
-| `README.md`, `LICENSE`          | prose                                          |
 
 ## Documentation
 

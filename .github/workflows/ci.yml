@@ -84,13 +84,13 @@ jobs:
       - name: Upload portable executable
         uses: actions/upload-artifact@v4
         with:
-          name: cleanify-portable
-          path: src-tauri/target/release/cleanify.exe
+          name: winknife-portable
+          path: src-tauri/target/release/winknife.exe
           if-no-files-found: error
 
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
-          name: cleanify-installer
+          name: winknife-installer
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error

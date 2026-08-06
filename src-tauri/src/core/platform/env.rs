@@ -173,6 +173,6 @@ mod tests {
         // `PATH` exists on every platform this builds for; the value is not
         // asserted on, only that the resolver reaches the real environment.
         assert!(SystemEnv.var("PATH").is_some());
-        assert_eq!(SystemEnv.var("CLEANIFY_DEFINITELY_NOT_SET"), None);
+        assert_eq!(SystemEnv.var("WINKNIFE_DEFINITELY_NOT_SET"), None);
     }
 }

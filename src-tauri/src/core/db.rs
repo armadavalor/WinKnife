@@ -13,7 +13,7 @@ use rusqlite::Connection;
 use crate::core::error::Result;
 
 /// Database file name inside the application data directory.
-pub const DB_FILE_NAME: &str = "cleanify.sqlite3";
+pub const DB_FILE_NAME: &str = "winknife.sqlite3";
 
 /// One numbered migration.
 #[derive(Debug, Clone, Copy)]
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn open_creates_the_file_and_parent_directory() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let app_data = dir.path().join("nested").join("cleanify");
+        let app_data = dir.path().join("nested").join("winknife");
         let conn = open(&app_data).expect("open");
 
         assert!(db_path(&app_data).is_file());

@@ -21,14 +21,14 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use chrono::Utc;
-use cleanify_lib::core::brain::{rules, Brain, ProtectedPaths};
-use cleanify_lib::core::db;
-use cleanify_lib::core::executor::{self, ExecEnvironment, ExecOptions};
-use cleanify_lib::core::platform::{MapEnv, RecycleBin, StubRecycleBin, SystemLockProbe};
-use cleanify_lib::core::quarantine::{Quarantine, RetentionPolicy};
-use cleanify_lib::core::scanner::CancellationToken;
-use cleanify_lib::core::types::{ExecOutcome, Finding, RiskBucket};
-use cleanify_lib::modules::cleaner::{self, CleanerContext};
+use winknife_lib::core::brain::{rules, Brain, ProtectedPaths};
+use winknife_lib::core::db;
+use winknife_lib::core::executor::{self, ExecEnvironment, ExecOptions};
+use winknife_lib::core::platform::{MapEnv, RecycleBin, StubRecycleBin, SystemLockProbe};
+use winknife_lib::core::quarantine::{Quarantine, RetentionPolicy};
+use winknife_lib::core::scanner::CancellationToken;
+use winknife_lib::core::types::{ExecOutcome, Finding, RiskBucket};
+use winknife_lib::modules::cleaner::{self, CleanerContext};
 
 /// A miniature dirty Windows profile plus the services that operate on it.
 struct World {
@@ -159,7 +159,7 @@ fn snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
 }
 
 fn bucket_of(
-    recommendations: &[cleanify_lib::core::types::Recommendation],
+    recommendations: &[winknife_lib::core::types::Recommendation],
     finding: &Finding,
 ) -> RiskBucket {
     recommendations
@@ -316,7 +316,7 @@ fn a_protected_path_lands_red_and_survives_an_approved_clean() {
     let mut finding = Finding::new(
         "cleaner",
         &victim,
-        cleanify_lib::core::types::FindingKind::File,
+        winknife_lib::core::types::FindingKind::File,
     );
     finding.size_bytes = 17;
     finding.meta = serde_json::json!({
@@ -332,7 +332,7 @@ fn a_protected_path_lands_red_and_survives_an_approved_clean() {
     );
     assert_eq!(
         recommendations[0].action,
-        cleanify_lib::core::types::Action::InfoOnly
+        winknife_lib::core::types::Action::InfoOnly
     );
     assert_eq!(recommendations[0].savings_bytes, 0);
 

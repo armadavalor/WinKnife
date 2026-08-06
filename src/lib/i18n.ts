@@ -113,7 +113,7 @@ const en = {
   "shutdown.replaceBody":
     "A timer is already running. Setting a new one replaces it.",
   "shutdown.trayHint":
-    "Cleanify keeps the countdown itself, so it has to stay running. The tray icon shows the time left and can cancel the timer.",
+    "WinKnife keeps the countdown itself, so it has to stay running. The tray icon shows the time left and can cancel the timer.",
   "shutdown.dryRunBanner":
     "This build was started with --dry-run: the timer counts down and warns you, but nothing is actually shut down. The action is written to the log instead.",
 
