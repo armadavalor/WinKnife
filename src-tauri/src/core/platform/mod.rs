@@ -32,6 +32,9 @@ pub use lock::{AlwaysUnlocked, LockProbe, LockState, SystemLockProbe};
 pub use power::{DryRunPower, PowerAction, PowerController, PowerEvent};
 pub use recycle_bin::{RecycleBin, RecycleBinStats, StubRecycleBin};
 
+// `cfg(not(test))` mirrors the definition: the arming function does not exist
+// in a test build, so neither does its re-export (security review M12).
+#[cfg(not(test))]
 pub(crate) use guard::arm_real_os_effects;
 
 /// The power controller that talks to the operating system.

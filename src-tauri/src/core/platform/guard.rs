@@ -11,10 +11,25 @@
 //! real call against the developer's machine (security review H5).
 //!
 //! A process-global flag has no such seam. It is armed in exactly one place —
-//! `lib.rs::run()`, the composition root — and `arm_real_os_effects` is
-//! `pub(crate)`, so nothing outside this crate can arm it. Unit tests,
-//! integration tests, doctests, benchmarks and any future binary that forgets
-//! to arm it all get the same refusal, for the same reason.
+//! `lib.rs::run()`, the composition root.
+//!
+//! # Exactly what is guaranteed
+//!
+//! - **Integration tests, doctests, benchmarks and any other crate**: cannot
+//!   arm the flag, because `arm_real_os_effects` is `pub(crate)`. They link the
+//!   library as an ordinary dependency and the item is not in their namespace.
+//! - **This crate's own unit tests** (`cargo test --lib`, and `--all-targets`
+//!   builds of it): cannot arm the flag either, because the function does not
+//!   exist under `cfg(test)` — a `#[cfg(test)]` module that called it would
+//!   fail to compile (security review M12). `pub(crate)` alone did not give
+//!   this: an in-crate test module could call it and unlock the real
+//!   `SystemPower` and `WindowsRecycleBin` for every later test in the binary.
+//! - **The application binary**: arms it once, from `run()`, unless `--dry-run`
+//!   asked for the no-op power controller.
+//!
+//! What is *not* guaranteed: nothing here stops a future non-test caller inside
+//! this crate from arming the flag. That is deliberate — `run()` is one of
+//! those callers.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -23,9 +38,11 @@ static REAL_OS_EFFECTS: AtomicBool = AtomicBool::new(false);
 
 /// Allow the irreversible OS calls to happen.
 ///
-/// Called once, from `lib.rs::run()`. Deliberately `pub(crate)`: a test can
-/// reach the real implementations through the composition-root helpers, and the
-/// only reason that is safe is that no test can turn this on.
+/// Called once, from `lib.rs::run()`. `pub(crate)` keeps every other crate out;
+/// `cfg(not(test))` keeps this crate's own unit tests out, so a test module
+/// cannot arm the process and hand the rest of the binary a live
+/// `SystemPower`. A test that tries does not compile.
+#[cfg(not(test))]
 pub(crate) fn arm_real_os_effects() {
     if REAL_OS_EFFECTS.swap(true, Ordering::SeqCst) {
         tracing::warn!("real OS effects were armed more than once");
@@ -52,5 +69,21 @@ mod tests {
             !real_os_effects_armed(),
             "a test run must never be allowed to reach an irreversible OS call"
         );
+    }
+
+    /// M12: the arming function is not merely private, it is *absent* from a
+    /// test build. This is the compile-time half of that claim — if the
+    /// `cfg(not(test))` gate were removed, the commented-out line below would
+    /// compile, and this test's reason for existing would be gone.
+    ///
+    /// ```compile_fail
+    /// crate::core::platform::guard::arm_real_os_effects();
+    /// ```
+    #[test]
+    fn the_arming_function_does_not_exist_in_a_test_build() {
+        // `module_path!` proves we are in the test cfg; the absence of the
+        // symbol is proved by the fact that this file compiles at all while
+        // `arm_real_os_effects` is defined under `cfg(not(test))`.
+        assert!(module_path!().ends_with("guard::tests"));
     }
 }

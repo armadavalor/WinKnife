@@ -113,6 +113,12 @@ pub fn run() {
     // refuse. Nothing else in the crate — and nothing at all outside it — can
     // reach this, which is what keeps every test binary harmless
     // (`core::platform::guard`, security review H5).
+    //
+    // The `cfg` mirrors the definition: the arming function does not exist in a
+    // test build at all, so a `#[cfg(test)]` module cannot call it — not even
+    // by going through `run()` (security review M12). `run()` is the
+    // application entry point and is never called from a test.
+    #[cfg(not(test))]
     core::platform::arm_real_os_effects();
 
     let dry_run = is_dry_run(std::env::args());
