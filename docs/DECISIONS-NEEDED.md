@@ -270,3 +270,72 @@ raw text. If a comparison must stay lexical, say why in a comment at the site.
       trivial; at a multi-million-file root it would not be. The size floor keeps
       it bounded in practice, and streaming the staged pipeline would be a
       rewrite rather than a tweak. Revisit if anyone points it at a whole drive.
+
+---
+
+## Architect resolutions — phase 2
+
+**The `%WINDIR%` escalation: the pack stays informational. No carve-out, ever.**
+
+The implementer read the three documents correctly — they did contradict, and
+raising it rather than improvising was the right call. The permanent answer:
+
+- **`%WINDIR%` gets no exception.** A "documented carve-out" is how a protected
+  path list erodes: the mechanism outlives the justification, and the next
+  contributor argues their directory is just as safe. This phase was bitten four
+  times by protected-path defects; we are not adding a door.
+- **Informational is not a workaround, it is the design.** `PLAN.md` §3.1 defines
+  the red bucket as "information only, no button — this is the honesty feature",
+  and `windows-update-leftovers` is the first real case of it. Keep it shipping,
+  keep it inert, but **make the `reason` earn its place**: it must name the size
+  found *and* point at the safe alternative (Windows' own Disk Cleanup /
+  Settings → System → Storage). "There is 4 GB here, I will not touch it, here is
+  what will" is a better answer than silence, and it is exactly the trust the
+  README will claim.
+- Leaving `enabled_by_default: false` is right — an inert pack should not put a
+  permanent "not walked" line in front of every user who never asked.
+- Tightening `no_shipped_rule_targets_a_protected_path` instead of relaxing it
+  was the correct instinct and is now the standing pattern: **a rule naming a
+  protected path must be structurally unable to propose an action**, proven
+  against the real brain, not by inspection.
+- `%WINDIR%\*.log` and `%WINDIR%\Downloaded Program Files` **stay unshipped.**
+  One informational rule makes the point; three would be noise pretending to be
+  coverage.
+- **Docs to correct so this cannot come back** (do these in the next round):
+  `docs/modules/02-cleaner-core.md` lists `windows-update-leftovers` as
+  NeedsReview and names the two `%WINDIR%` locations — change the table to
+  InfoOnly and delete those two rows, with a line saying why.
+  `docs/RULES-FORMAT.md` says "a rule matching a protected path is a test
+  failure"; make it precise — a rule that *proposes an action* on a protected
+  path is a test failure, an informational rule is permitted and must be
+  structurally incapable of acting.
+
+**The access-clock problem is a CLAUDE.md violation and must be fixed properly.**
+
+CLAUDE.md is unambiguous: "All scans are read-only. `scan()` and `analyze()` must
+not modify the filesystem." A lock probe that opens every candidate bumps each
+file's last-access time on any volume where last-access updates are enabled — the
+scan mutates the very signal it is reading, and a second scan of the day finds
+nothing safe. Requiring both clocks to be old is a sound defensive reading, but it
+treats the symptom.
+
+**Fix the cause:** Windows documents a suppression for exactly this — after
+opening the probe handle, call `SetFileTime` with the last-access argument set to
+a `FILETIME` of `{0xFFFFFFFF, 0xFFFFFFFF}`, which disables access-time updates for
+the remaining lifetime of that handle. Do that in `SystemLockProbe`, and add a
+test proving a probe leaves the access time untouched. Keep the two-clock reading
+as defence in depth. Modern Windows disables last-access updates by default, so
+this is rare rather than theoretical — which is precisely why it would have been
+found late and blamed on something else.
+
+**Accepted as implemented, no change needed:**
+
+- **Duplicate confidence is a flat 75, not a `brain::score` result** — correct. A
+  blake3 match is a fact about bytes; the uncertainty is which copy a person
+  wants, which no heuristic score should pretend to quantify. NeedsReview
+  minimum and the gates on top are the right shape.
+- **`cancel_scan` reaching the token phase 1 shipped without a caller** — good
+  catch, keep it. No stop button on the cleaner route: a pack walk is seconds.
+- **The duplicate candidate list is held in memory** — fine for V1 behind the
+  size floor. If anyone points it at a whole drive we stream it; that belongs in
+  the backlog, not in this phase.
