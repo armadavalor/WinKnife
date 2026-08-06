@@ -31,6 +31,8 @@ import type {
   ScanResult,
   ScheduleMode,
   ShutdownTick,
+  StartupScanResult,
+  StartupSource,
   TimerStatus,
   TreeLevel,
   TreemapScanResult,
@@ -133,6 +135,29 @@ export function treemapCached(root: string): Promise<CachedScan | null> {
 /** Show a path in File Explorer. Opens a window; changes nothing. */
 export function revealInExplorer(path: string): Promise<void> {
   return invoke<void>("reveal_in_explorer", { path });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — startup manager
+ * ---------------------------------------------------------------------- */
+
+/** Enumerate everything that runs at logon. Read-only. */
+export function startupScan(): Promise<StartupScanResult> {
+  return invoke<StartupScanResult>("startup_scan");
+}
+
+/**
+ * Turn an autostart entry back on.
+ *
+ * The reversal. Turning something **off** goes through {@link execute}, so it
+ * passes the executor's gates and is written to the audit log; putting it back
+ * has nothing left to re-verify, exactly like restoring from quarantine.
+ */
+export function startupEnable(
+  source: StartupSource,
+  key: string,
+): Promise<void> {
+  return invoke<void>("startup_enable", { source, key });
 }
 
 /* -------------------------------------------------------------------------

@@ -1355,6 +1355,45 @@ fn copy_dir_recursive(
     Ok(skipped)
 }
 
+/// Move one user file to a new place, without ever overwriting or deleting.
+///
+/// # Why this is here and not in the module that wants it
+///
+/// The startup manager disables a Startup-folder shortcut by moving the `.lnk`
+/// into a module-managed folder (module spec 05), and that is a move of user
+/// data. `clippy.toml` forbids `fs::rename` and `fs::remove_*` everywhere but
+/// this file, precisely so there is one audited implementation of "move
+/// something the user owns": rename on the same volume, copy-verify-remove
+/// across volumes, and never replace an occupied destination.
+///
+/// This is not a quarantine take — there is no batch, no ledger row and no
+/// retention, because a disabled shortcut must never be purged. The startup
+/// module keeps its own ledger so the move is reversible; what it borrows here
+/// is the primitive, not the policy.
+///
+/// # Errors
+/// Returns [`CoreError::Quarantine`] when the source is missing, the
+/// destination is occupied, or the move fails; [`CoreError::VerifyFailed`] when
+/// a cross-volume copy did not match, in which case the original is untouched.
+pub fn move_user_file(from: &Path, to: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(from).map_err(|err| {
+        CoreError::Quarantine(format!("cannot inspect `{}`: {err}", from.display()))
+    })?;
+    if metadata.is_symlink() {
+        // Same refusal as `take`: moving a link moves the link, not the data.
+        return Err(CoreError::Quarantine(format!(
+            "`{}` is a symbolic link; links are never moved",
+            from.display()
+        )));
+    }
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            CoreError::Quarantine(format!("cannot create `{}`: {err}", parent.display()))
+        })?;
+    }
+    move_path(from, to).map_err(|failure| failure.into_error(from, to))
+}
+
 /// Byte-for-byte comparison. Deliberately not a hash: no dependency, no
 /// collision argument to make, and quarantine moves are not hot-path work.
 pub fn files_are_identical(a: &Path, b: &Path) -> std::io::Result<bool> {

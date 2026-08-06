@@ -185,17 +185,32 @@ pub fn run() {
                 }
             }
 
+            // The startup manager is composed here, like everything else that
+            // can touch the machine: it holds the real registry, the real task
+            // scheduler and the real signature probe, and every one of those
+            // refuses to write until the flag armed above is set.
+            let database = Arc::new(Database::new(connection));
+            let startup_service = Arc::new(modules::startup::StartupService::new(
+                Arc::new(core::platform::SystemRegistry),
+                Arc::new(core::platform::SystemTaskScheduler),
+                Arc::new(core::platform::SystemSignatureProbe),
+                modules::startup::KnownApps::load(&rules_dir)?,
+                modules::startup::StartupPaths::from_env(&SystemEnv, &app_data_dir),
+                SystemEnv.var("WINDIR").map(std::path::PathBuf::from),
+            ));
+
             app.manage(commands::Services {
                 quarantine,
                 brain,
                 recycle_bin: core::platform::real_recycle_bin(),
-                // No module produces `DisableStartupEntry` yet, so the executor
-                // refuses one per item and says so. The startup manager replaces
-                // this with a real control.
-                startup: Arc::new(core::executor::NoStartupControl),
+                startup: Arc::new(modules::startup::StartupControlAdapter::new(
+                    Arc::clone(&startup_service),
+                    Arc::clone(&database),
+                )),
+                startup_service,
                 rules_dir,
             });
-            app.manage(Database::new(connection));
+            app.manage(database);
             app.manage(Arc::clone(&timer));
             if let Some(guard) = log_guard {
                 // The appender guard has to outlive the process, or buffered
@@ -218,6 +233,8 @@ pub fn run() {
             commands::treemap_children,
             commands::treemap_cached,
             commands::reveal_in_explorer,
+            commands::startup_scan,
+            commands::startup_enable,
             commands::get_recommendations,
             commands::scan_summary,
             commands::execute,

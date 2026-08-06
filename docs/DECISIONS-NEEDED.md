@@ -403,11 +403,25 @@ found late and blamed on something else.
       80 ms and the syscall was worth 3 800 ms. `core::scanner` is now a sorted
       depth-first `read_dir` walk — sequential, streaming, deterministic — and
       `jwalk` has been dropped. First paint on the 100k tree went from 8 678 ms
-      to **798 ms** against a 3 000 ms budget, and every module that walks
-      anything got the same speedup. The aggregation *is* still bottom-up, as one
-      linear depth-ordered sweep. If a future phase points this at a spinning
-      disk where concurrency pays for itself, the place to add it back is one
-      function, and the benchmark to prove it is already committed.
+      to **868 ms** against a 3 000 ms budget. The aggregation *is* still
+      bottom-up, as one linear depth-ordered sweep. If a future phase points this
+      at a spinning disk where concurrency pays for itself, the place to add it
+      back is one function, and the benchmark to prove it is already committed.
+- [ ] 2026-08-06 (phase 3): the cheap path above has one caveat, found by
+      `duplicates::scanning_never_modifies_anything` failing intermittently
+      after the rewrite. NTFS keeps a **copy** of each entry's timestamps in its
+      parent directory's index and updates it lazily, so `DirEntry::metadata()`
+      can report a modification time older than the truth for something that
+      changed moments ago. Sizes and attributes are unaffected. That matters
+      because the cleaner's age heuristic reads modification times and "older
+      than the truth" is the direction that makes a freshly written file look
+      abandoned. Safest interpretation taken:
+      `WalkOptions::accurate_timestamps` defaults to **true**, so the cleaner and
+      the duplicate finder pay one stat per entry and behave exactly as they did
+      before the rewrite; only the treemap opts out, because it reads no clocks
+      at all and is the only thing that walks a whole drive. The speedup is
+      therefore the treemap's, not everyone's — the earlier claim in this file
+      was wrong and is corrected here.
 - [ ] 2026-08-06 (phase 3): module spec 04's cross-links say the actions route
       "with path pre-filled". That works for **Find duplicates here**
       (`/duplicates?root=…` narrows the scan to that folder) and for **Open in

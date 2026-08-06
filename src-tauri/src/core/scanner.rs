@@ -27,9 +27,18 @@
 //! directory listing already returned, and does not follow reparse points —
 //! which is exactly the semantics this walker wants. So the parallelism was
 //! worth 80 ms and the syscall was worth 3 800 ms, and the walk is now a plain
-//! sorted depth-first `read_dir`: streaming, deterministic, no arena, and
-//! twenty times faster than what it replaced. Every module that walks anything
-//! got that speedup (`docs/DECISIONS-NEEDED.md`, phase 3).
+//! sorted depth-first `read_dir`: streaming, deterministic and no arena.
+//!
+//! **With one caveat, and it is why [`WalkOptions::accurate_timestamps`]
+//! exists.** NTFS keeps a *copy* of each entry's timestamps in its parent's
+//! index and updates it lazily, so the listing can report a modification time
+//! that is older than the truth. Sizes and attributes are not affected. The
+//! cleaner's age heuristic reads modification times, and "older than the truth"
+//! is the direction that makes a freshly written file look abandoned — so the
+//! cleaner and the duplicate finder keep the authoritative stat and are exactly
+//! as fast as they were. The treemap opts out, because it reads no clocks at
+//! all, and it is the only thing here that walks a whole drive
+//! (`docs/DECISIONS-NEEDED.md`, phase 3).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -88,7 +97,7 @@ pub struct WalkEntry {
 }
 
 /// How a walk should behave.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct WalkOptions {
     /// Report reparse points as entries instead of passing over them.
     ///
@@ -103,6 +112,36 @@ pub struct WalkOptions {
     /// carry `size_bytes: 0` and `is_link: true`, and the walk still refuses to
     /// descend into them.
     pub report_links: bool,
+
+    /// Whether timestamps have to be authoritative, at one extra syscall per
+    /// entry.
+    ///
+    /// **On by default, and every module before the treemap needs it on.**
+    ///
+    /// The directory listing Windows returns carries a *copy* of each entry's
+    /// timestamps, and NTFS updates that copy lazily — a file or folder that
+    /// changed moments ago can still be listed with its previous modification
+    /// time. Sizes and attributes do not have this problem, which is why the
+    /// cheap path is still the default for everything else.
+    ///
+    /// The cleaner's age heuristic reads modification times, and a stale one
+    /// always reads *older* than the truth. That is the dangerous direction:
+    /// a file a program has just written would look untouched for days. So the
+    /// cleaner and the duplicate finder pay the syscall and get the real
+    /// answer, exactly as they did before this walker was rewritten.
+    ///
+    /// The treemap turns it off because it never looks at a timestamp — it
+    /// wants sizes — and it is the only thing here that walks a whole drive.
+    pub accurate_timestamps: bool,
+}
+
+impl Default for WalkOptions {
+    fn default() -> Self {
+        Self {
+            report_links: false,
+            accurate_timestamps: true,
+        }
+    }
 }
 
 impl WalkEntry {
@@ -193,14 +232,23 @@ pub fn walk_with(
                 continue;
             }
             let is_dir = metadata.is_dir();
+            let path = entry.path();
+            // The listing's copy of the timestamps can lag behind the truth;
+            // the size and the attributes cannot. A caller that reads clocks
+            // pays for the authoritative answer — see `accurate_timestamps`.
+            let clocks = if options.accurate_timestamps {
+                std::fs::symlink_metadata(&path).unwrap_or_else(|_| metadata.clone())
+            } else {
+                metadata.clone()
+            };
             entries.push(WalkEntry {
-                path: entry.path(),
+                path,
                 // A link's own size is meaningless and its target's bytes belong
                 // to wherever the target really lives, so it contributes nothing.
                 size_bytes: if is_dir || is_link { 0 } else { metadata.len() },
-                modified: to_utc(metadata.modified().ok()),
-                created: to_utc(metadata.created().ok()),
-                accessed: to_utc(metadata.accessed().ok()),
+                modified: to_utc(clocks.modified().ok()),
+                created: to_utc(clocks.created().ok()),
+                accessed: to_utc(clocks.accessed().ok()),
                 is_dir,
                 is_link,
                 compressed: is_compressed(&metadata),
@@ -498,7 +546,10 @@ mod tests {
         let mut entries = Vec::new();
         walk_with(
             &inside,
-            WalkOptions { report_links: true },
+            WalkOptions {
+                report_links: true,
+                ..WalkOptions::default()
+            },
             &CancellationToken::new(),
             &mut |entry| entries.push(entry.clone()),
         );
@@ -516,6 +567,40 @@ mod tests {
             !entries.iter().any(|e| e.path.ends_with("secret.txt")),
             "reporting a link must not mean walking through it"
         );
+    }
+
+    /// The reason `accurate_timestamps` defaults to on.
+    ///
+    /// The directory listing's copy of a timestamp can lag behind the real one,
+    /// and the cleaner decides what is old enough to remove from exactly that
+    /// number. Two walks of an untouched tree must agree, or the age heuristic
+    /// is reading noise.
+    #[test]
+    fn two_walks_of_an_untouched_tree_report_the_same_clocks() {
+        let dir = fixture();
+        let clocks = |root: &Path| {
+            let mut seen: Vec<(PathBuf, Option<DateTime<Utc>>)> = Vec::new();
+            walk(root, &CancellationToken::new(), &mut |entry| {
+                seen.push((entry.path.clone(), entry.modified));
+            });
+            seen.sort();
+            seen
+        };
+        assert_eq!(
+            clocks(dir.path()),
+            clocks(dir.path()),
+            "a walk that reports authoritative clocks must be repeatable"
+        );
+    }
+
+    #[test]
+    fn the_default_options_ask_for_authoritative_clocks() {
+        let options = WalkOptions::default();
+        assert!(
+            options.accurate_timestamps,
+            "every caller but the treemap reads modification times, and a stale              one reads older than the truth"
+        );
+        assert!(!options.report_links);
     }
 
     #[test]

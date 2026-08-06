@@ -473,6 +473,62 @@ export interface TreemapScanResult {
 }
 
 /* -------------------------------------------------------------------------
+ * modules/startup.rs
+ * ---------------------------------------------------------------------- */
+
+/** What the known-app list advises. Never acts on its own. */
+export type StartupVerdict =
+  | "keep"
+  | "user-choice"
+  | "safe-to-disable"
+  | "unknown";
+
+/** Estimated effect on logon time. Always presented as an estimate. */
+export type StartupImpact = "low" | "medium" | "high";
+
+/** One thing that runs at logon. */
+export interface StartupEntry {
+  /** `{source}:{key}`. */
+  id: string;
+  name: string;
+  source: StartupSource;
+  /** Value name, shortcut file name or task path. */
+  key: string;
+  /** Human-readable location, e.g. `HKCU\…\Run`. */
+  location: string;
+  command: string;
+  target: string | null;
+  enabled: boolean;
+  /** Windows owns it: the toggle is disabled and `os_reason` says why. */
+  os_owned: boolean;
+  os_reason: string | null;
+  publisher: string | null;
+  signed: boolean;
+  signature_note: string;
+  impact: StartupImpact;
+  /** How the estimate was arrived at, in words. */
+  impact_reason: string;
+  verdict: StartupVerdict;
+  category: string | null;
+  note: string;
+}
+
+/** What one enumeration produced. */
+export interface StartupScan {
+  entries: StartupEntry[];
+  /** Sources that could not be read, so a partial list says so. */
+  unreadable: string[];
+}
+
+/** What `startup_scan` hands back. */
+export interface StartupScanResult {
+  scanId: string;
+  scan: StartupScan;
+  /** One per toggleable entry; a disable applies one of these. */
+  recommendations: Recommendation[];
+}
+
+/* -------------------------------------------------------------------------
  * commands.rs — settings
  * ---------------------------------------------------------------------- */
 

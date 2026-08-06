@@ -1,0 +1,152 @@
+{
+  "id": "startup-known",
+  "version": 1,
+  "description": "Publishers and program names the startup manager recognises, so an ordinary updater does not look like a mystery. Community-editable: add an entry rather than teaching users to ignore warnings.",
+  "notes": [
+    "This file lives in rules/startup/ rather than rules/ because it is not a cleaner rule pack — it has no paths, no globs and no action. The cleaner's loader reads rules/*.json and would refuse to start the app on a file it cannot compile.",
+    "`verdict` is a hint the UI shows, never something that acts on its own. `keep` greys the toggle only when `os` is also true; otherwise it is advice a person can overrule.",
+    "`impact` is an estimate and is labelled as one everywhere it appears."
+  ],
+  "entries": [
+    {
+      "match": { "publisher": "Microsoft Windows" },
+      "category": "Windows",
+      "verdict": "keep",
+      "os": true,
+      "note": "Part of Windows itself."
+    },
+    {
+      "match": { "name": "SecurityHealth" },
+      "category": "Security",
+      "verdict": "keep",
+      "os": true,
+      "note": "Windows Security's status icon."
+    },
+    {
+      "match": { "name": "WindowsDefender" },
+      "category": "Security",
+      "verdict": "keep",
+      "os": true,
+      "note": "Microsoft Defender."
+    },
+    {
+      "match": { "command_contains": "OneDrive" },
+      "category": "Cloud storage",
+      "verdict": "user-choice",
+      "impact": "medium",
+      "note": "Syncs your OneDrive folder. Disabling it stops syncing until you open it yourself."
+    },
+    {
+      "match": { "command_contains": "Dropbox" },
+      "category": "Cloud storage",
+      "verdict": "user-choice",
+      "impact": "medium",
+      "note": "Syncs your Dropbox folder. Disabling it stops syncing until you open it yourself."
+    },
+    {
+      "match": { "command_contains": "GoogleDriveFS" },
+      "category": "Cloud storage",
+      "verdict": "user-choice",
+      "impact": "medium",
+      "note": "Syncs Google Drive. Disabling it stops syncing until you open it yourself."
+    },
+    {
+      "match": { "command_contains": "Steam" },
+      "category": "Games",
+      "verdict": "safe-to-disable",
+      "impact": "high",
+      "note": "Steam starts itself when you launch a game, so it does not need to start at logon."
+    },
+    {
+      "match": { "command_contains": "EpicGamesLauncher" },
+      "category": "Games",
+      "verdict": "safe-to-disable",
+      "impact": "high",
+      "note": "The launcher starts when you launch a game."
+    },
+    {
+      "match": { "command_contains": "Spotify" },
+      "category": "Media",
+      "verdict": "safe-to-disable",
+      "impact": "medium",
+      "note": "Spotify does not need to be running before you ask for music."
+    },
+    {
+      "match": { "command_contains": "Discord" },
+      "category": "Chat",
+      "verdict": "user-choice",
+      "impact": "medium",
+      "note": "Disabling this means you appear offline until you open Discord."
+    },
+    {
+      "match": { "command_contains": "Teams" },
+      "category": "Chat",
+      "verdict": "user-choice",
+      "impact": "high",
+      "note": "Disabling this means you miss calls until you open Teams."
+    },
+    {
+      "match": { "command_contains": "Skype" },
+      "category": "Chat",
+      "verdict": "user-choice",
+      "impact": "medium",
+      "note": "Disabling this means you appear offline until you open Skype."
+    },
+    {
+      "match": { "command_contains": "AdobeARM" },
+      "category": "Updater",
+      "verdict": "safe-to-disable",
+      "impact": "low",
+      "note": "Adobe's updater. Adobe applications also check for updates when you open them."
+    },
+    {
+      "match": { "command_contains": "GoogleUpdate" },
+      "category": "Updater",
+      "verdict": "safe-to-disable",
+      "impact": "low",
+      "note": "Chrome updates itself while it is running, so this is not the only path."
+    },
+    {
+      "match": { "command_contains": "EdgeUpdate" },
+      "category": "Updater",
+      "verdict": "user-choice",
+      "impact": "low",
+      "note": "Edge's updater. Edge also updates itself while it is running."
+    },
+    {
+      "match": { "command_contains": "iTunesHelper" },
+      "category": "Updater",
+      "verdict": "safe-to-disable",
+      "impact": "low",
+      "note": "Watches for an iPhone being plugged in. iTunes still opens by hand."
+    },
+    {
+      "match": { "publisher": "NVIDIA Corporation" },
+      "category": "Drivers",
+      "verdict": "user-choice",
+      "impact": "medium",
+      "note": "Graphics driver companion. Games work without it; some overlay features do not."
+    },
+    {
+      "match": { "publisher": "Realtek Semiconductor Corp." },
+      "category": "Drivers",
+      "verdict": "user-choice",
+      "impact": "low",
+      "note": "Audio driver companion."
+    },
+    {
+      "match": { "publisher": "Synaptics Incorporated" },
+      "category": "Drivers",
+      "verdict": "keep",
+      "impact": "low",
+      "note": "Touchpad settings. Disabling it can lose gestures."
+    },
+    {
+      "match": { "publisher": "Intel Corporation" },
+      "category": "Drivers",
+      "verdict": "user-choice",
+      "impact": "low",
+      "note": "Intel driver companion."
+    }
+  ]
+}

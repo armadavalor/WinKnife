@@ -35,6 +35,7 @@ register_modules! {
     cleaner => cleaner::CleanerModule,
     treemap => treemap::TreemapModule,
     duplicates => duplicates::DuplicatesModule,
+    startup => startup::StartupModule,
     shutdown_timer => shutdown_timer::ShutdownTimerModule,
 }
 
@@ -105,7 +106,13 @@ mod tests {
     #[test]
     fn every_shipped_module_is_registered() {
         let registry = registry().expect("registry");
-        for id in ["cleaner", "treemap", "duplicates", "shutdown-timer"] {
+        for id in [
+            "cleaner",
+            "treemap",
+            "duplicates",
+            "startup",
+            "shutdown-timer",
+        ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }
     }

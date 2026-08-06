@@ -32,7 +32,7 @@ use crate::core::types::ExecReport;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, DuplicateProgress, DuplicateScan};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
-use crate::modules::treemap;
+use crate::modules::{startup, treemap};
 
 /// Everything the settings page reads and writes, in one round trip.
 ///
@@ -108,6 +108,8 @@ pub struct Services {
     pub recycle_bin: Arc<dyn RecycleBin>,
     /// Autostart entries, for `Action::DisableStartupEntry`.
     pub startup: Arc<dyn executor::StartupControl>,
+    /// The same service, for the enumeration and the re-enable path.
+    pub startup_service: Arc<startup::StartupService>,
     /// Directory the rule packs were loaded from, for diagnostics.
     pub rules_dir: PathBuf,
 }
@@ -596,6 +598,166 @@ pub fn treemap_cached(
 #[tauri::command]
 pub fn reveal_in_explorer(path: PathBuf) -> Result<(), ApiError> {
     crate::core::platform::reveal_in_explorer(&path).map_err(Into::into)
+}
+
+/* -------------------------------------------------------------------------
+ * Startup manager
+ * ---------------------------------------------------------------------- */
+
+/// What a startup scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupScanResult {
+    /// Id `execute` needs when a toggle turns something off.
+    pub scan_id: Uuid,
+    /// The entries, sorted by source then name.
+    pub scan: startup::StartupScan,
+    /// One per entry: the recommendation a toggle applies, so a disable goes
+    /// through the executor's four gates and lands in the audit log like every
+    /// other change (module spec 05).
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+}
+
+/// Enumerate everything that runs at logon. Read-only.
+///
+/// # Errors
+/// Returns an error only if the ledger of disabled shortcuts cannot be read.
+#[tauri::command]
+pub async fn startup_scan<R: Runtime>(
+    app: AppHandle<R>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Database>,
+) -> Result<StartupScanResult, ApiError> {
+    let scan = db.with(|conn| Ok(services.startup_service.scan(conn)))?;
+    let scan_id = Uuid::new_v4();
+
+    let mut findings = Vec::with_capacity(scan.entries.len());
+    let mut recommendations = Vec::with_capacity(scan.entries.len());
+    for entry in &scan.entries {
+        let (finding, recommendation) = startup_recommendation(entry);
+        findings.push(finding);
+        if let Some(recommendation) = recommendation {
+            recommendations.push(recommendation);
+        }
+    }
+
+    store.insert(ScanResult {
+        scan_id,
+        module: "startup".to_owned(),
+        findings,
+        recommendations: recommendations.clone(),
+        skipped_rules: scan.unreadable.clone(),
+    });
+
+    tracing::info!(
+        scan = %scan_id,
+        entries = scan.entries.len(),
+        unreadable = scan.unreadable.len(),
+        "startup scan finished"
+    );
+    let _ = events::emit_scan_done(
+        &app,
+        &ScanDone {
+            scan_id,
+            module: "startup".to_owned(),
+            finding_count: scan.entries.len() as u64,
+        },
+    );
+
+    Ok(StartupScanResult {
+        scan_id,
+        scan,
+        recommendations,
+    })
+}
+
+/// Build the finding and, when the entry can be toggled, the recommendation the
+/// executor will re-verify.
+fn startup_recommendation(
+    entry: &startup::StartupEntry,
+) -> (
+    crate::core::types::Finding,
+    Option<crate::core::types::Recommendation>,
+) {
+    use crate::core::types::{Action, Finding, FindingKind, Justification, RiskBucket};
+
+    let kind = match entry.source {
+        crate::core::types::StartupSource::ScheduledTask => FindingKind::ScheduledTask,
+        crate::core::types::StartupSource::UserStartupFolder
+        | crate::core::types::StartupSource::CommonStartupFolder => FindingKind::File,
+        _ => FindingKind::RegistryEntry,
+    };
+    let mut finding = Finding::new("startup", PathBuf::from(&entry.command), kind);
+    finding.meta = serde_json::json!({
+        "entryId": entry.id,
+        "source": entry.source,
+        "key": entry.key,
+    });
+
+    // Windows' own entries and anything already off get a finding but no
+    // action — the same shape the cleaner's red bucket uses.
+    if entry.os_owned || !entry.enabled {
+        return (finding, None);
+    }
+
+    let risk = match entry.verdict {
+        startup::Verdict::SafeToDisable => RiskBucket::Safe,
+        _ => RiskBucket::NeedsReview,
+    };
+    let reason = format!(
+        "{} Turning this off stops it starting at logon; it can be turned back on here at \
+         any time, and nothing is removed. Estimated impact: {:?}. {}",
+        entry.note, entry.impact, entry.impact_reason
+    );
+
+    let recommendation = crate::core::types::Recommendation::new(
+        vec![finding.id],
+        risk,
+        if entry.signed { 80 } else { 55 },
+        Action::DisableStartupEntry,
+        reason,
+        // Disabling an autostart entry frees no disk space, and claiming a
+        // figure here would put an invented number in the report.
+        0,
+        Justification::StartupEntry {
+            source: entry.source,
+            key: entry.key.clone(),
+            command: entry.command.clone(),
+        },
+    );
+
+    match recommendation {
+        Ok(recommendation) => (finding, Some(recommendation)),
+        Err(err) => {
+            tracing::error!(entry = entry.id, error = %err, "dropped a startup recommendation");
+            (finding, None)
+        }
+    }
+}
+
+/// Turn an autostart entry back on.
+///
+/// The reversal, and deliberately not an executor action: there is no
+/// recommendation to re-verify when putting something back the way the user
+/// found it, exactly as restoring from quarantine is not an executor action
+/// either. Turning something **off** goes through `execute`.
+///
+/// # Errors
+/// Returns an error when the entry is unknown, when Windows owns it, or when
+/// the change was refused (an `HKLM` entry needs elevation).
+#[tauri::command]
+pub fn startup_enable(
+    source: crate::core::types::StartupSource,
+    key: String,
+    services: State<'_, Services>,
+    db: State<'_, Database>,
+) -> Result<(), ApiError> {
+    Ok(db.with(|conn| {
+        services
+            .startup_service
+            .set_enabled(conn, source, &key, true, Utc::now())
+    })?)
 }
 
 /* -------------------------------------------------------------------------

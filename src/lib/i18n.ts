@@ -169,6 +169,36 @@ const en = {
   "treemap.category.document": "Documents",
   "treemap.category.other": "Other",
 
+  "startup.intro":
+    "Reading this list changes nothing. Turning an entry off uses the same switch Windows' own Task Manager uses, so the two agree — nothing is deleted, and you can turn it back on here whenever you like.",
+  "startup.loading": "Reading your startup entries…",
+  "startup.loadError": "Could not read what runs at logon.",
+  "startup.empty": "Nothing runs at logon on this machine.",
+  "startup.summary": "{total} entries · {on} currently run at logon",
+  "startup.refresh": "Refresh",
+  "startup.unreadable":
+    "Some locations could not be read, so this list may be incomplete:",
+  "startup.signed": "signed",
+  "startup.unsigned": "unsigned",
+  "startup.impact": "{tier} impact (estimated)",
+  "startup.impactLow": "Low",
+  "startup.impactMedium": "Medium",
+  "startup.impactHigh": "High",
+  "startup.verdictKeep": "Best left on",
+  "startup.verdictUserChoice": "Your call",
+  "startup.verdictSafeToDisable": "Safe to turn off",
+  "startup.verdictUnknown": "Not recognised",
+  "startup.on": "On",
+  "startup.off": "Off",
+  "startup.working": "Working…",
+  "startup.toggleLabel": "Run {name} at logon",
+  "startup.confirmTitle": "Stop {name} running at logon?",
+  "startup.confirmBody":
+    "It will not start the next time you log in. You can still open it yourself whenever you want to.",
+  "startup.confirmNote":
+    "Nothing is deleted. A registry entry keeps its value and gets the same disabled flag Task Manager uses; a shortcut is moved into WinKnife's own folder and moved back untouched if you turn this on again.",
+  "startup.confirmAction": "Turn it off",
+
   "settings.title": "Settings",
   "settings.subtitle":
     "Everything here is stored locally. Values that could make the app unsafe are corrected on save, and the page shows you what was actually stored.",

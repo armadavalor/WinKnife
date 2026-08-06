@@ -221,7 +221,13 @@ pub fn scan(
     let mut seen = 0u64;
     let summary = scanner::walk_with(
         root,
-        WalkOptions { report_links: true },
+        WalkOptions {
+            report_links: true,
+            // The treemap reads no clocks: every figure it shows is a size.
+            // Skipping the authoritative stat is what makes a whole-drive walk
+            // affordable (see `core::scanner`'s header for the measurement).
+            accurate_timestamps: false,
+        },
         cancel,
         &mut |entry| {
             seen += 1;
