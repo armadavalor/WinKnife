@@ -15,13 +15,13 @@
 //! - Only files are ever proposed. Directories are walked but never quarantined
 //!   in phase 1, so a clean can never take a folder structure with it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::core::brain::{Brain, CompiledRule, RuleAction, RulePack};
+use crate::core::brain::{Brain, CompiledRule, ProtectedPaths, RuleAction, RulePack};
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
 use crate::core::platform::RecycleBin;
 use crate::core::scanner::{self, CancellationToken, WalkEntry};
@@ -68,6 +68,10 @@ pub struct ScanOutput {
 pub struct CleanerContext<'a> {
     /// Packs to run, already compiled and expanded.
     pub packs: &'a [RulePack],
+    /// Hard gates, consulted before a walk root is walked rather than only
+    /// afterwards: a root that resolves into a protected location is never
+    /// entered at all (security review C1d).
+    pub protected: &'a ProtectedPaths,
     /// The recycle bin, read-only during a scan.
     pub recycle_bin: &'a dyn RecycleBin,
     /// Reference instant for every age comparison, so a scan is reproducible.
@@ -103,24 +107,32 @@ pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) ->
             continue;
         }
 
-        for rule in &pack.rules {
-            // Each rule names its own walk roots, so a scan only touches the
-            // directories the packs actually point at.
-            for root in rule.roots() {
-                let summary = scanner::walk(root, ctx.cancel, &mut |entry| {
-                    seen += 1;
-                    if let Some(sink) = progress.as_deref_mut() {
-                        sink(seen, &entry.path);
-                    }
+        // Each rule names its own walk roots, so a scan only touches the
+        // directories the packs actually point at — and only after every root
+        // has been resolved and cleared against the hard gates.
+        let (groups, refused) = plan_walks(pack, ctx.protected);
+        output.skipped_rules.extend(refused);
+
+        for group in &groups {
+            let summary = scanner::walk(&group.root, ctx.cancel, &mut |entry| {
+                seen += 1;
+                if let Some(sink) = progress.as_deref_mut() {
+                    sink(seen, &entry.path);
+                }
+                // Rules sharing a root are tried in declaration order and the
+                // first one to claim an entry wins, which is what the walk-per-
+                // rule loop plus `dedupe_by_path` used to add up to.
+                for rule in &group.rules {
                     if let Some(finding) = finding_for(entry, rule, pack, ctx.now) {
                         output.findings.push(finding);
+                        break;
                     }
-                });
-                output.unreadable.extend(summary.unreadable);
-                output.cancelled |= summary.cancelled;
-                if output.cancelled {
-                    return output;
                 }
+            });
+            output.unreadable.extend(summary.unreadable);
+            output.cancelled |= summary.cancelled;
+            if output.cancelled {
+                return output;
             }
         }
     }
@@ -129,6 +141,101 @@ pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) ->
     // so a file is never offered twice.
     dedupe_by_path(&mut output.findings);
     output
+}
+
+/// One directory to walk and the rules that asked for it.
+struct WalkGroup<'a> {
+    /// The root exactly as the rule spelled it. The canonical form decides
+    /// *whether* to walk; the spelled form decides *what* to walk, because the
+    /// globs were compiled against that spelling and would stop matching if a
+    /// junction rewrote it.
+    root: PathBuf,
+    /// Rules whose roots resolve to this same directory, in declaration order.
+    rules: Vec<&'a CompiledRule>,
+}
+
+/// What resolving a walk root concluded.
+enum RootVerdict {
+    /// Walk it. Carries the identity used to fold duplicate roots together.
+    Walk(String),
+    /// Do not walk it, and say so in `skipped_rules`.
+    Refused(String),
+}
+
+/// Group a pack's walk roots, dropping the ones that must not be walked and
+/// folding the ones that name the same directory twice (security review C1d,
+/// L5). `%TEMP%` and `%LOCALAPPDATA%\Temp` are the same tree on a stock
+/// install, and walking it twice doubles the scan for nothing.
+fn plan_walks<'a>(pack: &'a RulePack, protected: &ProtectedPaths) -> (Vec<WalkGroup<'a>>, Vec<String>) {
+    let mut groups: Vec<WalkGroup<'a>> = Vec::new();
+    let mut by_identity: HashMap<String, usize> = HashMap::new();
+    let mut refused = Vec::new();
+
+    for rule in &pack.rules {
+        for root in rule.roots() {
+            let identity = match resolve_root(root, protected) {
+                RootVerdict::Walk(identity) => identity,
+                RootVerdict::Refused(why) => {
+                    tracing::warn!(
+                        pack = pack.id(),
+                        rule = rule.spec.id.as_str(),
+                        root = %root.display(),
+                        "walk root refused"
+                    );
+                    refused.push(format!("{}/{}: {why}", pack.id(), rule.spec.id));
+                    continue;
+                }
+            };
+
+            match by_identity.get(&identity) {
+                Some(&index) => groups[index].rules.push(rule),
+                None => {
+                    by_identity.insert(identity, groups.len());
+                    groups.push(WalkGroup {
+                        root: root.clone(),
+                        rules: vec![rule],
+                    });
+                }
+            }
+        }
+    }
+
+    (groups, refused)
+}
+
+/// Decide whether a walk root may be walked, and what identifies it.
+fn resolve_root(root: &Path, protected: &ProtectedPaths) -> RootVerdict {
+    if let Some(reason) = protected.reason_for(root) {
+        return RootVerdict::Refused(format!(
+            "`{}` was not walked because it is a protected location ({reason})",
+            root.display()
+        ));
+    }
+
+    match dunce::canonicalize(root) {
+        Ok(canonical) => {
+            // A junction, a reparse point or an 8.3 alias can aim a harmless-
+            // looking root straight at `C:\Windows`. Only the resolved form
+            // answers that question.
+            if let Some(reason) = protected.reason_for(&canonical) {
+                return RootVerdict::Refused(format!(
+                    "`{}` was not walked because it resolves to `{}`, a protected location ({reason})",
+                    root.display(),
+                    canonical.display()
+                ));
+            }
+            RootVerdict::Walk(canonical.to_string_lossy().to_lowercase())
+        }
+        // A rule pointing at a folder this machine does not have is not an
+        // error; the walk simply finds nothing.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            RootVerdict::Walk(root.to_string_lossy().to_lowercase())
+        }
+        Err(err) => RootVerdict::Refused(format!(
+            "`{}` was not walked because it could not be resolved ({err})",
+            root.display()
+        )),
+    }
 }
 
 /// Decide whether one walked entry becomes a finding for one rule.
@@ -418,11 +525,15 @@ mod tests {
             rules::load_dir(&repo_rules_dir(), &self.env).expect("the shipped packs must load")
         }
 
+        /// The injected protected path: a rule pack cannot see it, and it must
+        /// still land red.
+        fn protected(&self) -> ProtectedPaths {
+            ProtectedPaths::from_trees([self.root.join("Windows")])
+        }
+
         fn brain(&self, packs: Vec<RulePack>) -> Brain {
             Brain::builder()
-                // The injected protected path: a rule pack cannot see it, and
-                // it must still land red.
-                .protected_paths(ProtectedPaths::from_trees([self.root.join("Windows")]))
+                .protected_paths(self.protected())
                 .packs(packs)
                 .lock_probe(Arc::new(AlwaysUnlocked))
                 .build()
@@ -470,10 +581,12 @@ mod tests {
 
     fn run(fixture: &Fixture, bin: &dyn RecycleBin) -> ScanOutput {
         let packs = fixture.packs();
+        let protected = fixture.protected();
         let cancel = CancellationToken::new();
         scan(
             &CleanerContext {
                 packs: &packs,
+                protected: &protected,
                 recycle_bin: bin,
                 now: Utc::now(),
                 cancel: &cancel,
@@ -578,10 +691,12 @@ mod tests {
         let packs = fixture.packs();
         let brain = fixture.brain(packs.clone());
 
+        let protected = fixture.protected();
         let cancel = CancellationToken::new();
         let mut output = scan(
             &CleanerContext {
                 packs: &packs,
+                protected: &protected,
                 recycle_bin: &bin,
                 now: Utc::now(),
                 cancel: &cancel,
@@ -758,12 +873,14 @@ mod tests {
     fn cancellation_stops_a_scan_and_says_so() {
         let fixture = Fixture::new();
         let packs = fixture.packs();
+        let protected = fixture.protected();
         let cancel = CancellationToken::new();
         cancel.cancel();
 
         let output = scan(
             &CleanerContext {
                 packs: &packs,
+                protected: &protected,
                 recycle_bin: &StubRecycleBin::default(),
                 now: Utc::now(),
                 cancel: &cancel,
@@ -779,6 +896,7 @@ mod tests {
     fn progress_reports_the_running_count() {
         let fixture = Fixture::new();
         let packs = fixture.packs();
+        let protected = fixture.protected();
         let cancel = CancellationToken::new();
         let mut ticks = 0u64;
         let mut last = 0u64;
@@ -790,6 +908,7 @@ mod tests {
         scan(
             &CleanerContext {
                 packs: &packs,
+                protected: &protected,
                 recycle_bin: &StubRecycleBin::default(),
                 now: Utc::now(),
                 cancel: &cancel,
@@ -805,11 +924,13 @@ mod tests {
     fn a_pack_whose_variable_is_unset_is_reported_not_hidden() {
         let dir = tempfile::tempdir().expect("tempdir");
         let packs = rules::load_dir(&repo_rules_dir(), &MapEnv::new()).expect("load");
+        let protected = ProtectedPaths::empty();
         let cancel = CancellationToken::new();
 
         let output = scan(
             &CleanerContext {
                 packs: &packs,
+                protected: &protected,
                 recycle_bin: &StubRecycleBin::default(),
                 now: Utc::now(),
                 cancel: &cancel,
@@ -826,6 +947,99 @@ mod tests {
             output.skipped_rules
         );
         drop(dir);
+    }
+
+    /// Security review C1d: a root the hard gates protect is never walked, and
+    /// the scan says so rather than quietly finding nothing.
+    #[test]
+    fn a_protected_walk_root_is_refused_and_reported() {
+        let fixture = Fixture::new();
+        let packs = fixture.packs();
+        // Somebody pointed a pack at a place the gates protect.
+        let protected = ProtectedPaths::from_trees([fixture.root.join("AppData/Local/Temp")]);
+        let cancel = CancellationToken::new();
+
+        let output = scan(
+            &CleanerContext {
+                packs: &packs,
+                protected: &protected,
+                recycle_bin: &StubRecycleBin::default(),
+                now: Utc::now(),
+                cancel: &cancel,
+            },
+            None,
+        );
+
+        assert!(
+            output
+                .skipped_rules
+                .iter()
+                .any(|entry| entry.contains("protected location")),
+            "a refused root must be reported, got {:?}",
+            output.skipped_rules
+        );
+        assert!(
+            !output
+                .findings
+                .iter()
+                .any(|f| f.path.to_string_lossy().contains("old-installer")),
+            "a protected root must not be walked at all"
+        );
+    }
+
+    /// The same, one layer deeper: the root itself is innocent and the thing it
+    /// resolves to is not.
+    #[cfg(windows)]
+    #[test]
+    fn a_walk_root_that_resolves_into_a_protected_location_is_refused() {
+        let fixture = Fixture::new();
+        let temp = fixture.root.join("AppData/Local/Temp");
+        let real_windows = fixture.root.join("Windows");
+        let door = temp.join("innocent");
+        if std::os::windows::fs::symlink_dir(&real_windows, &door).is_err() {
+            // Creating links needs developer mode or elevation.
+            return;
+        }
+
+        let protected = fixture.protected();
+        assert!(
+            protected.reason_for(&door).is_none(),
+            "the premise: the link's own path is not lexically protected"
+        );
+        match resolve_root(&door, &protected) {
+            RootVerdict::Refused(why) => {
+                assert!(why.contains("resolves to"), "got `{why}`");
+            }
+            RootVerdict::Walk(_) => panic!("a root resolving into a protected tree must be refused"),
+        }
+    }
+
+    /// Security review L5: `%TEMP%` and `%LOCALAPPDATA%\Temp` are the same
+    /// folder on a stock install, and walking it twice doubles the scan. Both
+    /// rules still get to see every entry.
+    #[test]
+    fn two_rules_naming_the_same_folder_share_one_walk() {
+        let fixture = Fixture::new();
+        let packs = fixture.packs();
+        let protected = fixture.protected();
+        let temp_pack = packs
+            .iter()
+            .find(|pack| pack.id() == "windows-temp")
+            .expect("the temp pack");
+
+        let (groups, refused) = plan_walks(temp_pack, &protected);
+
+        assert!(refused.is_empty(), "got {refused:?}");
+        assert_eq!(
+            groups.len(),
+            1,
+            "%TEMP% and %LOCALAPPDATA%\\Temp resolve to one folder here"
+        );
+        assert_eq!(
+            groups[0].rules.len(),
+            2,
+            "both rules must still be tried against every entry"
+        );
     }
 
     #[test]

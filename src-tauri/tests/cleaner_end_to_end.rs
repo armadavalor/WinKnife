@@ -76,10 +76,7 @@ impl World {
 
     fn brain(&self) -> Brain {
         Brain::builder()
-            .protected_paths(ProtectedPaths::from_trees([
-                self.planted_windows.clone(),
-                self.quarantine.root().to_path_buf(),
-            ]))
+            .protected_paths(self.protected())
             .packs(self.packs())
             .lock_probe(Arc::new(SystemLockProbe))
             .build()
@@ -89,12 +86,21 @@ impl World {
         rules::load_dir(&repo_rules_dir(), &self.env).expect("the shipped packs must load")
     }
 
+    fn protected(&self) -> ProtectedPaths {
+        ProtectedPaths::from_trees([
+            self.planted_windows.clone(),
+            self.quarantine.root().to_path_buf(),
+        ])
+    }
+
     fn scan(&self, bin: &StubRecycleBin) -> cleaner::ScanOutput {
         let packs = self.packs();
+        let protected = self.protected();
         let cancel = CancellationToken::new();
         cleaner::scan(
             &CleanerContext {
                 packs: &packs,
+                protected: &protected,
                 recycle_bin: bin,
                 now: Utc::now(),
                 cancel: &cancel,

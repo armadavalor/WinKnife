@@ -13,10 +13,35 @@
 //! - [`Scope::Exact`] — the directory itself but not its children. The user
 //!   profile root (`C:\Users\dev` is protected, `C:\Users\dev\Downloads` is
 //!   fair game) and drive roots, which would otherwise protect everything.
+//!
+//! # Spelling a protected path differently is not a way past it
+//!
+//! Matching used to be a plain component comparison against the text it was
+//! handed, and Win32 accepts several spellings of the same file that such a
+//! comparison reads as different places (security review C1):
+//!
+//! - `\\?\C:\Windows` and `\\.\C:\Windows` — the verbatim and device prefixes,
+//!   which the object manager strips before it opens anything.
+//! - `C:\Windows.` and `C:\Windows ` — Win32 discards trailing dots and spaces
+//!   in a path component, so both open `C:\Windows`.
+//! - `%TEMP%\..\..\..\Windows` — `..` climbing back out of the folder a rule
+//!   was pointed at.
+//! - `C:\PROGRA~1` — the 8.3 alias of `C:\Program Files`.
+//!
+//! The first three are handled here, in [`components`]. The 8.3 alias cannot be
+//! expanded without asking the filesystem, so it is caught one layer up: the
+//! executor canonicalises through `dunce` before it consults this list, and the
+//! scanner canonicalises every walk root before it walks it. A path this list
+//! cannot judge — anything still carrying a `..` — is reported as protected
+//! rather than guessed at.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::core::platform::EnvResolver;
+
+/// Why a path that climbs with `..` is refused outright.
+const TRAVERSAL_REASON: &str =
+    "this path climbs out of its own folder with `..`, which can land anywhere, so it is never treated as cleanable";
 
 /// How far a protected entry reaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,9 +76,18 @@ impl ProtectedPaths {
         Self::default()
     }
 
-    /// Build from explicit entries.
+    /// Build from explicit entries. Every path is normalised on the way in, so
+    /// a caller cannot register an entry in a spelling the probe never matches.
     pub fn new(entries: Vec<ProtectedEntry>) -> Self {
-        Self { entries }
+        Self {
+            entries: entries
+                .into_iter()
+                .map(|entry| ProtectedEntry {
+                    path: normalise(&entry.path),
+                    ..entry
+                })
+                .collect(),
+        }
     }
 
     /// Build a tree-scoped list from paths, with a generic reason. Used by
@@ -74,10 +108,22 @@ impl ProtectedPaths {
     /// The real Windows list, resolved through `env` so tests can point it
     /// somewhere harmless.
     ///
+    /// Environment variables only ever *widen* this list. The default install
+    /// locations are compiled in unconditionally, because an environment where
+    /// `%WINDIR%` is unset or has been pointed somewhere harmless is exactly
+    /// the environment in which an unprotected `C:\Windows` does the most
+    /// damage (security review C1e).
+    ///
     /// `quarantine_root` and `app_data_dir` are ours: cleaning our own storage
     /// would let the app eat the very files it promised to keep restorable.
     pub fn from_env(env: &dyn EnvResolver, app_data_dir: &Path, quarantine_root: &Path) -> Self {
         let mut entries = Vec::new();
+
+        let windows_reason =
+            "the Windows directory: removing anything here can stop the system booting";
+        let programs_reason =
+            "an installed-programs directory: use the app's own uninstaller instead";
+        let shared_reason = "shared application data used by installed programs";
 
         let mut tree = |value: Option<String>, reason: &str| {
             if let Some(value) = value {
@@ -92,26 +138,22 @@ impl ProtectedPaths {
             }
         };
 
+        // The compiled-in floor. These are the stock locations on every
+        // Windows install; a machine that has moved them still gets them from
+        // the variables below.
+        tree(Some("C:\\Windows".to_owned()), windows_reason);
+        tree(Some("C:\\Program Files".to_owned()), programs_reason);
+        tree(Some("C:\\Program Files (x86)".to_owned()), programs_reason);
+        tree(Some("C:\\ProgramData".to_owned()), shared_reason);
+
         tree(
             env.var("WINDIR").or_else(|| env.var("SystemRoot")),
-            "the Windows directory: removing anything here can stop the system booting",
+            windows_reason,
         );
-        tree(
-            env.var("ProgramFiles"),
-            "an installed-programs directory: use the app's own uninstaller instead",
-        );
-        tree(
-            env.var("ProgramFiles(x86)"),
-            "an installed-programs directory: use the app's own uninstaller instead",
-        );
-        tree(
-            env.var("ProgramW6432"),
-            "an installed-programs directory: use the app's own uninstaller instead",
-        );
-        tree(
-            env.var("ProgramData"),
-            "shared application data used by installed programs",
-        );
+        tree(env.var("ProgramFiles"), programs_reason);
+        tree(env.var("ProgramFiles(x86)"), programs_reason);
+        tree(env.var("ProgramW6432"), programs_reason);
+        tree(env.var("ProgramData"), shared_reason);
 
         entries.push(ProtectedEntry {
             path: normalise(app_data_dir),
@@ -157,7 +199,10 @@ impl ProtectedPaths {
     /// Add one more entry (used to register the quarantine root once it is
     /// known).
     pub fn push(&mut self, entry: ProtectedEntry) {
-        self.entries.push(entry);
+        self.entries.push(ProtectedEntry {
+            path: normalise(&entry.path),
+            ..entry
+        });
     }
 
     /// Every entry, for tests and diagnostics.
@@ -167,12 +212,22 @@ impl ProtectedPaths {
 
     /// Why `path` is protected, or `None` when it is not.
     ///
-    /// Comparison is case-insensitive and separator-agnostic, matching Windows,
-    /// and works on paths that do not exist so the rules can be tested without
-    /// a filesystem.
+    /// Comparison is case-insensitive, separator-agnostic and blind to the
+    /// verbatim prefix and the trailing dots and spaces Win32 discards, and it
+    /// works on paths that do not exist so the rules can be tested without a
+    /// filesystem.
+    ///
+    /// A path that still climbs with `..` is reported as protected: this list
+    /// resolves `..` lexically, and a lexical answer is the wrong one as soon
+    /// as a junction is involved, so the honest verdict is "not judgeable".
+    /// Nothing legitimate reaches here with a `..` in it — the walker produces
+    /// absolute paths and the rule-pack parser rejects the pattern outright.
     pub fn reason_for(&self, path: &Path) -> Option<&str> {
-        let candidate = normalise(path);
-        let candidate_components: Vec<_> = split(&candidate);
+        if has_traversal(path) {
+            return Some(TRAVERSAL_REASON);
+        }
+
+        let candidate_components: Vec<_> = split(path);
 
         for entry in &self.entries {
             let entry_components: Vec<_> = split(&entry.path);
@@ -210,35 +265,107 @@ impl ProtectedPaths {
     }
 }
 
-/// Lower-case, forward slashes turned into backslashes, trailing separators
-/// removed. Not `canonicalize`: that needs the path to exist, and the brain has
-/// to be able to judge a path it has only been told about.
+/// The canonical text of a path for comparison purposes: lower-cased,
+/// backslash-separated, no verbatim prefix, no trailing separator.
+///
+/// Not `canonicalize`: that needs the path to exist, and the brain has to be
+/// able to judge a path it has only been told about. The executor does
+/// canonicalise, and calls this on the result.
 fn normalise(path: &Path) -> PathBuf {
-    let raw = path.to_string_lossy().replace('/', "\\");
-    let trimmed = raw.trim_end_matches('\\');
-    PathBuf::from(if trimmed.is_empty() { "\\" } else { trimmed }.to_lowercase())
+    let parts = split(path);
+    if parts.is_empty() {
+        return PathBuf::from("\\");
+    }
+    PathBuf::from(parts.join("\\"))
 }
 
-/// Split a normalised path into comparable components. `C:\Windows\System32`
-/// becomes `["c:", "windows", "system32"]`.
+/// Split a path into comparable components. `C:\Windows\System32` becomes
+/// `["c:", "windows", "system32"]`.
+///
+/// Deliberately text-based rather than `Path::components`: the normalisations
+/// below (verbatim prefix, trailing dot and space, lexical `..`) are Windows
+/// path semantics, and they have to apply identically whatever host the tests
+/// happen to run on.
 fn split(path: &Path) -> Vec<String> {
-    path.components()
-        .filter_map(|component| match component {
-            Component::Prefix(prefix) => Some(
-                prefix
-                    .as_os_str()
-                    .to_string_lossy()
-                    .trim_end_matches('\\')
-                    .to_lowercase(),
-            ),
-            Component::Normal(part) => Some(part.to_string_lossy().to_lowercase()),
-            // A leading separator carries no identity of its own; the drive
-            // prefix already anchors the path.
-            Component::RootDir | Component::CurDir => None,
-            Component::ParentDir => Some("..".to_owned()),
-        })
-        .filter(|part| !part.is_empty())
-        .collect()
+    let raw = strip_windows_prefix(&path.to_string_lossy().replace('/', "\\"));
+
+    let mut parts: Vec<String> = Vec::new();
+    // How many leading components anchor the path. `..` never climbs past the
+    // anchor, matching Win32: `C:\..\Windows` is `C:\Windows`.
+    let mut anchor = 0usize;
+    let mut rest = raw.as_str();
+
+    // A UNC share root is two components that only mean anything together, so
+    // they are kept as one and can never be mistaken for a local directory.
+    if let Some(unc) = rest.strip_prefix("\\\\") {
+        let mut pieces = unc.splitn(3, '\\');
+        let server = pieces.next().unwrap_or_default();
+        let share = pieces.next().unwrap_or_default();
+        if !server.is_empty() && !share.is_empty() {
+            parts.push(format!(
+                "\\\\{}\\{}",
+                server.to_lowercase(),
+                share.to_lowercase()
+            ));
+            anchor = 1;
+            rest = pieces.next().unwrap_or("");
+        }
+    }
+
+    for part in rest.split('\\') {
+        match part {
+            "" | "." => continue,
+            ".." => {
+                if parts.len() > anchor {
+                    parts.pop();
+                }
+            }
+            _ => {
+                // Win32 discards trailing dots and spaces when it resolves a
+                // name, so `Windows.` and `Windows ` both open `Windows`.
+                let trimmed = part.trim_end_matches(['.', ' ']).to_lowercase();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if parts.is_empty() && is_drive(&trimmed) {
+                    anchor = 1;
+                }
+                parts.push(trimmed);
+            }
+        }
+    }
+    parts
+}
+
+/// Remove the `\\?\` verbatim or `\\.\` device prefix, putting a UNC path back
+/// into its ordinary `\\server\share` spelling.
+fn strip_windows_prefix(raw: &str) -> String {
+    for prefix in ["\\\\?\\", "\\\\.\\"] {
+        if let Some(rest) = raw.strip_prefix(prefix) {
+            let unc_marker = "unc\\";
+            if rest.len() >= unc_marker.len()
+                && rest[..unc_marker.len()].to_lowercase() == unc_marker
+            {
+                return format!("\\\\{}", &rest[unc_marker.len()..]);
+            }
+            return rest.to_owned();
+        }
+    }
+    raw.to_owned()
+}
+
+/// Whether a component is a drive specifier such as `c:`.
+fn is_drive(part: &str) -> bool {
+    let bytes = part.as_bytes();
+    bytes.len() == 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic()
+}
+
+/// Whether a path contains a `..` component in any spelling.
+fn has_traversal(path: &Path) -> bool {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .split('\\')
+        .any(|part| part == "..")
 }
 
 #[cfg(test)]
@@ -365,18 +492,116 @@ mod tests {
         assert!(!protected.is_protected(Path::new("C:\\fixture\\WindowsApps")));
     }
 
+    /// Environment variables widen the list; they never replace it. An
+    /// environment that has lost `%WINDIR%` must still protect `C:\Windows`
+    /// (security review C1e).
     #[test]
-    fn missing_environment_variables_are_simply_skipped() {
+    fn missing_environment_variables_fall_back_to_the_compiled_in_list() {
         let protected = ProtectedPaths::from_env(
             &MapEnv::new(),
             Path::new("C:\\app"),
             Path::new("C:\\app\\q"),
         );
-        // No WINDIR in this environment, so nothing claims it — but drive roots
-        // and our own directories are unconditional.
-        assert!(!protected.is_protected(Path::new("C:\\Windows\\System32")));
-        assert!(protected.is_protected(Path::new("C:\\")));
-        assert!(protected.is_protected(Path::new("C:\\app\\q\\batch\\item")));
+
+        for path in [
+            "C:\\Windows\\System32",
+            "C:\\Program Files\\App\\a.exe",
+            "C:\\Program Files (x86)\\Old\\x.dll",
+            "C:\\ProgramData\\Vendor\\cache.db",
+            "C:\\",
+            "C:\\app\\q\\batch\\item",
+        ] {
+            assert!(
+                protected.is_protected(Path::new(path)),
+                "`{path}` must be protected even with an empty environment"
+            );
+        }
+        // Widening still works: a machine with Windows somewhere else says so.
+        let moved = ProtectedPaths::from_env(
+            &MapEnv::new().with("WINDIR", "D:\\Windows"),
+            Path::new("C:\\app"),
+            Path::new("C:\\app\\q"),
+        );
+        assert!(moved.is_protected(Path::new("D:\\Windows\\System32")));
+        assert!(moved.is_protected(Path::new("C:\\Windows\\System32")));
+    }
+
+    /// Security review C1: every spelling of a protected path that Win32
+    /// accepts has to be refused, not just the one the list was written in.
+    #[test]
+    fn alternate_spellings_of_a_protected_path_are_still_protected() {
+        let protected = windows_like();
+        let cases: &[(&str, &str)] = &[
+            (
+                "C:\\Users\\dev\\AppData\\Local\\Temp\\..\\..\\..\\..\\Windows\\System32\\ntoskrnl.exe",
+                "`..` traversal out of the folder a rule was pointed at",
+            ),
+            (
+                "\\\\?\\C:\\Windows\\System32\\ntoskrnl.exe",
+                "the verbatim prefix the object manager strips",
+            ),
+            (
+                "\\\\.\\C:\\Windows\\System32\\ntoskrnl.exe",
+                "the device-namespace prefix",
+            ),
+            ("C:\\Windows.\\System32\\x", "a trailing dot Win32 discards"),
+            (
+                "C:\\Windows \\System32\\x",
+                "a trailing space Win32 discards",
+            ),
+            (
+                "C:\\Program Files.\\App\\a.exe",
+                "trailing dot on an installed-programs directory",
+            ),
+            (
+                "\\\\?\\C:\\Users\\dev",
+                "the verbatim spelling of the profile root",
+            ),
+            (
+                "C:/Users/dev/Downloads/../../../Windows",
+                "forward slashes and `..` together",
+            ),
+        ];
+
+        for (path, why) in cases {
+            assert!(protected.is_protected(Path::new(path)), "{path} — {why}");
+            assert!(
+                protected
+                    .reason_for(Path::new(path))
+                    .is_some_and(|reason| reason.len() > 10),
+                "{path} must still explain itself"
+            );
+        }
+    }
+
+    /// The 8.3 alias cannot be expanded without asking the filesystem, so this
+    /// list deliberately does not catch it. The executor canonicalises before
+    /// it consults the list, and `executor::tests` proves that path.
+    #[test]
+    fn an_8_3_alias_is_left_for_the_canonicalising_caller() {
+        let protected = windows_like();
+        assert!(!protected.is_protected(Path::new("C:\\PROGRA~1\\App\\a.exe")));
+        assert!(
+            protected.is_protected(Path::new("C:\\Program Files\\App\\a.exe")),
+            "the long name it canonicalises to is what the gate sees"
+        );
+    }
+
+    #[test]
+    fn a_unc_path_never_looks_like_a_local_one() {
+        let protected = windows_like();
+        // `\\server\Windows\System32` is somebody else's machine, not ours.
+        assert!(!protected.is_protected(Path::new("\\\\server\\Windows\\System32")));
+        assert_eq!(
+            split(Path::new("\\\\?\\UNC\\server\\share\\x")),
+            vec!["\\\\server\\share", "x"],
+            "the verbatim UNC spelling collapses onto the ordinary one"
+        );
+        assert_eq!(
+            split(Path::new("\\\\server\\share\\a\\..\\..\\..\\b")),
+            vec!["\\\\server\\share", "b"],
+            "`..` never climbs past the share root"
+        );
     }
 
     #[test]
@@ -409,5 +634,38 @@ mod tests {
             split(Path::new("c:\\windows\\temp")),
             vec!["c:", "windows", "temp"]
         );
+    }
+
+    /// The prefix normaliser on its own, so each rule can fail on its own line.
+    #[test]
+    fn the_normaliser_collapses_every_windows_spelling() {
+        let cases: &[(&str, &str)] = &[
+            ("\\\\?\\C:\\Windows\\System32", "c:\\windows\\system32"),
+            ("\\\\.\\C:\\Windows\\System32", "c:\\windows\\system32"),
+            ("\\\\?\\c:\\windows", "c:\\windows"),
+            ("C:\\Windows.", "c:\\windows"),
+            ("C:\\Windows ", "c:\\windows"),
+            ("C:\\Program Files. \\App", "c:\\program files\\app"),
+            ("C:\\Temp\\..\\Windows", "c:\\windows"),
+            ("C:\\..\\Windows", "c:\\windows"),
+            ("C:\\Temp\\.\\sub", "c:\\temp\\sub"),
+            ("C:/Temp//sub/", "c:\\temp\\sub"),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(
+                normalise(Path::new(raw)),
+                PathBuf::from(*expected),
+                "normalising `{raw}`"
+            );
+        }
+    }
+
+    #[test]
+    fn traversal_is_detected_in_either_separator() {
+        assert!(has_traversal(Path::new("C:\\a\\..\\b")));
+        assert!(has_traversal(Path::new("C:/a/../b")));
+        assert!(!has_traversal(Path::new("C:\\a..b\\c")));
+        assert!(!has_traversal(Path::new("C:\\a\\..b")));
+        assert!(!has_traversal(Path::new("C:\\Windows\\System32")));
     }
 }

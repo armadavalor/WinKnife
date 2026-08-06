@@ -480,6 +480,7 @@ name = "cleanify"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dunce",
  "globset",
  "jwalk",
  "rusqlite",

@@ -291,23 +291,37 @@ pub fn parse_pack(pack_name: &str, json: &str) -> Result<RulePackSpec> {
                     "a pattern must not be empty".to_owned(),
                 ));
             }
+            // A pattern that can name a protected location in a spelling the
+            // protected-path list does not recognise is rejected outright: a
+            // pack is community-editable, and "walk %TEMP%\..\..\..\Windows"
+            // must never be a thing a pull request can say (security review
+            // C1c).
+            if let Some(message) = unsafe_pattern_shape(pattern) {
+                return Err(invalid(&field(&format!("paths[{pattern_index}]")), message));
+            }
             // Compile-check every pattern now so a typo fails at load, not
             // halfway through a scan.
             compile_glob(pattern)
                 .map_err(|message| invalid(&field(&format!("paths[{pattern_index}]")), message))?;
         }
 
-        // An absolute pattern that does not start from an environment variable
-        // reaches outside the user profile. RULES-FORMAT.md requires the rule
-        // to say so.
-        let reaches_outside_profile = rule.paths.iter().any(|pattern| {
-            !pattern.starts_with('%') && pattern.len() > 1 && pattern.as_bytes()[1] == b':'
-        });
-        if reaches_outside_profile && !rule.requires_admin {
-            return Err(invalid(
-                &field("requires_admin"),
-                "an absolute path outside the user profile must set `requires_admin`".to_owned(),
-            ));
+        // An absolute or network pattern reaches outside the user profile.
+        // RULES-FORMAT.md requires the rule to say so. This is the shape-only
+        // half of the check; `compile_spec` runs the other half once `%VARS%`
+        // are expanded and the profile root is known (security review M8).
+        if !rule.requires_admin {
+            if let Some(pattern) = rule
+                .paths
+                .iter()
+                .find(|pattern| reaches_outside_profile(pattern))
+            {
+                return Err(invalid(
+                    &field("requires_admin"),
+                    format!(
+                        "`{pattern}` reaches outside the user profile, so the rule must set `requires_admin`"
+                    ),
+                ));
+            }
         }
     }
 
@@ -331,6 +345,10 @@ pub fn compile_pack(pack_name: &str, json: &str, env: &dyn EnvResolver) -> Resul
 pub fn compile_spec(spec: RulePackSpec, env: &dyn EnvResolver) -> Result<RulePack> {
     let mut rules = Vec::with_capacity(spec.rules.len());
     let mut skipped = Vec::new();
+    // Known only at compile time, and only on a real machine: without it the
+    // containment half of the `requires_admin` check cannot be evaluated and
+    // the shape-only half in `parse_pack` is all there is.
+    let profile = env.var("USERPROFILE").map(PathBuf::from);
 
     for rule in &spec.rules {
         let mut include = Vec::new();
@@ -345,7 +363,27 @@ pub fn compile_spec(spec: RulePackSpec, env: &dyn EnvResolver) -> Result<RulePac
                         field: format!("rules.{}.paths", rule.id),
                         message,
                     })?;
-                    roots.push(literal_prefix(&expanded));
+                    let root = literal_prefix(&expanded);
+                    // `%TEMP%` is only inside the profile on the machine that
+                    // says so. A pack that expands to somewhere else has to
+                    // declare `requires_admin`, whatever the pattern looked
+                    // like before expansion (security review M8).
+                    if !rule.requires_admin && !is_shell_namespace(&expanded) {
+                        if let Some(profile) = &profile {
+                            if !is_inside(profile, &root) {
+                                return Err(CoreError::RulePack {
+                                    pack: spec.id.clone(),
+                                    field: format!("rules.{}.requires_admin", rule.id),
+                                    message: format!(
+                                        "`{pattern}` expands to `{}`, which is outside the user profile `{}`; the rule must set `requires_admin`",
+                                        root.display(),
+                                        profile.display()
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                    roots.push(root);
                     include.push(glob);
                 }
                 env::Expansion::Missing(name) => {
@@ -445,6 +483,91 @@ pub fn load_dir(dir: &Path, env: &dyn EnvResolver) -> Result<Vec<RulePack>> {
         packs.push(pack);
     }
     Ok(packs)
+}
+
+/// Whether a pattern, as written, already reaches outside the user profile.
+///
+/// Character-based, not byte-indexed: a pattern starting with a multi-byte
+/// character used to make `pattern.as_bytes()[1] == b':'` read the middle of a
+/// codepoint and answer no (security review M8).
+fn reaches_outside_profile(pattern: &str) -> bool {
+    let normalised = pattern.replace('/', "\\");
+
+    // A network share and the verbatim namespace are outside every profile.
+    // (The verbatim form is rejected outright elsewhere; this keeps the answer
+    // correct if that ever relaxes.)
+    if normalised.starts_with("\\\\") {
+        return true;
+    }
+    // `%VAR%\...` is judged after expansion, in `compile_spec`.
+    if normalised.starts_with('%') {
+        return false;
+    }
+    // `C:\...` — a drive-absolute path written out longhand.
+    let mut chars = normalised.chars();
+    matches!((chars.next(), chars.next()), (Some(letter), Some(':')) if letter.is_alphabetic())
+}
+
+/// Whether a pattern names a shell namespace object rather than a directory.
+/// `shell:RecycleBinFolder` has no filesystem location to contain, so profile
+/// containment is not a question that can be asked about it.
+fn is_shell_namespace(pattern: &str) -> bool {
+    pattern.len() >= 6 && pattern[..6].eq_ignore_ascii_case("shell:")
+}
+
+/// Whether `path` sits inside `profile`, comparing whole components so
+/// `C:\Users\dev2` is not read as inside `C:\Users\dev`.
+fn is_inside(profile: &Path, path: &Path) -> bool {
+    let parts = |value: &Path| -> Vec<String> {
+        value
+            .to_string_lossy()
+            .replace('/', "\\")
+            .split('\\')
+            .filter(|part| !part.is_empty() && *part != ".")
+            .map(|part| part.trim_end_matches(['.', ' ']).to_lowercase())
+            .filter(|part| !part.is_empty())
+            .collect()
+    };
+    let (profile, path) = (parts(profile), parts(path));
+    !profile.is_empty() && path.len() >= profile.len() && path[..profile.len()] == profile[..]
+}
+
+/// Why a pattern is refused whatever else it says, or `None` when its shape is
+/// fine.
+///
+/// All three of these are ways to name a place while spelling it as somewhere
+/// else, which is exactly what the protected-path list cannot see through
+/// without touching the disk. A pack has no legitimate need for any of them:
+/// every location a rule wants is reachable by its ordinary long name.
+fn unsafe_pattern_shape(pattern: &str) -> Option<String> {
+    let normalised = pattern.replace('/', "\\");
+
+    if normalised.starts_with("\\\\?\\") || normalised.starts_with("\\\\.\\") {
+        return Some(format!(
+            "`{pattern}` uses a `\\\\?\\` or `\\\\.\\` prefix; write the plain path instead"
+        ));
+    }
+
+    for part in normalised.split('\\') {
+        if part == ".." {
+            return Some(format!(
+                "`{pattern}` climbs with `..`; write the folder it means directly"
+            ));
+        }
+        if is_short_name(part) {
+            return Some(format!(
+                "`{pattern}` uses the 8.3 short name `{part}`; write the long name instead"
+            ));
+        }
+    }
+    None
+}
+
+/// Whether a path component is an 8.3 short name such as `PROGRA~1`.
+fn is_short_name(part: &str) -> bool {
+    let stem = part.split('.').next().unwrap_or(part);
+    stem.rsplit_once('~')
+        .is_some_and(|(_, tail)| !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()))
 }
 
 fn compile_glob(pattern: &str) -> std::result::Result<GlobMatcher, String> {
@@ -624,6 +747,11 @@ mod tests {
                 VALID.replace(r#"%TEMP%\\**"#, r#"C:\\Windows\\Temp\\**"#),
                 "rules[0].requires_admin",
             ),
+            (
+                "UNC path without requires_admin",
+                VALID.replace(r#"%TEMP%\\**"#, r#"\\\\server\\share\\**"#),
+                "rules[0].requires_admin",
+            ),
         ];
 
         for (label, json, expected_field) in cases {
@@ -638,6 +766,120 @@ mod tests {
                 other => panic!("`{label}` produced the wrong error: {other}"),
             }
         }
+    }
+
+    /// Security review C1c: a community pack must not be able to name a place
+    /// in a spelling the protected-path list cannot see through.
+    #[test]
+    fn patterns_that_disguise_their_destination_are_rejected() {
+        let cases: &[(&str, &str)] = &[
+            (
+                "parent traversal",
+                r#"%TEMP%\\..\\..\\..\\..\\Windows\\System32\\**"#,
+            ),
+            (
+                "parent traversal, forward slashes",
+                r#"%TEMP%/../../Windows/**"#,
+            ),
+            ("bare parent traversal", r#"%TEMP%\\..\\**"#),
+            ("verbatim prefix", r#"\\\\?\\C:\\Windows\\**"#),
+            ("device prefix", r#"\\\\.\\C:\\Windows\\**"#),
+            ("8.3 short name", r#"%TEMP%\\PROGRA~1\\**"#),
+            (
+                "8.3 short name with an extension",
+                r#"%TEMP%\\DOCUME~1.TXT"#,
+            ),
+        ];
+
+        for (label, pattern) in cases {
+            let json = VALID.replace(r#"%TEMP%\\**"#, pattern);
+            let err = parse_pack("windows-temp", &json)
+                .err()
+                .unwrap_or_else(|| panic!("`{label}` should have been rejected"));
+            match err {
+                CoreError::RulePack { pack, field, .. } => {
+                    assert_eq!(pack, "windows-temp", "`{label}` must name the pack");
+                    assert_eq!(field, "rules[0].paths[0]", "`{label}` must name the field");
+                }
+                other => panic!("`{label}` produced the wrong error: {other}"),
+            }
+        }
+    }
+
+    /// The same rejection applies to `exclude`, which is walked by the same
+    /// loop and would otherwise be a second way in.
+    #[test]
+    fn an_exclude_pattern_is_held_to_the_same_shape_rules() {
+        let json = VALID.replace(r#"%TEMP%\\**\\*.lock"#, r#"%TEMP%\\..\\**"#);
+        assert!(matches!(
+            parse_pack("windows-temp", &json),
+            Err(CoreError::RulePack { .. })
+        ));
+    }
+
+    #[test]
+    fn ordinary_patterns_that_merely_contain_a_tilde_or_dots_still_parse() {
+        for pattern in [
+            r#"%TEMP%\\my~file\\**"#,
+            r#"%TEMP%\\a..b\\**"#,
+            r#"%TEMP%\\backup~\\**"#,
+        ] {
+            let json = VALID.replace(r#"%TEMP%\\**"#, pattern);
+            parse_pack("windows-temp", &json)
+                .unwrap_or_else(|err| panic!("`{pattern}` should have parsed: {err}"));
+        }
+    }
+
+    /// Security review M8: `%VAR%` is not a promise about where a rule lands.
+    #[test]
+    fn a_variable_that_expands_outside_the_profile_needs_requires_admin() {
+        let env = MapEnv::new()
+            .with("USERPROFILE", "C:\\Users\\dev")
+            .with("TEMP", "D:\\SomewhereElse");
+
+        let err = compile_pack("windows-temp", VALID, &env)
+            .expect_err("an expansion outside the profile must be refused");
+        match err {
+            CoreError::RulePack { field, message, .. } => {
+                assert_eq!(field, "rules.user-temp-files.requires_admin");
+                assert!(message.contains("D:\\SomewhereElse"), "got `{message}`");
+            }
+            other => panic!("wrong error: {other}"),
+        }
+
+        // Inside the profile, the same pack compiles.
+        let inside = MapEnv::new()
+            .with("USERPROFILE", "C:\\Users\\dev")
+            .with("TEMP", "C:\\Users\\dev\\AppData\\Local\\Temp");
+        assert!(compile_pack("windows-temp", VALID, &inside).is_ok());
+    }
+
+    #[test]
+    fn a_sibling_profile_is_not_inside_the_profile() {
+        assert!(is_inside(
+            Path::new("C:\\Users\\dev"),
+            Path::new("C:\\Users\\dev\\AppData\\Local\\Temp")
+        ));
+        assert!(is_inside(
+            Path::new("C:\\Users\\dev"),
+            Path::new("c:/users/DEV")
+        ));
+        assert!(!is_inside(
+            Path::new("C:\\Users\\dev"),
+            Path::new("C:\\Users\\dev2\\Temp")
+        ));
+        assert!(!is_inside(
+            Path::new("C:\\Users\\dev"),
+            Path::new("C:\\Windows")
+        ));
+    }
+
+    #[test]
+    fn the_recycle_bin_pack_is_not_asked_where_it_lives() {
+        assert!(is_shell_namespace("shell:RecycleBinFolder"));
+        assert!(is_shell_namespace("SHELL:recyclebinfolder"));
+        assert!(!is_shell_namespace("C:\\shell"));
+        assert!(!reaches_outside_profile("shell:RecycleBinFolder"));
     }
 
     #[test]

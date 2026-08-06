@@ -101,6 +101,7 @@ pub async fn start_scan<R: Runtime>(
         cleaner::scan(
             &CleanerContext {
                 packs: services.brain.packs(),
+                protected: services.brain.protected_paths(),
                 recycle_bin: services.recycle_bin.as_ref(),
                 now: Utc::now(),
                 cancel: &cancel,

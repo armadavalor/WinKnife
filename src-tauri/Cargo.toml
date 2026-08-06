@@ -35,6 +35,11 @@ rusqlite = { version = "0.40.1", features = ["bundled"] }
 jwalk = "0.9"
 # Rule-pack path patterns; case-insensitive matching for Windows paths.
 globset = "0.4"
+# `std::fs::canonicalize` hands back `\\?\` verbatim paths, which compare
+# differently from every path the rest of the app has ever seen. `dunce` returns
+# the plain form whenever Win32 accepts one, so the protected-path gate can
+# canonicalise before it matches (security review C1).
+dunce = "1.0.5"
 # This app deletes things: every executed item gets an audit line.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -48,6 +53,7 @@ tempfile = "3.27.0"
 [target."cfg(windows)".dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Storage_FileSystem",
     "Win32_System_Power",
     "Win32_UI_Shell",
 ] }

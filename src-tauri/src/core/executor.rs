@@ -174,13 +174,42 @@ fn apply_one(
         };
     }
 
-    // 2. Protected paths are re-checked here, not trusted from analyze time.
+    // 2. Protected paths are re-checked here, not trusted from analyze time,
+    //    and against the *canonical* path rather than the text we were handed.
+    //    `C:\PROGRA~1\...`, `\\?\C:\Windows\...` and a junction pointing at
+    //    System32 all name a protected file while spelling it as something the
+    //    list has never seen (security review C1a).
     if let Some(reason) = env.brain.protection_reason(&unit.finding.path) {
         tracing::warn!(
             path = %unit.finding.path.display(),
             "refused to act on a protected path at execute time"
         );
         return skipped(reason);
+    }
+    match canonical_gate_path(&unit.finding.path) {
+        GatePath::Resolved(canonical) => {
+            if let Some(reason) = env.brain.protection_reason(&canonical) {
+                tracing::warn!(
+                    path = %unit.finding.path.display(),
+                    canonical = %canonical.display(),
+                    "refused to act on a path that resolves into a protected location"
+                );
+                return skipped(reason);
+            }
+        }
+        // Nothing is there to protect, and `take` reports the miss properly.
+        GatePath::Missing => {}
+        GatePath::Unresolvable(err) => {
+            tracing::warn!(
+                path = %unit.finding.path.display(),
+                error = %err,
+                "refused to act on a path that could not be resolved"
+            );
+            return skipped(format!(
+                "skipped: `{}` could not be resolved to a real location, so it is treated as protected ({err})",
+                unit.finding.path.display()
+            ));
+        }
     }
 
     // 3. Locks are re-checked too: a file can be opened between review and
@@ -196,6 +225,31 @@ fn apply_one(
             (ExecOutcome::Succeeded, item.size_bytes)
         }
         Err(err) => failed(err.to_string()),
+    }
+}
+
+/// What canonicalising a path before the protected-path gate produced.
+enum GatePath {
+    /// The real location on disk, with 8.3 aliases, junctions and the verbatim
+    /// prefix resolved away.
+    Resolved(std::path::PathBuf),
+    /// Nothing is there. Safe to continue: the move itself reports the miss.
+    Missing,
+    /// The path exists in some form but could not be resolved, so we cannot
+    /// prove it is not protected. Treated as protected.
+    Unresolvable(std::io::Error),
+}
+
+/// Resolve `path` to what Windows would actually open.
+///
+/// `dunce::canonicalize` rather than `std::fs::canonicalize`: the latter always
+/// hands back a `\\?\` verbatim path, which every other layer of this app —
+/// and every protected-path entry — spells without.
+fn canonical_gate_path(path: &std::path::Path) -> GatePath {
+    match dunce::canonicalize(path) {
+        Ok(canonical) => GatePath::Resolved(canonical),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => GatePath::Missing,
+        Err(err) => GatePath::Unresolvable(err),
     }
 }
 
@@ -505,6 +559,133 @@ mod tests {
         ));
         assert!(victim.exists(), "protected files are never moved");
         assert_eq!(report.reclaimed_bytes, 0);
+    }
+
+    /// The 8.3 alias of a directory name is a second spelling of the same
+    /// place, and the lexical protected-path list cannot see through it. The
+    /// gate canonicalises first, so it can (security review C1a/C1f).
+    #[cfg(windows)]
+    #[test]
+    fn an_8_3_alias_of_a_protected_directory_is_refused() {
+        let h = harness();
+        // A long name with spaces, which is what makes Windows mint an alias.
+        let protected_dir = h.work.join("Protected Program Files");
+        std::fs::create_dir_all(&protected_dir).expect("dir");
+        let victim = write(&protected_dir, "kernel.sys", b"critical");
+
+        // The list is written in long names, as the real one is.
+        let long_dir = dunce::canonicalize(&protected_dir).expect("canonicalize");
+        let Some(short_victim) = short_path_name(&victim) else {
+            // 8.3 alias generation is disabled on this volume.
+            return;
+        };
+        if short_victim == dunce::canonicalize(&victim).expect("canonicalize") {
+            return;
+        }
+
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::from_trees([long_dir]))
+            .lock_probe(Arc::new(AlwaysUnlocked))
+            .build();
+        let bin = StubRecycleBin::default();
+
+        assert!(
+            brain.protection_reason(&short_victim).is_none(),
+            "the premise of this test is that the short name slips past the lexical list"
+        );
+
+        let finding = finding_at(&short_victim, 8);
+        let rec = quarantine_rec(&finding);
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            None,
+        )
+        .expect("execute");
+
+        assert!(
+            matches!(report.items[0].outcome, ExecOutcome::Skipped { .. }),
+            "got {:?}",
+            report.items[0].outcome
+        );
+        assert!(
+            victim.exists(),
+            "a protected file must survive its own alias"
+        );
+    }
+
+    /// A junction is the other way to spell a protected place as somewhere
+    /// harmless. Skipped when the environment cannot create one.
+    #[cfg(windows)]
+    #[test]
+    fn a_link_pointing_into_a_protected_directory_is_refused() {
+        let h = harness();
+        let protected_dir = h.work.join("Windows");
+        std::fs::create_dir_all(&protected_dir).expect("dir");
+        let victim = write(&protected_dir, "kernel.sys", b"critical");
+
+        let door = h.work.join("innocent");
+        if std::os::windows::fs::symlink_dir(&protected_dir, &door).is_err() {
+            // Creating links needs developer mode or elevation.
+            return;
+        }
+        let through_the_door = door.join("kernel.sys");
+
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::from_trees([protected_dir.clone()]))
+            .lock_probe(Arc::new(AlwaysUnlocked))
+            .build();
+        let bin = StubRecycleBin::default();
+
+        assert!(
+            brain.protection_reason(&through_the_door).is_none(),
+            "the premise: the link's own path is not lexically protected"
+        );
+
+        let finding = finding_at(&through_the_door, 8);
+        let rec = quarantine_rec(&finding);
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            None,
+        )
+        .expect("execute");
+
+        assert!(matches!(
+            report.items[0].outcome,
+            ExecOutcome::Skipped { .. }
+        ));
+        assert!(victim.exists(), "the file behind the link must survive");
+    }
+
+    /// The 8.3 alias of `path`, or `None` when the volume does not mint one.
+    #[cfg(windows)]
+    fn short_path_name(path: &Path) -> Option<PathBuf> {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::GetShortPathNameW;
+
+        let wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut buffer = vec![0u16; 1024];
+        // SAFETY: `wide` is NUL-terminated and outlives the call, and the
+        // buffer length the API is given is its real length in `u16`s.
+        let written =
+            unsafe { GetShortPathNameW(PCWSTR(wide.as_ptr()), Some(&mut buffer)) } as usize;
+        if written == 0 || written >= buffer.len() {
+            return None;
+        }
+        Some(PathBuf::from(OsString::from_wide(&buffer[..written])))
     }
 
     #[test]

@@ -407,9 +407,12 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let app_data = temp.path().join("appdata");
         let quarantine = app_data.join("quarantine");
+        // The profile has to be the tempdir the packs expand into: a rule that
+        // expands outside the declared profile now has to say `requires_admin`
+        // (security review M8), and the shipped packs do not.
         let env = core::platform::MapEnv::new()
             .with("WINDIR", "C:\\Windows")
-            .with("USERPROFILE", "C:\\Users\\dev")
+            .with("USERPROFILE", temp.path().to_string_lossy())
             .with("TEMP", temp.path().join("temp").to_string_lossy())
             .with("LOCALAPPDATA", temp.path().join("local").to_string_lossy());
 
