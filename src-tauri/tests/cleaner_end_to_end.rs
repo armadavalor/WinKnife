@@ -23,8 +23,8 @@ use std::time::{Duration, SystemTime};
 use chrono::Utc;
 use cleanify_lib::core::brain::{rules, Brain, ProtectedPaths};
 use cleanify_lib::core::db;
-use cleanify_lib::core::executor::{self, ExecEnvironment};
-use cleanify_lib::core::platform::{MapEnv, StubRecycleBin, SystemLockProbe};
+use cleanify_lib::core::executor::{self, ExecEnvironment, ExecOptions};
+use cleanify_lib::core::platform::{MapEnv, RecycleBin, StubRecycleBin, SystemLockProbe};
 use cleanify_lib::core::quarantine::{Quarantine, RetentionPolicy};
 use cleanify_lib::core::scanner::CancellationToken;
 use cleanify_lib::core::types::{ExecOutcome, Finding, RiskBucket};
@@ -231,6 +231,7 @@ fn scan_clean_and_restore_round_trips_byte_identically() {
             brain: &brain,
             recycle_bin: &bin,
         },
+        &ExecOptions::default(),
         None,
     )
     .expect("execute");
@@ -346,6 +347,7 @@ fn a_protected_path_lands_red_and_survives_an_approved_clean() {
             brain: &brain,
             recycle_bin: &bin,
         },
+        &ExecOptions::default(),
         None,
     )
     .expect("execute");
@@ -402,6 +404,7 @@ fn a_locked_file_is_skipped_with_a_per_item_report() {
             brain: &brain,
             recycle_bin: &bin,
         },
+        &ExecOptions::default(),
         None,
     )
     .expect("execute");
@@ -467,8 +470,57 @@ fn a_fixture_scan_is_deterministic() {
     );
 }
 
-/// Emptying the recycle bin is the one action that does not go to quarantine.
-/// The stub proves the call is made and that nothing is moved for it.
+/// Emptying the recycle bin is the one action that does not go to quarantine,
+/// and the one that needs its own confirmation. Without the flag it is skipped
+/// however the item was selected (security review H6).
+#[test]
+fn emptying_the_recycle_bin_needs_its_own_confirmation() {
+    let world = World::new();
+    let bin = StubRecycleBin::new(9, 65_536);
+    let brain = world.brain();
+
+    let output = world.scan(&bin);
+    let recommendations = cleaner::analyze(&output.findings, &brain);
+    let bin_finding = find_by_suffix(&output.findings, "shell:RecycleBinFolder");
+    let approved: Vec<_> = recommendations
+        .iter()
+        .filter(|rec| rec.finding_ids.contains(&bin_finding.id))
+        .map(|rec| rec.id)
+        .collect();
+    let units = executor::plan(&approved, &recommendations, &output.findings);
+
+    let report = executor::execute(
+        &units,
+        &ExecEnvironment {
+            quarantine: &world.quarantine,
+            conn: &world.conn,
+            brain: &brain,
+            recycle_bin: &bin,
+        },
+        // The user selected the item but never answered the recycle-bin
+        // question, which the dialog asks separately.
+        &ExecOptions::default(),
+        None,
+    )
+    .expect("execute");
+
+    assert_eq!(bin.empty_calls(), 0, "the bin must not be touched");
+    assert_eq!(report.reclaimed_bytes, 0);
+    match &report.items[0].outcome {
+        ExecOutcome::Skipped { reason } => {
+            assert!(reason.contains("confirmation"), "got `{reason}`");
+        }
+        other => panic!("expected a skip without the confirmation, got {other:?}"),
+    }
+    assert_eq!(
+        bin.query().expect("query").size_bytes,
+        65_536,
+        "the bin still holds what it held"
+    );
+}
+
+/// With the confirmation it goes ahead, and the bytes it reports are the ones
+/// it actually freed rather than the analyze-time figure.
 #[test]
 fn emptying_the_recycle_bin_bypasses_quarantine() {
     let world = World::new();
@@ -495,13 +547,24 @@ fn emptying_the_recycle_bin_bypasses_quarantine() {
             brain: &brain,
             recycle_bin: &bin,
         },
+        &ExecOptions {
+            confirm_empty_recycle_bin: true,
+        },
         None,
     )
     .expect("execute");
 
     assert_eq!(bin.empty_calls(), 1, "the shell API must be asked once");
     assert_eq!(report.succeeded(), 1);
-    assert_eq!(report.reclaimed_bytes, 65_536);
+    assert_eq!(
+        report.reclaimed_bytes, 65_536,
+        "sized by asking the bin again afterwards, not from the scan"
+    );
+    assert_eq!(
+        bin.query().expect("query").size_bytes,
+        0,
+        "and the bin really is empty"
+    );
     assert_eq!(
         report.batch_id, None,
         "the recycle bin moves nothing into quarantine"
@@ -537,6 +600,7 @@ fn restoring_over_a_recreated_file_never_overwrites_it() {
             brain: &brain,
             recycle_bin: &bin,
         },
+        &ExecOptions::default(),
         None,
     )
     .expect("execute");

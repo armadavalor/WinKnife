@@ -28,9 +28,16 @@
   const reviewRows = $derived(store.rowsIn("needsReview"));
   const blockedRows = $derived(store.rowsIn("doNotDelete"));
 
+  // The dialog names emptying the recycle bin separately, in the danger
+  // colour, because it is the one thing here that quarantine cannot undo. The
+  // flag Rust receives is that warning being on screen when the user confirmed
+  // — not merely a recycle-bin row being ticked (spec 02, security review H6).
+  const emptiesRecycleBin = $derived(store.selectionEmptiesRecycleBin);
+
   async function confirmExecute(): Promise<void> {
+    const confirmedRecycleBin = emptiesRecycleBin;
     confirming = false;
-    await store.execute();
+    await store.execute(confirmedRecycleBin);
     await quarantineStore.reload();
   }
 </script>
@@ -219,9 +226,7 @@
     size: formatBytes(store.selectedBytes),
   })}
   note={t("cleaner.confirmNote")}
-  warning={store.selectionEmptiesRecycleBin
-    ? t("cleaner.confirmRecycleBin")
-    : undefined}
+  warning={emptiesRecycleBin ? t("cleaner.confirmRecycleBin") : undefined}
   confirmLabel={t("cleaner.clean")}
   onconfirm={confirmExecute}
   oncancel={() => (confirming = false)}

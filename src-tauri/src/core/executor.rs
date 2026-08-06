@@ -50,6 +50,32 @@ pub struct ExecEnvironment<'a> {
     pub recycle_bin: &'a dyn RecycleBin,
 }
 
+/// Per-request confirmations, separate from the services in
+/// [`ExecEnvironment`] because they belong to one click, not to the app.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExecOptions {
+    /// Whether the user confirmed emptying the recycle bin *specifically*.
+    ///
+    /// Everything else in a batch goes to quarantine and can be undone; this
+    /// one is final and takes every drive with it. It used to trigger off a
+    /// bare `Uuid` in `approved`, exactly like a quarantine item, so nothing on
+    /// the Rust side could tell an informed confirmation from a stray id
+    /// (security review H6). Without this flag a recycle-bin item is skipped
+    /// and says why.
+    pub confirm_empty_recycle_bin: bool,
+}
+
+/// What has already happened in this batch.
+#[derive(Debug, Default)]
+struct BatchState {
+    /// Whether anything reached quarantine, so the report only names a batch
+    /// that exists.
+    moved_anything: bool,
+    /// Whether the recycle bin has already been emptied. Two recycle-bin items
+    /// in one batch used to empty it twice and count the bytes twice.
+    emptied_bin: bool,
+}
+
 /// Progress callback so the UI can show which item is being handled.
 pub type ProgressSink<'a> = &'a mut dyn FnMut(u64, u64, &Finding);
 
@@ -63,6 +89,7 @@ pub type ProgressSink<'a> = &'a mut dyn FnMut(u64, u64, &Finding);
 pub fn execute(
     units: &[ExecUnit<'_>],
     env: &ExecEnvironment<'_>,
+    options: &ExecOptions,
     mut progress: Option<ProgressSink<'_>>,
 ) -> Result<ExecReport> {
     if units.is_empty() {
@@ -73,7 +100,7 @@ pub fn execute(
     // The batch id is allocated up front so the report can name it even if
     // every item ends up skipped.
     let batch = env.quarantine.start_batch();
-    let mut moved_anything = false;
+    let mut state = BatchState::default();
     let mut items = Vec::with_capacity(units.len());
 
     tracing::info!(batch = %batch, items = total, "execute batch started");
@@ -83,7 +110,7 @@ pub fn execute(
             sink(index as u64, total, unit.finding);
         }
 
-        let (outcome, reclaimed) = apply_one(unit, env, batch, &mut moved_anything);
+        let (outcome, reclaimed) = apply_one(unit, env, options, batch, &mut state);
         match &outcome {
             ExecOutcome::Succeeded => tracing::info!(
                 batch = %batch,
@@ -123,7 +150,7 @@ pub fn execute(
 
     // A batch id that never received a file would show up as an empty row in
     // the quarantine drawer, so only report one when something actually moved.
-    let report = ExecReport::from_items(moved_anything.then_some(batch), items);
+    let report = ExecReport::from_items(state.moved_anything.then_some(batch), items);
     tracing::info!(
         batch = %batch,
         succeeded = report.succeeded(),
@@ -138,8 +165,9 @@ pub fn execute(
 fn apply_one(
     unit: &ExecUnit<'_>,
     env: &ExecEnvironment<'_>,
+    options: &ExecOptions,
     batch: Uuid,
-    moved_anything: &mut bool,
+    state: &mut BatchState,
 ) -> (ExecOutcome, u64) {
     let skipped = |reason: String| (ExecOutcome::Skipped { reason }, 0);
     let failed = |error: String| (ExecOutcome::Failed { error }, 0);
@@ -166,12 +194,11 @@ fn apply_one(
     }
 
     // The recycle bin is the documented exception: it has no path to move,
-    // because Windows' own bin already is the reversible step.
+    // because Windows' own bin already is the reversible step. It is also the
+    // only irreversible thing in a batch, so it needs its own confirmation
+    // rather than riding along on a selected id (security review H6).
     if unit.finding.kind == FindingKind::RecycleBinItem {
-        return match env.recycle_bin.empty() {
-            Ok(()) => (ExecOutcome::Succeeded, unit.finding.size_bytes),
-            Err(err) => failed(err.to_string()),
-        };
+        return empty_recycle_bin(unit, env, options, state);
     }
 
     // 2. Protected paths are re-checked here, not trusted from analyze time,
@@ -221,10 +248,67 @@ fn apply_one(
 
     match env.quarantine.take(env.conn, batch, &unit.finding.path) {
         Ok(item) => {
-            *moved_anything = true;
+            state.moved_anything = true;
             (ExecOutcome::Succeeded, item.size_bytes)
         }
         Err(err) => failed(err.to_string()),
+    }
+}
+
+/// Empty the recycle bin, at most once per batch and only when the user said so
+/// about this specific action.
+fn empty_recycle_bin(
+    unit: &ExecUnit<'_>,
+    env: &ExecEnvironment<'_>,
+    options: &ExecOptions,
+    state: &mut BatchState,
+) -> (ExecOutcome, u64) {
+    let skipped = |reason: &str| {
+        (
+            ExecOutcome::Skipped {
+                reason: reason.to_owned(),
+            },
+            0,
+        )
+    };
+
+    if !options.confirm_empty_recycle_bin {
+        tracing::warn!("refused to empty the recycle bin: it was not confirmed separately");
+        return skipped(
+            "skipped: emptying the recycle bin is final and is not covered by the \
+             quarantine, so it needs its own confirmation",
+        );
+    }
+    // Two recycle-bin findings in one batch would otherwise empty it twice and
+    // count the reclaimed bytes twice.
+    if state.emptied_bin {
+        return skipped("skipped: the recycle bin was already emptied in this batch");
+    }
+
+    // Sized now rather than trusting the analyze-time figure, which can be
+    // hours old: the number the report shows is what this call actually freed.
+    let before = env
+        .recycle_bin
+        .query()
+        .map(|stats| stats.size_bytes)
+        .unwrap_or(unit.finding.size_bytes);
+
+    match env.recycle_bin.empty() {
+        Ok(()) => {
+            state.emptied_bin = true;
+            let after = env
+                .recycle_bin
+                .query()
+                .map(|stats| stats.size_bytes)
+                .unwrap_or(0);
+            (ExecOutcome::Succeeded, before.saturating_sub(after))
+        }
+        Err(err) => (
+            ExecOutcome::Failed {
+                error: err.to_string(),
+            },
+            0,
+        ),
     }
 }
 
@@ -360,7 +444,8 @@ mod tests {
         let h = harness();
         let brain = brain();
         let bin = StubRecycleBin::default();
-        let report = execute(&[], &env(&h, &brain, &bin), None).expect("execute");
+        let report =
+            execute(&[], &env(&h, &brain, &bin), &ExecOptions::default(), None).expect("execute");
         assert_eq!(report, ExecReport::default());
         assert_eq!(report.batch_id, None);
     }
@@ -385,7 +470,13 @@ mod tests {
             },
         ];
 
-        let report = execute(&units, &env(&h, &brain, &bin), None).expect("execute");
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
 
         assert_eq!(report.succeeded(), 2);
         assert_eq!(report.failed(), 0);
@@ -415,7 +506,13 @@ mod tests {
             },
         ];
 
-        let report = execute(&units, &env(&h, &brain, &bin), None).expect("execute");
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
 
         assert_eq!(report.items.len(), 2);
         assert_eq!(report.failed(), 1);
@@ -462,7 +559,13 @@ mod tests {
             },
         ];
 
-        let report = execute(&units, &env(&h, &brain, &bin), None).expect("execute");
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
 
         let locked_result = report
             .items
@@ -509,6 +612,7 @@ mod tests {
                 finding: &finding,
             }],
             &env(&h, &brain, &bin),
+            &ExecOptions::default(),
             None,
         )
         .expect("execute");
@@ -549,6 +653,7 @@ mod tests {
                 finding: &finding,
             }],
             &env(&h, &brain, &bin),
+            &ExecOptions::default(),
             None,
         )
         .expect("execute");
@@ -602,6 +707,7 @@ mod tests {
                 finding: &finding,
             }],
             &env(&h, &brain, &bin),
+            &ExecOptions::default(),
             None,
         )
         .expect("execute");
@@ -653,6 +759,7 @@ mod tests {
                 finding: &finding,
             }],
             &env(&h, &brain, &bin),
+            &ExecOptions::default(),
             None,
         )
         .expect("execute");
@@ -711,6 +818,7 @@ mod tests {
                 finding: &finding,
             }],
             &env(&h, &brain, &bin),
+            &ExecOptions::default(),
             None,
         )
         .expect("execute");
@@ -722,17 +830,28 @@ mod tests {
         assert!(path.exists());
     }
 
-    #[test]
-    fn the_recycle_bin_is_emptied_rather_than_moved() {
-        let h = harness();
-        let brain = brain();
-        let bin = StubRecycleBin::new(12, 5_000);
+    fn recycle_bin_finding(size: u64) -> Finding {
         let mut finding = Finding::new(
             "cleaner",
             Path::new("shell:RecycleBinFolder"),
             FindingKind::RecycleBinItem,
         );
-        finding.size_bytes = 5_000;
+        finding.size_bytes = size;
+        finding
+    }
+
+    fn confirmed() -> ExecOptions {
+        ExecOptions {
+            confirm_empty_recycle_bin: true,
+        }
+    }
+
+    #[test]
+    fn the_recycle_bin_is_emptied_rather_than_moved() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::new(12, 5_000);
+        let finding = recycle_bin_finding(5_000);
         let rec = quarantine_rec(&finding);
 
         let report = execute(
@@ -741,6 +860,7 @@ mod tests {
                 finding: &finding,
             }],
             &env(&h, &brain, &bin),
+            &confirmed(),
             None,
         )
         .expect("execute");
@@ -751,6 +871,108 @@ mod tests {
         assert_eq!(
             report.batch_id, None,
             "emptying the bin moves nothing into quarantine"
+        );
+    }
+
+    /// H6: the one irreversible action in a batch used to trigger off a bare
+    /// id, exactly like a quarantine item.
+    #[test]
+    fn the_recycle_bin_is_not_emptied_without_its_own_confirmation() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::new(12, 5_000);
+        let finding = recycle_bin_finding(5_000);
+        let rec = quarantine_rec(&finding);
+
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        assert_eq!(bin.empty_calls(), 0, "the bin must be left alone");
+        assert_eq!(report.succeeded(), 0);
+        assert_eq!(report.reclaimed_bytes, 0);
+        match &report.items[0].outcome {
+            ExecOutcome::Skipped { reason } => {
+                assert!(reason.contains("confirmation"), "got `{reason}`");
+                assert!(reason.contains("quarantine"), "got `{reason}`");
+            }
+            other => panic!("expected a skip, got {other:?}"),
+        }
+    }
+
+    /// H6: two recycle-bin units used to empty it twice and count the bytes
+    /// twice.
+    #[test]
+    fn the_recycle_bin_is_emptied_at_most_once_per_batch() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::new(12, 5_000);
+        let (first, second) = (recycle_bin_finding(5_000), recycle_bin_finding(5_000));
+        let (rec_a, rec_b) = (quarantine_rec(&first), quarantine_rec(&second));
+
+        let report = execute(
+            &[
+                ExecUnit {
+                    recommendation: &rec_a,
+                    finding: &first,
+                },
+                ExecUnit {
+                    recommendation: &rec_b,
+                    finding: &second,
+                },
+            ],
+            &env(&h, &brain, &bin),
+            &confirmed(),
+            None,
+        )
+        .expect("execute");
+
+        assert_eq!(bin.empty_calls(), 1, "once, whatever the batch contains");
+        assert_eq!(report.succeeded(), 1);
+        assert_eq!(
+            report.reclaimed_bytes, 5_000,
+            "and the bytes are counted once"
+        );
+        match &report.items[1].outcome {
+            ExecOutcome::Skipped { reason } => {
+                assert!(reason.contains("already emptied"), "got `{reason}`");
+            }
+            other => panic!("expected the second one to be skipped, got {other:?}"),
+        }
+    }
+
+    /// H6: the reported figure is what emptying actually freed, not what the
+    /// scan saw however long ago.
+    #[test]
+    fn the_reclaimed_bytes_are_measured_at_execute_time() {
+        let h = harness();
+        let brain = brain();
+        // The bin grew since the scan, which said 1 000.
+        let bin = StubRecycleBin::new(40, 9_000);
+        let finding = recycle_bin_finding(1_000);
+        let rec = quarantine_rec(&finding);
+
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            &confirmed(),
+            None,
+        )
+        .expect("execute");
+
+        assert_eq!(
+            report.reclaimed_bytes, 9_000,
+            "the analyze-time figure was stale"
         );
     }
 
@@ -775,7 +997,13 @@ mod tests {
 
         let mut ticks = Vec::new();
         let mut sink = |done: u64, total: u64, _: &Finding| ticks.push((done, total));
-        execute(&units, &env(&h, &brain, &bin), Some(&mut sink)).expect("execute");
+        execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            Some(&mut sink),
+        )
+        .expect("execute");
 
         assert_eq!(ticks, vec![(0, 3), (1, 3), (2, 3), (3, 3)]);
     }

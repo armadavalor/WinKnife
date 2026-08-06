@@ -71,12 +71,25 @@ export function scanSummary(scanId: string): Promise<CleanerSummary> {
   return invoke<CleanerSummary>("scan_summary", { scanId });
 }
 
-/** Apply the recommendations the user approved, by recommendation id. */
+/**
+ * Apply the recommendations the user approved, by recommendation id.
+ *
+ * `confirmEmptyRecycleBin` answers a separate question. Everything else in a
+ * batch goes to quarantine and can be undone; emptying the bin is final and
+ * takes every drive with it, so Rust refuses to do it on the strength of a
+ * selected id alone. Only set it when the confirm dialog named the recycle bin
+ * and the user went ahead.
+ */
 export function execute(
   scanId: string,
   approved: string[],
+  confirmEmptyRecycleBin: boolean,
 ): Promise<ExecReport> {
-  return invoke<ExecReport>("execute", { scanId, approved });
+  return invoke<ExecReport>("execute", {
+    scanId,
+    approved,
+    confirmEmptyRecycleBin,
+  });
 }
 
 /* -------------------------------------------------------------------------

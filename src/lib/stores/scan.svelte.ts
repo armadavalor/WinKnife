@@ -138,8 +138,14 @@ class ScanStore {
     this.selected = selected;
   }
 
-  /** Apply the selection. */
-  async execute(): Promise<void> {
+  /**
+   * Apply the selection.
+   *
+   * `confirmEmptyRecycleBin` is passed through from the dialog rather than
+   * derived here: it must mean "the user was shown the recycle-bin warning and
+   * went ahead", not "a recycle-bin row happens to be ticked".
+   */
+  async execute(confirmEmptyRecycleBin: boolean): Promise<void> {
     const scan = this.result;
     if (!scan) {
       return;
@@ -147,7 +153,11 @@ class ScanStore {
     this.step = "executing";
     this.error = null;
     try {
-      this.report = await invokeExecute(scan.scanId, [...this.selected]);
+      this.report = await invokeExecute(
+        scan.scanId,
+        [...this.selected],
+        confirmEmptyRecycleBin,
+      );
       this.step = "done";
     } catch (error: unknown) {
       this.error = message(error);

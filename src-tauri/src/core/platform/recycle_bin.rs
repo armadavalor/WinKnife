@@ -109,11 +109,15 @@ impl RecycleBin for WindowsRecycleBin {
     }
 }
 
-/// A recycle bin that reports fixed contents and records `empty()` calls
-/// without touching anything. Used by every test and on non-Windows builds.
+/// A recycle bin that reports contents and records `empty()` calls without
+/// touching anything. Used by every test and on non-Windows builds.
+///
+/// Emptying it really does empty it, because the executor sizes what it
+/// reclaimed by asking again afterwards: a stub that kept reporting a full bin
+/// after being emptied would make that measurement untestable.
 #[derive(Debug, Clone, Default)]
 pub struct StubRecycleBin {
-    stats: RecycleBinStats,
+    stats: Arc<Mutex<RecycleBinStats>>,
     emptied: Arc<Mutex<u32>>,
 }
 
@@ -121,10 +125,10 @@ impl StubRecycleBin {
     /// A bin holding `item_count` items totalling `size_bytes`.
     pub fn new(item_count: u64, size_bytes: u64) -> Self {
         Self {
-            stats: RecycleBinStats {
+            stats: Arc::new(Mutex::new(RecycleBinStats {
                 item_count,
                 size_bytes,
-            },
+            })),
             emptied: Arc::new(Mutex::new(0)),
         }
     }
@@ -140,7 +144,10 @@ impl StubRecycleBin {
 
 impl RecycleBin for StubRecycleBin {
     fn query(&self) -> Result<RecycleBinStats> {
-        Ok(self.stats)
+        Ok(*self
+            .stats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 
     fn empty(&self) -> Result<()> {
@@ -148,6 +155,10 @@ impl RecycleBin for StubRecycleBin {
             .emptied
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+        *self
+            .stats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = RecycleBinStats::default();
         Ok(())
     }
 }

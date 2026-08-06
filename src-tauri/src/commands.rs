@@ -164,6 +164,13 @@ pub fn scan_summary(
 
 /// Apply the recommendations the user approved.
 ///
+/// `confirm_empty_recycle_bin` is a separate answer to a separate question.
+/// Everything else in a batch goes to quarantine and can be undone; emptying
+/// the bin is final and takes every drive with it, and it used to trigger off a
+/// selected id like anything else (security review H6). The dialog only sets
+/// this when a recycle-bin item is in the selection, and without it that item
+/// is skipped with a reason.
+///
 /// # Errors
 /// Returns an error if the scan is unknown or the ledger is unusable. Item
 /// failures land in the report.
@@ -172,6 +179,7 @@ pub async fn execute<R: Runtime>(
     app: AppHandle<R>,
     scan_id: Uuid,
     approved: Vec<Uuid>,
+    confirm_empty_recycle_bin: bool,
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
     db: State<'_, Database>,
@@ -204,7 +212,14 @@ pub async fn execute<R: Runtime>(
                 tracing::debug!(error = %err, "exec progress event was not delivered");
             }
         };
-        executor::execute(&units, &env, Some(&mut emit))
+        executor::execute(
+            &units,
+            &env,
+            &executor::ExecOptions {
+                confirm_empty_recycle_bin,
+            },
+            Some(&mut emit),
+        )
     })?;
 
     notify_quarantine_changed(&app, &services, &db, report.batch_id);

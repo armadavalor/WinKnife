@@ -32,7 +32,7 @@ class QuarantineStore {
   /** Batches still holding something, newest first. */
   batches = $state<QuarantineBatch[]>([]);
   /** Totals, used for the sidebar badge. */
-  stats = $state<QuarantineStats>({ itemCount: 0, totalBytes: 0 });
+  stats = $state<QuarantineStats>({ itemCount: 0, totalBytes: 0, unreadableRows: 0 });
   /** Where the fetch is. */
   status = $state<LoadStatus>("idle");
   /** Message of the last failure. */
@@ -117,9 +117,12 @@ class QuarantineStore {
    */
   async listen(): Promise<() => void> {
     const unlisten = await onQuarantineChanged((payload) => {
+      // The event carries the badge numbers only; the corrupt-row count comes
+      // from `reload`, which asks the ledger directly.
       this.stats = {
         itemCount: payload.itemCount,
         totalBytes: payload.totalBytes,
+        unreadableRows: this.stats.unreadableRows,
       };
       if (this.open) {
         void this.reload();
