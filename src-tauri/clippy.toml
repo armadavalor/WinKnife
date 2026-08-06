@@ -15,4 +15,6 @@ disallowed-methods = [
     { path = "std::fs::remove_dir", reason = "user data is only ever removed by core::quarantine; take() moves, purge() deletes" },
     { path = "std::fs::remove_dir_all", reason = "user data is only ever removed by core::quarantine; take() moves, purge() deletes" },
     { path = "std::fs::rename", reason = "rename replaces an existing destination; go through core::quarantine's move_path, which refuses to" },
+    { path = "std::fs::File::create", reason = "File::create truncates an existing file, which destroys user data without going through quarantine; use OpenOptions::new().create_new(true) (security review L7)" },
+    { path = "std::fs::OpenOptions::truncate", reason = "truncating an existing file destroys user data without going through quarantine; use create_new(true) so an occupied destination fails instead (security review L7)" },
 ]
