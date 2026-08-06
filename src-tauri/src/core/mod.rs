@@ -6,6 +6,7 @@
 pub mod brain;
 pub mod db;
 pub mod error;
+pub mod events;
 pub mod module;
 pub mod types;
 
