@@ -43,6 +43,39 @@ Open scope questions and contradictions found while implementing. Format:
       **RESOLVED (architect, 2026-08-06): convention approved — dictionary
       override with manifest fallback is the standing i18n rule for manifests.**
 
+- [ ] 2026-08-06 (phase 1): the `quarantine` table has `restored_at` but no
+      `purged_at`, so a purge has to choose between deleting the row (losing
+      the audit trail in the database) and adding a migration — took the
+      boring option: **purge deletes the row**, and the rolling `tracing` log
+      keeps the audit trail with the original path, size and reason. Revisit
+      if the drawer ever needs to show purge history.
+- [ ] 2026-08-06 (phase 1): module spec 02 lists the recycle bin as a rule
+      pack, but the pack format is path-and-glob based and the bin is a shell
+      namespace object — modelled it as a pack with the sentinel path
+      `shell:RecycleBinFolder` and a dedicated `empty_recycle_bin` action that
+      the parser only accepts inside the `recycle-bin` pack. The brain skips
+      the protected-path and lock gates for that finding kind, since neither
+      question is meaningful for a shell object.
+- [ ] 2026-08-06 (phase 1): the cleaner walks directories but never proposes
+      one, so an emptied temp folder keeps its (now empty) subdirectories —
+      the safest reading of "never delete user files", since a directory can
+      gain a file between analyze and execute. Quarantine itself does handle
+      directories, so lifting this is a cleaner-side change only.
+- [ ] 2026-08-06 (phase 1): `docs/RULES-FORMAT.md` documents `score.base` and
+      the 85/40 bucket thresholds, but the phase-1 brief says "no scoring yet:
+      rule → fixed bucket" — parse and validate `score.base` (so packs written
+      today stay valid) and ignore it, using `score.max_bucket` as the bucket.
+      Phase 2 turns it into the real pipeline.
+- [ ] 2026-08-06 (phase 1): module spec 01 asks for warning notifications
+      "with a cancel action", but Tauri v2's notification plugin has no
+      reliable action buttons on Windows 10 — the notification is
+      informational and names the tray and the route as the ways to cancel.
+      Revisit if the plugin gains Windows action support.
+- [ ] 2026-08-06 (phase 1): a rule whose `%VAR%` is unset on this machine
+      cannot match anything — reported it in `ScanResult.skipped_rules` and
+      shown in the UI rather than dropped silently, so a partial scan says it
+      was partial. A *malformed* pack still refuses to start the app.
+
 Open items awaiting the producer (not blocking implementation):
 - LICENSE copyright holder (currently "Cleanify contributors") — decide with
   the final product name.

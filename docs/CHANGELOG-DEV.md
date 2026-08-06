@@ -92,3 +92,107 @@ line, diffstat `3 files changed, 58 insertions(+)`, registry then reported
 - The product name is still the `cleanify` codename. `src/lib/branding.ts` holds
   the single UI-side constant, and the README lists every other place it
   appears.
+
+---
+
+## 2026-08-06 — Phase 1: first blood
+
+**Built.** Two working tools on top of a quarantine service, in the build order
+the brief specifies: quarantine → executor → shutdown timer → brain gates →
+cleaner → drawer UI.
+
+- **Quarantine** (`core/quarantine.rs`). Same-volume `rename` where possible,
+  copy + byte-for-byte verify + remove when crossing volumes, with the original
+  left untouched if verification fails. The ledger row is written *before* the
+  move, so a crash mid-move still knows where the file belongs. Restore never
+  overwrites — a collision gets a ` (restored)` suffix and reports it. Retention
+  purge (7 days, configurable) plus a size cap that purges oldest-first, both
+  refusing to touch anything outside the quarantine root.
+- **Executor** (`core/executor.rs`). Approved recommendations → one quarantine
+  batch → one `ExecReport`. Every item is re-validated at execute time: the
+  recommendation's own invariants, then the protected-path check, then the lock
+  check — none of them trusted from the analyze phase, because the review screen
+  can sit open for an hour. A failure or a lock skips that item only. Every item
+  writes a `tracing` line.
+- **Shutdown timer** (`modules/shutdown_timer.rs`). Duration and clock-time
+  modes, shutdown/restart/sleep, replace-on-schedule with confirmation, >24h
+  refused, warnings at T-5 and T-1, persistence across app restarts (re-armed
+  only if the target is still ahead). Tray icon with a countdown tooltip and a
+  cancel item. `--dry-run` flag.
+- **Brain v0** (`core/brain/`). Hard gates only: protected path → red, locked
+  file → red, rule match → the rule's declared bucket, nothing matched → red
+  with an honest reason. `protected_paths()` is compiled-in Rust covering
+  `%WINDIR%`, both Program Files trees, `%ProgramData%`, the profile root
+  (exact, not its subdirectories), drive roots, `System Volume Information`, and
+  our own app and quarantine directories.
+- **Rule packs** (`rules/`, `core/brain/rules.rs`). `windows-temp`,
+  `recycle-bin`, `thumbnail-icon-cache`, plus `rule-pack.schema.json`. The
+  parser is a trust boundary: `deny_unknown_fields`, every constraint checked,
+  and failures name the pack and the dotted field path.
+- **Cleaner v0** (`modules/cleaner.rs`). Walks only the roots the packs point
+  at, tags findings with pack and rule, and skips anything touched in the last
+  hour even under a Safe rule.
+- **Scanner, settings, scan store, logging** (`core/`). jwalk-based walker that
+  never follows links and is cancellable per entry; typed settings over the
+  key/value table; last-8-scans in-memory store; daily-rotating audit log in
+  `{app_data}/logs`.
+- **UI.** Cleaner 3-step flow (scan → three-bucket review grouped by pack, every
+  row showing its reason, green preselected and yellow not → confirm dialog
+  stating the total and the quarantine promise). Timer route with a big
+  countdown driven by `shutdown:tick`. Quarantine drawer in the shell with
+  restore, per-batch item lists and purge-now. The dummy module is gone.
+
+**Decisions taken.**
+
+- **Every irreversible OS call sits behind a trait** (`core/platform/`):
+  `PowerController`, `RecycleBin`, `LockProbe`, plus `EnvResolver` for `%VARS%`.
+  The real implementations refuse to act when `cfg!(test)` is true, and the app
+  installs the real power controller in exactly one place — `lib.rs::run()`,
+  only when `--dry-run` is absent. Two tests assert the refusal directly.
+- **`EnvResolver` is what makes fixture tests honest.** Pointing `%TEMP%` at a
+  tempdir means the tests exercise the *shipped* rule packs without the shipped
+  packs ever touching the developer's real temp folder.
+- **The "only quarantine may delete" rule is enforced against the source.**
+  `no_other_module_removes_user_data` walks the crate's own `src/` and fails the
+  build if any file other than `core/quarantine.rs` calls `fs::remove_*`.
+- **The recycle bin skips the path gates.** Running a lock probe against
+  `shell:RecycleBinFolder` made a perfectly emptyable bin look permanently
+  locked — a real bug the end-to-end test caught. `Brain::classify_finding`
+  routes shell objects straight to the rule.
+- **Purge deletes the ledger row**; the rolling log keeps the audit trail. No
+  migration was needed, so the schema is still at version 1.
+- **A malformed rule pack refuses to start the app**; a rule whose `%VAR%` is
+  unset is reported in `ScanResult.skipped_rules` and shown in the UI. Broken is
+  a bug; missing is a fact about this machine.
+- **Registered modules must have a route.** A test asserts
+  `src/routes/<id>/+page.svelte` exists for every module in the registry.
+
+**Verification.** `cargo clippy --all-targets -- -D warnings` clean,
+`cargo fmt --check` clean, `cargo test` 225/225 green (218 unit + 7 integration),
+`cargo build --release` OK, `npm run build` OK, `npm run check` 0 errors /
+0 warnings.
+
+**Deferred / not verified.**
+
+- The window and tray were **not launched visually** — `tauri dev` blocks the
+  agent session. The tray, the notifications and the countdown are evidenced by
+  unit tests over the engine and a clean `svelte-check`, not by a screenshot.
+  Someone should run `npm run tauri dev -- -- --dry-run` and watch a 2-minute
+  timer through both warnings before this is called done.
+- Notification **action buttons** are not implemented (Tauri v2 has no reliable
+  Windows support); cancel is via the route and the tray. The capability file
+  deliberately does **not** grant `notification:default` — notifications are
+  raised from Rust, which the ACL does not gate, and handing the WebView the
+  permission it does not need would be the wrong default. Windows toasts also
+  want an installed shortcut for a stable AppUserModelID, so a `tauri dev` run
+  may show them differently from an installed build.
+- The cleaner never proposes a **directory**, so emptied temp folders keep their
+  empty subdirectories. Quarantine handles directories already.
+- **Yellow-bucket packs, scoring, heuristics and the LLM layer** are out of
+  scope per the brief. The yellow bucket renders and stays empty; red is
+  populated by the gates.
+- `owner_process_absent` is parsed and validated but not acted on — it belongs
+  with the browser packs.
+- CI is still **unverified**: no git remote exists, so the workflow has never
+  run. The workflow was not updated for the new `cargo fmt`/integration-test
+  steps beyond what phase 0 already ran.
