@@ -104,6 +104,28 @@ pub enum CoreError {
     /// scan was evicted).
     #[error("unknown scan: {0}")]
     UnknownScan(String),
+
+    /// A registry read or write failed.
+    #[error("registry error: {0}")]
+    Registry(String),
+
+    /// A registry write was requested from a build that must never change the
+    /// machine (any test binary). See `core::platform::guard`.
+    #[error("registry write blocked: this build must never modify the real registry")]
+    RegistryBlocked,
+
+    /// The Task Scheduler refused, or is unavailable.
+    #[error("task scheduler error: {0}")]
+    TaskScheduler(String),
+
+    /// A scheduled-task change was requested from a build that must never
+    /// change the machine.
+    #[error("task scheduler write blocked: this build must never modify real scheduled tasks")]
+    TaskSchedulerBlocked,
+
+    /// An autostart entry id the UI referred to is not in the last scan.
+    #[error("unknown startup entry: {0}")]
+    UnknownStartupEntry(String),
 }
 
 impl CoreError {
@@ -128,6 +150,11 @@ impl CoreError {
             Self::RecycleBinBlocked => "recycle_bin_blocked",
             Self::InvalidTimer(_) => "invalid_timer",
             Self::UnknownScan(_) => "unknown_scan",
+            Self::Registry(_) => "registry",
+            Self::RegistryBlocked => "registry_blocked",
+            Self::TaskScheduler(_) => "task_scheduler",
+            Self::TaskSchedulerBlocked => "task_scheduler_blocked",
+            Self::UnknownStartupEntry(_) => "unknown_startup_entry",
         }
     }
 }

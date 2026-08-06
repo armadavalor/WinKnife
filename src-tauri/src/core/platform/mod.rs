@@ -25,6 +25,10 @@ pub(crate) mod lock;
 pub(crate) mod power;
 pub(crate) mod process;
 pub(crate) mod recycle_bin;
+pub(crate) mod registry;
+pub(crate) mod signature;
+pub(crate) mod tasks;
+pub(crate) mod volume;
 
 use std::sync::Arc;
 
@@ -35,6 +39,13 @@ pub use lock::{AlwaysUnlocked, LockProbe, LockState, SystemLockProbe};
 pub use power::{DryRunPower, PowerAction, PowerController, PowerEvent};
 pub use process::{CachedProcessProbe, ProcessProbe, StubProcessProbe, SystemProcessProbe};
 pub use recycle_bin::{RecycleBin, RecycleBinStats, StubRecycleBin};
+pub use registry::{
+    Hive, MapRegistry, RegValue, Registry, SystemRegistry, REG_TYPE_BINARY, REG_TYPE_EXPAND_SZ,
+    REG_TYPE_SZ,
+};
+pub use signature::{MapSignatures, Signature, SignatureProbe, SystemSignatureProbe};
+pub use tasks::{LogonTask, MapTaskScheduler, SystemTaskScheduler, TaskScheduler};
+pub use volume::{DriveInfo, StubVolumes, SystemVolumes, Volumes};
 
 // `cfg(not(test))` mirrors the definition: the arming function does not exist
 // in a test build, so neither does its re-export (security review M12).

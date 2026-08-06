@@ -58,6 +58,19 @@ tempfile = "3.27.0"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
+    # Authenticode publisher lookup for the startup manager
+    # (core/platform/signature.rs).
+    "Win32_Security_Cryptography",
+    "Win32_Security_WinTrust",
+    # The startup manager reads Run/RunOnce and writes the StartupApproved
+    # flags through `core/platform/registry.rs`.
+    "Win32_System_Registry",
+    # `ITaskService`, the COM interface module spec 05 prefers over parsing
+    # `schtasks` output (core/platform/tasks.rs).
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_TaskScheduler",
+    "Win32_System_Variant",
     # `owner_process_absent` needs the process list; `Toolhelp32Snapshot` is the
     # cheapest read-only way to ask (core/platform/process.rs).
     "Win32_System_Diagnostics_ToolHelp",
