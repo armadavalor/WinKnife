@@ -24,7 +24,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::core::platform::{AlwaysUnlocked, LockProbe, LockState};
-use crate::core::types::{Action, RiskBucket};
+use crate::core::types::{Action, Finding, FindingKind, RiskBucket};
 
 pub use protected::{ProtectedEntry, ProtectedPaths, Scope};
 pub use rules::{CompiledRule, MaxBucket, RuleAction, RulePack, RuleSpec};
@@ -130,9 +130,9 @@ impl Brain {
     /// Why `path` is protected, or `None`. The executor calls this again at
     /// execute time rather than trusting the analyze-time verdict.
     pub fn protection_reason(&self, path: &Path) -> Option<String> {
-        self.protected.reason_for(path).map(|reason| {
-            format!("protected location, not cleanable: {reason}")
-        })
+        self.protected
+            .reason_for(path)
+            .map(|reason| format!("protected location, not cleanable: {reason}"))
     }
 
     /// Current lock state of `path`.
@@ -172,6 +172,25 @@ impl Brain {
             };
         }
 
+        self.classify_by_rule(matched)
+    }
+
+    /// Classify a finding.
+    ///
+    /// Identical to [`Brain::classify`] for anything that is a real path. The
+    /// recycle bin is not: `shell:RecycleBinFolder` is a shell namespace
+    /// object, so asking whether it is protected or held open is meaningless —
+    /// and asking anyway made an empty-able bin look permanently locked. Those
+    /// findings go straight to the rule.
+    pub fn classify_finding(&self, finding: &Finding, matched: Option<&CompiledRule>) -> Verdict {
+        if finding.kind == FindingKind::RecycleBinItem {
+            return self.classify_by_rule(matched);
+        }
+        self.classify(&finding.path, matched)
+    }
+
+    /// Steps 2 and 4 of the pipeline, with no path gates.
+    fn classify_by_rule(&self, matched: Option<&CompiledRule>) -> Verdict {
         let Some(rule) = matched else {
             // Gate 4: honest ignorance. The red bucket is produced, not
             // targeted — this is the honesty feature from module spec 02.
@@ -388,11 +407,7 @@ mod tests {
 
         for case in cases {
             let verdict = brain.classify(Path::new(case.path), case.matched);
-            assert_eq!(
-                verdict.bucket, case.bucket,
-                "{} — {}",
-                case.path, case.why
-            );
+            assert_eq!(verdict.bucket, case.bucket, "{} — {}", case.path, case.why);
             assert_eq!(verdict.source, case.source, "{}", case.path);
             assert!(
                 !verdict.reason.trim().is_empty(),
@@ -453,7 +468,11 @@ mod tests {
         assert_eq!(verdict.bucket, RiskBucket::DoNotDelete);
         assert_eq!(verdict.source, VerdictSource::Locked);
         assert_eq!(verdict.action, Action::InfoOnly);
-        assert!(verdict.reason.contains("in use"), "got `{}`", verdict.reason);
+        assert!(
+            verdict.reason.contains("in use"),
+            "got `{}`",
+            verdict.reason
+        );
     }
 
     #[test]
@@ -525,7 +544,11 @@ mod tests {
     fn an_unmatched_path_says_so_in_plain_language() {
         let verdict = brain().classify(Path::new("C:\\Nowhere\\thing.bin"), None);
         assert_eq!(verdict.source, VerdictSource::Unknown);
-        assert!(verdict.reason.contains("no rule"), "got `{}`", verdict.reason);
+        assert!(
+            verdict.reason.contains("no rule"),
+            "got `{}`",
+            verdict.reason
+        );
         assert_eq!(verdict.rule, None);
     }
 
@@ -556,6 +579,48 @@ mod tests {
             verdict.reason,
             "Temporary file older than 24h in the user temp folder."
         );
+    }
+
+    /// The recycle bin is a shell object; running path gates against
+    /// `shell:RecycleBinFolder` made a perfectly emptyable bin look locked.
+    #[test]
+    fn a_recycle_bin_finding_skips_the_path_gates() {
+        struct Locked;
+        impl LockProbe for Locked {
+            fn probe(&self, _path: &Path) -> LockState {
+                LockState::Inaccessible
+            }
+        }
+
+        let pack = pack();
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::from_trees([PathBuf::from("shell:")]))
+            .packs(vec![pack.clone()])
+            .lock_probe(Arc::new(Locked))
+            .build();
+
+        let mut finding = Finding::new(
+            "cleaner",
+            "shell:RecycleBinFolder",
+            FindingKind::RecycleBinItem,
+        );
+        finding.size_bytes = 1_024;
+
+        let verdict = brain.classify_finding(&finding, Some(rule(&pack, "user-temp-files")));
+        assert_eq!(verdict.bucket, RiskBucket::Safe);
+        assert_eq!(verdict.source, VerdictSource::Rule);
+    }
+
+    #[test]
+    fn a_file_finding_still_runs_every_path_gate() {
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::from_trees([PathBuf::from("C:\\Windows")]))
+            .packs(vec![pack()])
+            .build();
+
+        let finding = Finding::new("cleaner", "C:\\Windows\\a.dll", FindingKind::File);
+        let verdict = brain.classify_finding(&finding, None);
+        assert_eq!(verdict.source, VerdictSource::ProtectedPath);
     }
 
     #[test]

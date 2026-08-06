@@ -76,14 +76,15 @@ pub struct CleanerContext<'a> {
     pub cancel: &'a CancellationToken,
 }
 
+/// Progress callback: the running item count and the path being looked at.
+/// Throttling is the caller's job, so a test can observe every tick.
+pub type ScanProgressSink<'a> = &'a mut dyn FnMut(u64, &Path);
+
 /// Walk the enabled packs and collect findings. Read-only.
 ///
 /// `progress` is called with the running item count and the current path; the
 /// caller throttles it.
-pub fn scan(
-    ctx: &CleanerContext<'_>,
-    progress: Option<&mut dyn FnMut(u64, &Path)>,
-) -> ScanOutput {
+pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) -> ScanOutput {
     let mut output = ScanOutput::default();
     let mut progress = progress;
     let mut seen = 0u64;
@@ -225,7 +226,7 @@ pub fn analyze(findings: &[Finding], brain: &Brain) -> Vec<Recommendation> {
 
     for finding in findings {
         let matched = rule_key(finding).and_then(|key| rules_by_id.get(&key).copied());
-        let verdict = brain.classify(&finding.path, matched);
+        let verdict = brain.classify_finding(finding, matched);
 
         // The red bucket carries no action, and `Recommendation::new` refuses
         // any other combination — that invariant is the last line of defence.
@@ -346,7 +347,7 @@ pub fn is_recycle_bin_finding(finding: &Finding) -> bool {
 }
 
 /// Look a finding up by id.
-pub fn find<'a>(findings: &'a [Finding], id: Uuid) -> Option<&'a Finding> {
+pub fn find(findings: &[Finding], id: Uuid) -> Option<&Finding> {
     findings.iter().find(|finding| finding.id == id)
 }
 
