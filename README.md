@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A modular Windows "Swiss army knife" utility: disk cleaning, duplicate finding,
-treemap, startup management and a shutdown timer — in one calm window.
+treemap, startup management and a shutdown timer (& more to come!) — in one calm window.
 
 > **Status: Phase 1 (first blood).** Two working tools — a shutdown timer and
 > a disk cleaner covering the three "safe" rule packs — on top of a quarantine
