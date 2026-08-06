@@ -65,13 +65,23 @@ fn running_process_names() -> Option<Vec<String>> {
         TH32CS_SNAPPROCESS,
     };
 
+    // `dwSize` is computed *before* the snapshot exists, so the only fallible
+    // step between opening the handle and closing it is the enumeration itself.
+    // It used to sit inside the `unsafe` block with a `?` on it: unreachable in
+    // practice (`PROCESSENTRY32W` is 568 bytes), but it was an early return that
+    // leaked the handle and quietly contradicted the SAFETY comment below —
+    // which is the line a future reader trusts (review L10).
+    let Ok(entry_size) = u32::try_from(std::mem::size_of::<PROCESSENTRY32W>()) else {
+        return None;
+    };
+
     // SAFETY: the snapshot handle is closed on every path below, and
     // `PROCESSENTRY32W` is initialised with its own size as the API requires.
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
 
         let mut entry = PROCESSENTRY32W {
-            dwSize: u32::try_from(std::mem::size_of::<PROCESSENTRY32W>()).ok()?,
+            dwSize: entry_size,
             ..Default::default()
         };
 
