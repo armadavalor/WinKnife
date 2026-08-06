@@ -37,7 +37,10 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          # 22.6+ is required: `node --test` only expands glob patterns and
+          # strips TypeScript types from that version on, and `npm run test:ui`
+          # relies on both. 20 silently found no test files and then failed.
+          node-version: 24
           cache: npm
 
       - name: Install UI dependencies
