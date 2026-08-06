@@ -5,6 +5,17 @@
 //! (CONVENTIONS.md). The one thing they do own is the *composition*: which
 //! quarantine, which brain, which recycle-bin wrapper a run uses. That is the
 //! seam that keeps the real Win32 calls out of every test.
+//!
+//! # Managed state
+//!
+//! Every `State<'_, T>` below names the type `lib.rs` passes to `app.manage`,
+//! **exactly**. Tauri resolves managed state by `TypeId`, so `Arc<Database>` and
+//! `Database` are two unrelated keys: registering one and asking for the other
+//! compiles clean and then fails on every single invocation with
+//! `state not managed for field ...`. That is why the database arrives here as
+//! `Arc<Database>` — the startup adapter holds a second handle, so the `Arc` is
+//! what gets registered. `tests/command_wiring.rs` invokes every registered
+//! command against a real app and fails if these ever drift apart again.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -141,7 +152,7 @@ pub async fn start_scan<R: Runtime>(
     module_id: String,
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
     cancels: State<'_, CancelRegistry>,
 ) -> Result<ScanResult, ApiError> {
     if module_id != "cleaner" {
@@ -274,7 +285,7 @@ pub async fn execute<R: Runtime>(
     confirm_empty_recycle_bin: bool,
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<ExecReport, ApiError> {
     let scan = store.get(scan_id)?;
     let units = executor::plan(&approved, &scan.recommendations, &scan.findings);
@@ -363,7 +374,7 @@ pub async fn start_duplicate_scan<R: Runtime>(
     roots: Option<Vec<PathBuf>>,
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
     cancels: State<'_, CancelRegistry>,
 ) -> Result<DuplicateScanResult, ApiError> {
     let stored: duplicates::DuplicatesSettings = db
@@ -516,7 +527,7 @@ pub fn treemap_drives() -> Result<Vec<crate::core::platform::DriveInfo>, ApiErro
 pub async fn treemap_scan<R: Runtime>(
     app: AppHandle<R>,
     root: PathBuf,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
     cancels: State<'_, CancelRegistry>,
 ) -> Result<TreemapScanResult, ApiError> {
     // The root arrives from the WebView unchecked, exactly as `treemap_children`'s
@@ -610,7 +621,7 @@ pub async fn treemap_scan<R: Runtime>(
 pub fn treemap_children(
     root: PathBuf,
     path: PathBuf,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<treemap::TreeLevel, ApiError> {
     let (root, path) = mappable_level(&root, &path)?;
     Ok(db.with(|conn| treemap::children(&path, &root, &treemap::CacheOracle::new(conn, &root)))?)
@@ -676,7 +687,7 @@ fn mappable_level(root: &Path, path: &Path) -> Result<(PathBuf, PathBuf), ApiErr
 #[tauri::command]
 pub fn treemap_cached(
     root: PathBuf,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<Option<treemap::CachedScan>, ApiError> {
     Ok(db.with(|conn| treemap::cached_scan(conn, &root))?)
 }
@@ -720,7 +731,7 @@ pub async fn startup_scan<R: Runtime>(
     app: AppHandle<R>,
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<StartupScanResult, ApiError> {
     let started_at = Utc::now();
     let scan = db.with(|conn| Ok(services.startup_service.scan(conn)))?;
@@ -855,7 +866,7 @@ pub fn startup_enable(
     source: crate::core::types::StartupSource,
     key: String,
     services: State<'_, Services>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<(), ApiError> {
     Ok(db.with(|conn| {
         services
@@ -929,7 +940,7 @@ pub fn dashboard_summary(
     registry: State<'_, ModuleRegistry>,
     services: State<'_, Services>,
     timer: State<'_, Arc<ShutdownTimer>>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<DashboardSummary, ApiError> {
     use crate::core::platform::Volumes;
 
@@ -963,7 +974,7 @@ pub fn dashboard_summary(
 #[tauri::command]
 pub fn get_settings(
     services: State<'_, Services>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<AppSettings, ApiError> {
     Ok(db.with(|conn| read_settings(&services, conn))?)
 }
@@ -985,7 +996,7 @@ pub fn get_settings(
 pub fn set_settings(
     settings_in: AppSettings,
     services: State<'_, Services>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<AppSettings, ApiError> {
     let policy = RetentionPolicy::validated(
         settings_in.quarantine.retention_days,
@@ -1079,7 +1090,7 @@ fn read_settings(
 #[tauri::command]
 pub fn quarantine_list(
     services: State<'_, Services>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<Vec<QuarantineBatch>, ApiError> {
     Ok(db.with(|conn| services.quarantine.list_batches(conn))?)
 }
@@ -1092,7 +1103,7 @@ pub fn quarantine_list(
 pub fn quarantine_batch_items(
     batch_id: Uuid,
     services: State<'_, Services>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<Vec<QuarantineItem>, ApiError> {
     Ok(db.with(|conn| services.quarantine.items_in_batch(conn, batch_id))?)
 }
@@ -1104,7 +1115,7 @@ pub fn quarantine_batch_items(
 #[tauri::command]
 pub fn quarantine_stats(
     services: State<'_, Services>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<QuarantineStats, ApiError> {
     Ok(db.with(|conn| services.quarantine.stats(conn))?)
 }
@@ -1139,7 +1150,7 @@ pub fn quarantine_restore<R: Runtime>(
     app: AppHandle<R>,
     batch_id: Uuid,
     services: State<'_, Services>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<RestoreReport, ApiError> {
     let (restored, failed) = db.with(|conn| services.quarantine.restore_batch(conn, batch_id))?;
     notify_quarantine_changed(&app, &services, &db, Some(batch_id));
@@ -1161,7 +1172,7 @@ pub fn quarantine_restore_item<R: Runtime>(
     app: AppHandle<R>,
     item_id: Uuid,
     services: State<'_, Services>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<RestoreOutcome, ApiError> {
     let outcome = db.with(|conn| services.quarantine.restore_item(conn, item_id))?;
     notify_quarantine_changed(&app, &services, &db, None);
@@ -1176,7 +1187,7 @@ pub fn quarantine_restore_item<R: Runtime>(
 pub fn quarantine_purge<R: Runtime>(
     app: AppHandle<R>,
     services: State<'_, Services>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<PurgeReport, ApiError> {
     let report = db.with(|conn| services.quarantine.purge(conn, Utc::now()))?;
     notify_quarantine_changed(&app, &services, &db, None);
@@ -1219,7 +1230,7 @@ pub fn shutdown_schedule(
     mode: ScheduleMode,
     action: PowerAction,
     timer: State<'_, Arc<ShutdownTimer>>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<TimerStatus, ApiError> {
     let now = Utc::now();
     let persisted = ShutdownTimer::prepare(mode, action, now)?;
@@ -1243,7 +1254,7 @@ pub fn shutdown_schedule(
 #[tauri::command]
 pub fn shutdown_cancel(
     timer: State<'_, Arc<ShutdownTimer>>,
-    db: State<'_, Database>,
+    db: State<'_, Arc<Database>>,
 ) -> Result<TimerStatus, ApiError> {
     db.with(|conn| crate::core::settings::clear(conn, crate::core::settings::KEY_ACTIVE_TIMER))?;
     timer.cancel();

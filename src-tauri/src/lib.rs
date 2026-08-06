@@ -106,6 +106,23 @@ fn power_controller(dry_run: bool) -> Arc<dyn PowerController> {
     core::platform::real_power_controller()
 }
 
+/// The database, for the handful of places that reach it outside a command.
+///
+/// The tray menu, the tick loop and the window-geometry listener all run on an
+/// `AppHandle` rather than through IPC. Each used to name the type itself, and
+/// two of the four named it wrong: `try_state::<Database>()` against a managed
+/// `Arc<Database>` matches nothing and returns `None`, which made the tray's
+/// "Cancel timer" refuse outright and left a fired timer sitting in the settings
+/// table to re-arm on the next start. One accessor means one spelling to get
+/// right, next to the `app.manage` call that decides it.
+///
+/// Generic over the runtime so a test can check it against a mock app.
+pub fn managed_database<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<tauri::State<'_, Arc<Database>>> {
+    app.try_state::<Arc<Database>>()
+}
+
 /// Build and run the desktop application.
 ///
 /// # Panics
@@ -293,7 +310,7 @@ async fn tokio_sleep(duration: std::time::Duration) {
 }
 
 fn clear_persisted_timer(app: &tauri::AppHandle) {
-    if let Some(db) = app.try_state::<Database>() {
+    if let Some(db) = managed_database(app) {
         let _ = db.with(|conn| settings::clear(conn, settings::KEY_ACTIVE_TIMER));
     }
 }
@@ -321,7 +338,6 @@ fn notify_warning(app: &tauri::AppHandle, minutes: i64, remaining_secs: i64) {
 mod window {
     use tauri::{Listener, Manager, PhysicalPosition, PhysicalSize};
 
-    use crate::core::db::Database;
     use crate::core::window_state::{self, WindowState};
 
     /// Restore the saved geometry and start recording changes.
@@ -333,7 +349,7 @@ mod window {
             return;
         };
 
-        if let Some(db) = app.try_state::<std::sync::Arc<Database>>() {
+        if let Some(db) = crate::managed_database(app) {
             match db.with(window_state::load) {
                 Ok(Some(state)) => {
                     let _ = window.set_size(PhysicalSize::new(state.width, state.height));
@@ -365,7 +381,7 @@ mod window {
         let Some(window) = app.get_webview_window("main") else {
             return;
         };
-        let Some(db) = app.try_state::<std::sync::Arc<Database>>() else {
+        let Some(db) = crate::managed_database(app) else {
             return;
         };
         let (Ok(size), Ok(position)) = (window.outer_size(), window.outer_position()) else {
@@ -409,7 +425,6 @@ mod tray {
     use tauri::tray::{TrayIcon, TrayIconBuilder};
     use tauri::{AppHandle, Manager};
 
-    use crate::core::db::Database;
     use crate::core::settings;
     use crate::modules::shutdown_timer::{format_remaining, ShutdownTimer};
 
@@ -468,7 +483,7 @@ mod tray {
     /// visible timer the user can cancel again beats an invisible one that
     /// comes back.
     fn cancel_timer(app: &AppHandle) {
-        let Some(db) = app.try_state::<Database>() else {
+        let Some(db) = crate::managed_database(app) else {
             tracing::error!("no database is registered; the timer cannot be cancelled safely");
             return;
         };
