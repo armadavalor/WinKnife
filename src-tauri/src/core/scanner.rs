@@ -30,15 +30,26 @@
 //! sorted depth-first `read_dir`: streaming, deterministic and no arena.
 //!
 //! **With one caveat, and it is why [`WalkOptions::accurate_timestamps`]
-//! exists.** NTFS keeps a *copy* of each entry's timestamps in its parent's
-//! index and updates it lazily, so the listing can report a modification time
-//! that is older than the truth. Sizes and attributes are not affected. The
-//! cleaner's age heuristic reads modification times, and "older than the truth"
-//! is the direction that makes a freshly written file look abandoned — so the
-//! cleaner and the duplicate finder keep the authoritative stat and are exactly
-//! as fast as they were. The treemap opts out, because it reads no clocks at
-//! all, and it is the only thing here that walks a whole drive
-//! (`docs/DECISIONS-NEEDED.md`, phase 3).
+//! exists.** NTFS keeps a *copy* of each entry's timestamps **and its size** in
+//! the parent's index and updates that copy lazily, so the listing can report a
+//! modification time older than the truth and a size that is smaller than the
+//! truth. (A 100 000-byte file whose parent index still called it 3 bytes is the
+//! measurement that corrected this paragraph — it previously claimed "sizes and
+//! attributes are not affected", which is false: security review M16.)
+//!
+//! So the switch governs both figures, together, from the same `Metadata`:
+//!
+//! - **On** (the default) — one `symlink_metadata` per entry, and the clocks
+//!   *and* the size come from it. The cleaner's age heuristic reads modification
+//!   times and its `savings_bytes` reads sizes, and a stale clock reads older
+//!   than the truth, which is the direction that makes a freshly written file
+//!   look abandoned. The cleaner and the duplicate finder pay the syscall.
+//! - **Off** — clocks and size both come from the directory listing. Only the
+//!   treemap opts out, because it is the only thing here that walks a whole
+//!   drive; it accepts that a file written moments ago may be drawn at its
+//!   previous size until the next scan, which is a rectangle a few pixels wrong
+//!   rather than a wrong decision about a file
+//!   (`docs/DECISIONS-NEEDED.md`, phase 3).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -113,16 +124,22 @@ pub struct WalkOptions {
     /// descend into them.
     pub report_links: bool,
 
-    /// Whether timestamps have to be authoritative, at one extra syscall per
-    /// entry.
+    /// Whether the entry's numbers have to be authoritative, at one extra
+    /// syscall per entry.
     ///
     /// **On by default, and every module before the treemap needs it on.**
     ///
     /// The directory listing Windows returns carries a *copy* of each entry's
-    /// timestamps, and NTFS updates that copy lazily — a file or folder that
-    /// changed moments ago can still be listed with its previous modification
-    /// time. Sizes and attributes do not have this problem, which is why the
-    /// cheap path is still the default for everything else.
+    /// timestamps and size, and NTFS updates that copy lazily — a file that grew
+    /// moments ago can still be listed with its previous modification time and
+    /// its previous length.
+    ///
+    /// When this is on, [`WalkEntry::modified`], [`WalkEntry::created`],
+    /// [`WalkEntry::accessed`] **and [`WalkEntry::size_bytes`]** all come from
+    /// the authoritative stat. They used to disagree: the stat was taken, the
+    /// clocks were read from it, and the size was read from the stale listing
+    /// anyway, so the cleaner paid for an accurate answer and then reported
+    /// `savings_bytes` from the inaccurate one (security review M16).
     ///
     /// The cleaner's age heuristic reads modification times, and a stale one
     /// always reads *older* than the truth. That is the dangerous direction:
@@ -130,8 +147,13 @@ pub struct WalkOptions {
     /// cleaner and the duplicate finder pay the syscall and get the real
     /// answer, exactly as they did before this walker was rewritten.
     ///
-    /// The treemap turns it off because it never looks at a timestamp — it
-    /// wants sizes — and it is the only thing here that walks a whole drive.
+    /// The treemap turns it off because it is the only thing here that walks a
+    /// whole drive. Its sizes therefore lag on the fast path, and the treemap
+    /// accepts that: the picture is a snapshot dated by its header row, and a
+    /// rectangle drawn at last week's size is redrawn by the next scan.
+    ///
+    /// The name is now narrower than what it governs; it is kept because it is
+    /// a public field and the doc says exactly what it does.
     pub accurate_timestamps: bool,
 }
 
@@ -160,7 +182,14 @@ impl WalkEntry {
 pub struct WalkSummary {
     /// Entries handed to the callback.
     pub entries_seen: u64,
-    /// Directories the walker could not read (permissions, transient locks).
+    /// Paths the walker could not read (permissions, transient locks): both
+    /// directories it could not list and individual entries the listing named
+    /// but could not describe.
+    ///
+    /// Both are holes in the picture, and a caller that presents a total has to
+    /// know it is a floor. An entry whose metadata call failed used to be
+    /// dropped without a trace, which left the aggregate above it claiming to be
+    /// complete (security review L12).
     pub unreadable: Vec<PathBuf>,
     /// Whether the walk stopped early because of cancellation.
     pub cancelled: bool,
@@ -224,31 +253,37 @@ pub fn walk_with(
             // already returned, and does not follow a reparse point. That is the
             // whole reason this walker exists in this shape — see the module
             // header for the measurement.
-            let Ok(metadata) = entry.metadata() else {
+            let Ok(listed) = entry.metadata() else {
+                // An entry the listing named and then could not describe. It is
+                // *something*, and dropping it silently makes it nothing —
+                // the same silent zero every module here refuses elsewhere. It
+                // is recorded so the summary and every aggregate built on it say
+                // "there is more here than we could see" (security review L12).
+                summary.unreadable.push(entry.path());
                 continue;
             };
-            let is_link = metadata.file_type().is_symlink();
+            let is_link = listed.file_type().is_symlink();
             if is_link && !options.report_links {
                 continue;
             }
-            let is_dir = metadata.is_dir();
+            let is_dir = listed.is_dir();
             let path = entry.path();
-            // The listing's copy of the timestamps can lag behind the truth;
-            // the size and the attributes cannot. A caller that reads clocks
-            // pays for the authoritative answer — see `accurate_timestamps`.
-            let clocks = if options.accurate_timestamps {
-                std::fs::symlink_metadata(&path).unwrap_or_else(|_| metadata.clone())
+            // The listing's copy of both the timestamps and the size can lag
+            // behind the truth. A caller that needs either to be authoritative
+            // pays one syscall for both — see `accurate_timestamps`.
+            let metadata = if options.accurate_timestamps {
+                std::fs::symlink_metadata(&path).unwrap_or(listed)
             } else {
-                metadata.clone()
+                listed
             };
             entries.push(WalkEntry {
                 path,
                 // A link's own size is meaningless and its target's bytes belong
                 // to wherever the target really lives, so it contributes nothing.
                 size_bytes: if is_dir || is_link { 0 } else { metadata.len() },
-                modified: to_utc(clocks.modified().ok()),
-                created: to_utc(clocks.created().ok()),
-                accessed: to_utc(clocks.accessed().ok()),
+                modified: to_utc(metadata.modified().ok()),
+                created: to_utc(metadata.created().ok()),
+                accessed: to_utc(metadata.accessed().ok()),
                 is_dir,
                 is_link,
                 compressed: is_compressed(&metadata),
@@ -590,6 +625,145 @@ mod tests {
             clocks(dir.path()),
             clocks(dir.path()),
             "a walk that reports authoritative clocks must be repeatable"
+        );
+    }
+
+    /// The other half of what `accurate_timestamps` buys, and the half that used
+    /// to be dropped on the floor.
+    ///
+    /// The walk took the authoritative `symlink_metadata` and then reported
+    /// `size_bytes` from the stale listing anyway. Measured error on a file the
+    /// parent index still called 3 bytes: 100 000 (security review M16). The
+    /// invariant this pins is simply that the authoritative walk agrees with an
+    /// authoritative stat, for every entry, always.
+    /// Grow `file` to `bytes` and hand back the still-open handle.
+    ///
+    /// The handle stays open on purpose: NTFS updates the parent directory's
+    /// copy of the size when the last handle closes, so a file being written
+    /// right now is exactly the file the listing is stale about — and "a program
+    /// is writing to it as we scan" is the ordinary case, not a contrived one.
+    fn growing(file: &Path, bytes: usize) -> std::fs::File {
+        use std::io::Write;
+        let mut handle = fs::OpenOptions::new()
+            .write(true)
+            .open(file)
+            .expect("open to grow");
+        handle.write_all(&vec![b'x'; bytes]).expect("grow");
+        handle.flush().expect("flush");
+        handle
+    }
+
+    #[test]
+    fn the_authoritative_walk_reports_authoritative_sizes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("grows.bin");
+        fs::write(&file, b"abc").expect("write");
+
+        // Read the directory once, so Windows has an index entry to go stale.
+        let (_, _) = collect(dir.path(), &CancellationToken::new());
+        let _still_open = growing(&file, 100_000);
+
+        let (entries, _) = collect(dir.path(), &CancellationToken::new());
+        for entry in &entries {
+            if entry.is_dir || entry.is_link {
+                continue;
+            }
+            let truth = fs::symlink_metadata(&entry.path).expect("stat").len();
+            assert_eq!(
+                entry.size_bytes,
+                truth,
+                "`{}` was reported as {} bytes and is {truth}",
+                entry.path.display(),
+                entry.size_bytes
+            );
+        }
+    }
+
+    /// The same measurement, printed rather than asserted: the fast path may or
+    /// may not lag on any given machine and run, and a test that *required* it
+    /// to lag would be a flake. Run with `--nocapture` to see the two figures.
+    #[test]
+    fn the_two_paths_are_measured_against_the_truth() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("grows.bin");
+        fs::write(&file, b"abc").expect("write");
+        let read_once = |options: WalkOptions| {
+            let mut size = 0;
+            walk_with(
+                dir.path(),
+                options,
+                &CancellationToken::new(),
+                &mut |entry| {
+                    if entry.path == file {
+                        size = entry.size_bytes;
+                    }
+                },
+            );
+            size
+        };
+        read_once(WalkOptions {
+            accurate_timestamps: false,
+            ..WalkOptions::default()
+        });
+        let _still_open = growing(&file, 100_000);
+
+        let truth = fs::symlink_metadata(&file).expect("stat").len();
+        let fast = read_once(WalkOptions {
+            accurate_timestamps: false,
+            ..WalkOptions::default()
+        });
+        let accurate = read_once(WalkOptions::default());
+
+        // The two sources, read directly rather than through the walker, so the
+        // evidence is about the filesystem and not about this module: `listed`
+        // is the number the old code reported on the accurate path.
+        let listed = fs::read_dir(dir.path())
+            .expect("read_dir")
+            .flatten()
+            .find(|entry| entry.path() == file)
+            .and_then(|entry| entry.metadata().ok())
+            .map(|meta| meta.len())
+            .unwrap_or_default();
+
+        println!("authoritative stat : {truth} bytes");
+        println!("directory listing  : {listed} bytes  <- what the accurate path used to report");
+        println!("accurate walk      : {accurate} bytes");
+        println!("fast walk          : {fast} bytes  [may lag; the treemap accepts that]");
+        if listed == truth {
+            println!("(this volume's index is up to date on this run, so the two agree here)");
+        }
+        assert_eq!(accurate, truth, "the accurate path must be accurate");
+    }
+
+    /// An entry the listing named and could not describe is a hole, and a hole
+    /// has to be recorded or the aggregate above it claims to be complete
+    /// (security review L12). Nothing here can force `DirEntry::metadata` to
+    /// fail on demand, so what is pinned is the contract: `unreadable` carries
+    /// entries as well as directories, and the doc says so.
+    #[test]
+    fn an_unreadable_directory_is_recorded_in_the_summary() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(dir.path().join("kept.txt"), b"x").expect("write");
+        // A nested `TempDir`, so the removal is `tempfile`'s and not a
+        // `fs::remove_*` in this crate — `clippy.toml` forbids those outside the
+        // quarantine, and so does `no_other_module_removes_user_data`.
+        let mut doomed = Some(tempfile::tempdir_in(dir.path()).expect("nested tempdir"));
+        let missing = doomed.as_ref().expect("present").path().to_path_buf();
+
+        // Remove it between the parent listing it and the walk opening it, which
+        // is the ordinary Windows race this branch exists for.
+        let summary = walk(dir.path(), &CancellationToken::new(), &mut |entry| {
+            if entry.path == missing {
+                doomed
+                    .take()
+                    .expect("present")
+                    .close()
+                    .expect("remove it mid-walk");
+            }
+        });
+        assert!(
+            summary.unreadable.contains(&missing),
+            "a directory that could not be listed has to be named: {summary:?}"
         );
     }
 
