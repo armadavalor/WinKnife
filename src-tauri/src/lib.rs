@@ -106,17 +106,167 @@ fn power_controller(dry_run: bool) -> Arc<dyn PowerController> {
     core::platform::real_power_controller()
 }
 
+/// Register everything the commands resolve out of Tauri's managed state.
+///
+/// Split out of [`run`]'s `setup` so that `tests/command_wiring.rs` can stand a
+/// real app up on **exactly** this registration rather than a hand-copied
+/// imitation of it. That is not tidiness: Tauri looks managed state up by
+/// `TypeId`, so a `State<'_, Database>` parameter against a managed
+/// `Arc<Database>` compiles, passes clippy, passes 486 unit tests, and then
+/// fails every single invocation at runtime with `state not managed for field
+/// `db``. The only thing that can catch that is a test that registers what
+/// production registers and then dispatches through the real IPC path, and the
+/// only way to keep such a test honest is for both callers to share this
+/// function.
+///
+/// Returns the timer, which [`run`] still needs for the tray ticker.
+///
+/// # Errors
+/// Returns an error if the module registry, the database, the rule packs or the
+/// known-apps list cannot be built — all of which are fatal by design.
+pub fn manage_state<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    app_data_dir: &Path,
+    resource_dir: Option<&Path>,
+    dry_run: bool,
+) -> Result<Arc<ShutdownTimer>> {
+    app.manage(modules::registry()?);
+    app.manage(ScanStore::new());
+    app.manage(CancelRegistry::new());
+
+    // Logging first, so everything after it is on the record.
+    let log_guard = core::logging::init(app_data_dir);
+    let connection = db::open(app_data_dir)?;
+
+    // Validated, not trusted: the settings table is a key/value store of
+    // strings, and a stored `0` used to mean "purge everything on the next
+    // start" (security review H7).
+    let policy = RetentionPolicy::validated(
+        settings::get_i64(
+            &connection,
+            settings::KEY_RETENTION_DAYS,
+            core::quarantine::DEFAULT_RETENTION_DAYS,
+        )?,
+        settings::get_u64(
+            &connection,
+            settings::KEY_MAX_BYTES,
+            core::quarantine::DEFAULT_MAX_BYTES,
+        )?,
+    );
+    let quarantine = Quarantine::new(app_data_dir, policy);
+
+    // Retention runs at start, before anything can add to the pile.
+    match quarantine.purge(&connection, chrono::Utc::now()) {
+        Ok(report) if !report.is_empty() => tracing::info!(
+            purged = report.purged_items,
+            freed_bytes = report.freed_bytes,
+            "startup quarantine purge"
+        ),
+        Ok(_) => {}
+        Err(err) => tracing::error!(error = %err, "startup quarantine purge failed"),
+    }
+
+    let rules_dir = rules_dir(resource_dir);
+    let brain = build_brain(&SystemEnv, app_data_dir, quarantine.root(), &rules_dir)?;
+
+    let timer = Arc::new(ShutdownTimer::new(power_controller(dry_run)));
+    // Re-arm a timer that survived a restart, if its target is still ahead;
+    // discard it otherwise.
+    if let Some(persisted) = settings::get_json(&connection, settings::KEY_ACTIVE_TIMER)? {
+        if !timer.rearm(persisted, chrono::Utc::now()) {
+            settings::clear(&connection, settings::KEY_ACTIVE_TIMER)?;
+        }
+    }
+
+    // The startup manager is composed here, like everything else that can touch
+    // the machine: it holds the real registry, the real task scheduler and the
+    // real signature probe, and every one of those refuses to write until the
+    // flag armed in `run()` is set.
+    let database = Arc::new(Database::new(connection));
+    let startup_service = Arc::new(modules::startup::StartupService::new(
+        Arc::new(core::platform::SystemRegistry),
+        Arc::new(core::platform::SystemTaskScheduler),
+        Arc::new(core::platform::SystemSignatureProbe),
+        modules::startup::KnownApps::load(&rules_dir)?,
+        modules::startup::StartupPaths::from_env(&SystemEnv, app_data_dir),
+        SystemEnv.var("WINDIR").map(std::path::PathBuf::from),
+    ));
+
+    app.manage(commands::Services {
+        quarantine,
+        brain,
+        recycle_bin: core::platform::real_recycle_bin(),
+        startup: Arc::new(modules::startup::StartupControlAdapter::new(
+            Arc::clone(&startup_service),
+            Arc::clone(&database),
+        )),
+        startup_service,
+        rules_dir,
+    });
+    // `Arc<Database>`, because the startup adapter above holds a clone. Every
+    // `db:` parameter in `commands.rs` and every `try_state` in this file has to
+    // spell it the same way.
+    app.manage(database);
+    app.manage(Arc::clone(&timer));
+    if let Some(guard) = log_guard {
+        // The appender guard has to outlive the process, or buffered audit lines
+        // are lost on exit.
+        app.manage(guard);
+    }
+
+    Ok(timer)
+}
+
+/// Every command the WebView is allowed to call.
+///
+/// Split out of [`run`] for the same reason as [`manage_state`]: the wiring test
+/// registers this exact list, so a command added to the app is a command the
+/// test dispatches.
+pub fn invoke_handler<R: tauri::Runtime>(
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        commands::list_modules,
+        commands::dashboard_summary,
+        commands::start_scan,
+        commands::cancel_scan,
+        commands::start_duplicate_scan,
+        commands::treemap_drives,
+        commands::treemap_scan,
+        commands::treemap_children,
+        commands::treemap_cached,
+        commands::reveal_in_explorer,
+        commands::startup_scan,
+        commands::startup_enable,
+        commands::get_recommendations,
+        commands::scan_summary,
+        commands::execute,
+        commands::get_settings,
+        commands::set_settings,
+        commands::quarantine_list,
+        commands::quarantine_batch_items,
+        commands::quarantine_stats,
+        commands::quarantine_restore,
+        commands::quarantine_restore_item,
+        commands::quarantine_purge,
+        commands::shutdown_schedule,
+        commands::shutdown_cancel,
+        commands::shutdown_status,
+    ]
+}
+
 /// The database, for the handful of places that reach it outside a command.
 ///
 /// The tray menu, the tick loop and the window-geometry listener all run on an
-/// `AppHandle` rather than through IPC. Each used to name the type itself, and
-/// two of the four named it wrong: `try_state::<Database>()` against a managed
-/// `Arc<Database>` matches nothing and returns `None`, which made the tray's
-/// "Cancel timer" refuse outright and left a fired timer sitting in the settings
-/// table to re-arm on the next start. One accessor means one spelling to get
-/// right, next to the `app.manage` call that decides it.
+/// `AppHandle` rather than through IPC, so no command signature covers them and
+/// `tests/command_wiring.rs` cannot dispatch to them. Each used to name the type
+/// itself, and two of the four named it wrong: `try_state::<Database>()` against
+/// a managed `Arc<Database>` returns `None`, which made the tray's "Cancel
+/// timer" refuse outright and left a fired timer sitting in the settings table
+/// to re-arm on the next start. One accessor means one spelling to get right,
+/// next to the `app.manage` call that decides it.
 ///
-/// Generic over the runtime so a test can check it against a mock app.
+/// Generic over the runtime so `tests/command_wiring.rs` can check it against
+/// the mock app it already builds.
 pub fn managed_database<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Option<tauri::State<'_, Arc<Database>>> {
@@ -150,90 +300,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
-            app.manage(modules::registry()?);
-            app.manage(ScanStore::new());
-            app.manage(CancelRegistry::new());
-
             let app_data_dir = app
                 .path()
                 .app_data_dir()
                 .map_err(|err| CoreError::AppDataDir(format!("{err}")))?;
-            // Logging first, so everything after it is on the record.
-            let log_guard = core::logging::init(&app_data_dir);
-            let connection = db::open(&app_data_dir)?;
+            let resource_dir = app.path().resource_dir().ok();
 
-            // Validated, not trusted: the settings table is a key/value store
-            // of strings, and a stored `0` used to mean "purge everything on
-            // the next start" (security review H7).
-            let policy = RetentionPolicy::validated(
-                settings::get_i64(
-                    &connection,
-                    settings::KEY_RETENTION_DAYS,
-                    core::quarantine::DEFAULT_RETENTION_DAYS,
-                )?,
-                settings::get_u64(
-                    &connection,
-                    settings::KEY_MAX_BYTES,
-                    core::quarantine::DEFAULT_MAX_BYTES,
-                )?,
-            );
-            let quarantine = Quarantine::new(&app_data_dir, policy);
-
-            // Retention runs at start, before anything can add to the pile.
-            match quarantine.purge(&connection, chrono::Utc::now()) {
-                Ok(report) if !report.is_empty() => tracing::info!(
-                    purged = report.purged_items,
-                    freed_bytes = report.freed_bytes,
-                    "startup quarantine purge"
-                ),
-                Ok(_) => {}
-                Err(err) => tracing::error!(error = %err, "startup quarantine purge failed"),
-            }
-
-            let rules_dir = rules_dir(app.path().resource_dir().ok().as_deref());
-            let brain = build_brain(&SystemEnv, &app_data_dir, quarantine.root(), &rules_dir)?;
-
-            let timer = Arc::new(ShutdownTimer::new(power_controller(dry_run)));
-            // Re-arm a timer that survived a restart, if its target is still
-            // ahead; discard it otherwise.
-            if let Some(persisted) = settings::get_json(&connection, settings::KEY_ACTIVE_TIMER)? {
-                if !timer.rearm(persisted, chrono::Utc::now()) {
-                    settings::clear(&connection, settings::KEY_ACTIVE_TIMER)?;
-                }
-            }
-
-            // The startup manager is composed here, like everything else that
-            // can touch the machine: it holds the real registry, the real task
-            // scheduler and the real signature probe, and every one of those
-            // refuses to write until the flag armed above is set.
-            let database = Arc::new(Database::new(connection));
-            let startup_service = Arc::new(modules::startup::StartupService::new(
-                Arc::new(core::platform::SystemRegistry),
-                Arc::new(core::platform::SystemTaskScheduler),
-                Arc::new(core::platform::SystemSignatureProbe),
-                modules::startup::KnownApps::load(&rules_dir)?,
-                modules::startup::StartupPaths::from_env(&SystemEnv, &app_data_dir),
-                SystemEnv.var("WINDIR").map(std::path::PathBuf::from),
-            ));
-
-            app.manage(commands::Services {
-                quarantine,
-                brain,
-                recycle_bin: core::platform::real_recycle_bin(),
-                startup: Arc::new(modules::startup::StartupControlAdapter::new(
-                    Arc::clone(&startup_service),
-                    Arc::clone(&database),
-                )),
-                startup_service,
-                rules_dir,
-            });
-            app.manage(database);
-            app.manage(Arc::clone(&timer));
-            if let Some(guard) = log_guard {
-                // The appender guard has to outlive the process, or buffered
-                // audit lines are lost on exit.
-                app.manage(guard);
-            }
+            let timer = manage_state(
+                app.handle(),
+                &app_data_dir,
+                resource_dir.as_deref(),
+                dry_run,
+            )?;
 
             tray::install(app.handle())?;
             spawn_ticker(app.handle().clone(), timer);
@@ -241,34 +319,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::list_modules,
-            commands::dashboard_summary,
-            commands::start_scan,
-            commands::cancel_scan,
-            commands::start_duplicate_scan,
-            commands::treemap_drives,
-            commands::treemap_scan,
-            commands::treemap_children,
-            commands::treemap_cached,
-            commands::reveal_in_explorer,
-            commands::startup_scan,
-            commands::startup_enable,
-            commands::get_recommendations,
-            commands::scan_summary,
-            commands::execute,
-            commands::get_settings,
-            commands::set_settings,
-            commands::quarantine_list,
-            commands::quarantine_batch_items,
-            commands::quarantine_stats,
-            commands::quarantine_restore,
-            commands::quarantine_restore_item,
-            commands::quarantine_purge,
-            commands::shutdown_schedule,
-            commands::shutdown_cancel,
-            commands::shutdown_status,
-        ])
+        .invoke_handler(invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
