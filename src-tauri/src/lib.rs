@@ -465,6 +465,105 @@ mod tests {
         );
     }
 
+    /// **Can the app start on the machine running this test?**
+    ///
+    /// Every other test in this crate hands the brain a [`MapEnv`] full of
+    /// fabricated values, so until this one existed nothing had ever loaded the
+    /// shipped packs against the environment the app actually boots in — and
+    /// that is precisely where it did not boot. Windows hands `%TEMP%` over in
+    /// 8.3 form on a great many accounts (`C:\Users\ARMADA~1\AppData\Local\Temp`,
+    /// `C:\Users\RUNNER~1\…` on the GitHub runner) while `%USERPROFILE%` arrives
+    /// in full. Compared as text those are two different places, the profile
+    /// containment check said the temp rules reach outside the profile, and
+    /// `build_brain` failing is fatal by design: `run()`'s `setup` propagates it
+    /// and no window ever opens.
+    ///
+    /// [`MapEnv`]: core::platform::MapEnv
+    #[test]
+    fn the_shipped_packs_load_against_the_real_process_environment() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app_data = temp.path().join("appdata");
+        let quarantine = app_data.join("quarantine");
+
+        let brain = build_brain(&SystemEnv, &app_data, &quarantine, &rules_dir(None))
+            .unwrap_or_else(|err| {
+                let var = |name: &str| SystemEnv.var(name).unwrap_or_else(|| "<unset>".to_owned());
+                panic!(
+                    "WinKnife cannot start on this machine.\n\
+                     *** LOAD FAILED *** {err}\n\
+                     TEMP         = {}\n\
+                     LOCALAPPDATA = {}\n\
+                     USERPROFILE  = {}",
+                    var("TEMP"),
+                    var("LOCALAPPDATA"),
+                    var("USERPROFILE"),
+                )
+            });
+
+        assert!(!brain.packs().is_empty(), "the shipped packs must load");
+        assert!(
+            brain
+                .protection_reason(Path::new("C:\\Windows\\System32\\a.dll"))
+                .is_some(),
+            "hard gates must be armed"
+        );
+    }
+
+    /// The exact shape that kept the window from opening, pinned so it cannot
+    /// come back: a short-form `%TEMP%` nested inside a long-form
+    /// `%USERPROFILE%`. Two spellings of one directory, and the containment
+    /// check has to see through both.
+    ///
+    /// Built out of real directories rather than invented strings, because
+    /// seeing through a spelling is exactly the part that needs a disk.
+    #[cfg(windows)]
+    #[test]
+    fn a_short_form_temp_inside_a_long_form_profile_still_loads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // The long spelling, whatever the tempdir handed us.
+        let profile = dunce::canonicalize(dir.path()).expect("canonicalize");
+        let temp = profile.join("AppData").join("Local").join("Temp");
+        let local_app_data = profile.join("AppData").join("Local");
+        std::fs::create_dir_all(temp.join("Microsoft").join("Windows").join("Explorer"))
+            .expect("fixture tree");
+
+        // …and the short one, which is what Windows really puts in `%TEMP%` on
+        // an account whose name does not fit 8.3.
+        let short_temp = core::test_support::short_path_name(&temp);
+        let Some(short_temp) = short_temp.filter(|short| short != &temp) else {
+            core::test_support::privileged_operation_unavailable(
+                "a_short_form_temp_inside_a_long_form_profile_still_loads",
+                "no 8.3 alias is available here (fsutil 8dot3name), so the two spellings \
+                 this test compares cannot be produced",
+            );
+            return;
+        };
+
+        let env = core::platform::MapEnv::new()
+            .with("WINDIR", "C:\\Windows")
+            .with("USERPROFILE", profile.to_string_lossy())
+            .with("TEMP", short_temp.to_string_lossy())
+            .with("LOCALAPPDATA", local_app_data.to_string_lossy());
+
+        let app_data = profile.join("appdata");
+        build_brain(
+            &env,
+            &app_data,
+            &app_data.join("quarantine"),
+            &rules_dir(None),
+        )
+        .unwrap_or_else(|err| {
+            panic!(
+                "a short-form `%TEMP%` is still inside a long-form `%USERPROFILE%`.\n\
+                     *** LOAD FAILED *** {err}\n\
+                     TEMP        = {}\n\
+                     USERPROFILE = {}",
+                short_temp.display(),
+                profile.display(),
+            )
+        });
+    }
+
     #[test]
     fn a_broken_rules_directory_refuses_to_build_a_brain() {
         let temp = tempfile::tempdir().expect("tempdir");

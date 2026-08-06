@@ -18,6 +18,7 @@ use globset::{Glob, GlobMatcher};
 use serde::{Deserialize, Serialize};
 
 use crate::core::error::{CoreError, Result};
+use crate::core::path_compare;
 use crate::core::platform::{env, EnvResolver};
 use crate::core::types::RiskBucket;
 
@@ -154,6 +155,13 @@ impl CompiledRule {
     }
 
     /// Whether `path` matches an include pattern and no exclude pattern.
+    ///
+    /// Deliberately a *text* comparison, and not routed through
+    /// [`crate::core::path_compare`]: these globs were compiled from the
+    /// spelling the rule pack was written in, so canonicalising the candidate
+    /// would rewrite it into a spelling the pattern never mentions and the rule
+    /// would stop matching its own directory. Where the candidate really points
+    /// is asked separately, by the gate, before anything is walked or moved.
     pub fn matches_path(&self, path: &Path) -> bool {
         // globset works on `/`-separated text; Windows paths arrive either way.
         let normalised = path.to_string_lossy().replace('\\', "/").to_lowercase();
@@ -368,9 +376,17 @@ pub fn compile_spec(spec: RulePackSpec, env: &dyn EnvResolver) -> Result<RulePac
                     // says so. A pack that expands to somewhere else has to
                     // declare `requires_admin`, whatever the pattern looked
                     // like before expansion (security review M8).
+                    //
+                    // Through `path_compare`, because the two variables need not
+                    // arrive in the same spelling: Windows hands `%TEMP%` over as
+                    // `C:\Users\ARMADA~1\AppData\Local\Temp` on any account whose
+                    // name does not fit 8.3, while `%USERPROFILE%` comes back in
+                    // full. Compared as text that is outside the profile, every
+                    // shipped pack was refused, and a rules-load failure is fatal
+                    // at startup — the window never opened (security review C3).
                     if !rule.requires_admin && !is_shell_namespace(&expanded) {
                         if let Some(profile) = &profile {
-                            if !is_inside(profile, &root) {
+                            if !path_compare::is_inside(profile, &root) {
                                 return Err(CoreError::RulePack {
                                     pack: spec.id.clone(),
                                     field: format!("rules.{}.requires_admin", rule.id),
@@ -513,23 +529,6 @@ fn reaches_outside_profile(pattern: &str) -> bool {
 /// containment is not a question that can be asked about it.
 fn is_shell_namespace(pattern: &str) -> bool {
     pattern.len() >= 6 && pattern[..6].eq_ignore_ascii_case("shell:")
-}
-
-/// Whether `path` sits inside `profile`, comparing whole components so
-/// `C:\Users\dev2` is not read as inside `C:\Users\dev`.
-fn is_inside(profile: &Path, path: &Path) -> bool {
-    let parts = |value: &Path| -> Vec<String> {
-        value
-            .to_string_lossy()
-            .replace('/', "\\")
-            .split('\\')
-            .filter(|part| !part.is_empty() && *part != ".")
-            .map(|part| part.trim_end_matches(['.', ' ']).to_lowercase())
-            .filter(|part| !part.is_empty())
-            .collect()
-    };
-    let (profile, path) = (parts(profile), parts(path));
-    !profile.is_empty() && path.len() >= profile.len() && path[..profile.len()] == profile[..]
 }
 
 /// Why a pattern is refused whatever else it says, or `None` when its shape is
@@ -889,6 +888,7 @@ mod tests {
 
     #[test]
     fn a_sibling_profile_is_not_inside_the_profile() {
+        let is_inside = path_compare::is_inside;
         assert!(is_inside(
             Path::new("C:\\Users\\dev"),
             Path::new("C:\\Users\\dev\\AppData\\Local\\Temp")
@@ -905,6 +905,44 @@ mod tests {
             Path::new("C:\\Users\\dev"),
             Path::new("C:\\Windows")
         ));
+    }
+
+    /// Security review C3, at the level the bug lives at: a `%TEMP%` spelled as
+    /// an 8.3 alias really is inside a `%USERPROFILE%` spelled in full, and the
+    /// containment check has to say so or the app does not start.
+    ///
+    /// Real directories, because seeing through a spelling is the part that
+    /// needs a disk.
+    #[cfg(windows)]
+    #[test]
+    fn a_short_form_temp_is_still_inside_a_long_form_profile() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let profile = dunce::canonicalize(dir.path()).expect("canonicalize");
+        let temp = profile.join("AppData").join("Local").join("Temp");
+        std::fs::create_dir_all(&temp).expect("fixture tree");
+
+        let Some(short_temp) =
+            crate::core::test_support::short_path_name(&temp).filter(|short| short != &temp)
+        else {
+            crate::core::test_support::privileged_operation_unavailable(
+                "a_short_form_temp_is_still_inside_a_long_form_profile",
+                "no 8.3 alias is available here (fsutil 8dot3name), so the two spellings \
+                 this test compares cannot be produced",
+            );
+            return;
+        };
+
+        let env = MapEnv::new()
+            .with("USERPROFILE", profile.to_string_lossy())
+            .with("TEMP", short_temp.to_string_lossy());
+
+        compile_pack("windows-temp", VALID, &env).unwrap_or_else(|err| {
+            panic!(
+                "`{}` is inside `{}`; they are the same tree spelled two ways: {err}",
+                short_temp.display(),
+                profile.display()
+            )
+        });
     }
 
     #[test]
