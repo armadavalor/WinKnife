@@ -113,3 +113,25 @@ Open items awaiting the producer (not blocking implementation):
   the final product name.
 - GitHub owner/repo slug for the CI badge — decide when the remote is created;
   CI stays unverified until first push.
+- [ ] 2026-08-06 (phase 1 remediation r2): the C2 allow-list means the gate only
+      accepts `X:\...`. A future phase that wants to clean a mapped network
+      drive or a genuinely remote share will have to widen `gate_path`
+      deliberately rather than by accident. Took the narrow reading: phase 1
+      packs are local-drive only, and "refused as unjudgeable" is the safe
+      answer for everything else.
+- [ ] 2026-08-06 (phase 1 remediation r2): `shell:RecycleBinFolder` is now
+      reported as unjudgeable by `reason_for`, because it is not a filesystem
+      path. Nothing breaks — `scan` routes the recycle-bin pack through the
+      shell API before `plan_walks` — but if a later phase gives a pack another
+      shell-namespace root it will need an explicit non-filesystem branch
+      rather than a walk root.
+- [ ] 2026-08-06 (phase 1 remediation r2): supersedes the round-1 note on M4.
+      The size cap now *skips* zero-byte items instead of stopping at them, so
+      the cap can no longer be wedged by a trickle of empty files (H8). The
+      under-purge is now bounded to exactly the bytes zero-byte items hold,
+      which is zero.
+- [ ] 2026-08-06 (phase 1 remediation r2): `WINKNIFE_ALLOW_SKIP_LINK_TESTS=1`
+      turns six link/alias-dependent safety tests into visible skips. The
+      development machine has no Developer Mode, so the local verification run
+      used it; CI must not, and `ci.yml` fails if it is set. Whoever first runs
+      CI should confirm all six actually execute there.

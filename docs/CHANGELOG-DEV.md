@@ -370,3 +370,104 @@ every finding it raised, fixed, with a regression test per fix. 262 unit tests
   are carried to the frontend and typed; showing them is a drawer change and
   was not in this brief's scope.
 - Still not launched visually — same caveat as the phase-1 entry above.
+
+## 2026-08-06 — Phase 1 security remediation, round 2
+
+Round 1 closed 19 findings; the re-review still returned BLOCK. It found a 9th
+protected-path bypass the round had missed, and one round-1 fix had introduced a
+new HIGH. Everything below was reproduced against the real code with a probe
+before being fixed, and re-probed afterwards.
+
+### C2 — every gate missed `\localhost\C$\Windows\System32\ntoskrnl.exe`
+
+The administrative share is the local disk under another name, it resolves from
+a **non-elevated** process, and canonicalising it yields a third spelling
+(`\?\UNC\localhost\c$\...`) that the list did not recognise either. Proven end
+to end before the fix: a pack with pattern `\localhost\C$\Windows\Temp\**` was
+ACCEPTED, the root was WALKED, and the file came back `bucket=Safe
+action=Quarantine`. `\127.0.0.1\C$\...` behaved identically.
+
+**Two rounds of rejecting bad spellings by name both shipped a bypass, so that
+approach is now closed.** The gate is an allow-list:
+
+- `brain::protected::gate_path(path) -> GateVerdict` is the single chokepoint.
+  It canonicalises and accepts **only** a plain local drive-letter path — after
+  an optional `\?\` prefix the first component must be `X:` followed by a
+  separator. Everything else is `Refused`, and refused is not allowed: the
+  caller skips the item and reports why. The shape is checked on the raw input
+  *and* on the canonical form, because a local path can resolve onto a share.
+- Both callers route through it and neither may fall back to the raw string:
+  `modules::cleaner::resolve_root` (walk roots) and `core::executor::apply_one`
+  (execute time). `executor`'s private `canonical_gate_path`/`GatePath` are gone.
+- `rules::unsafe_pattern_shape` now rejects any pattern starting with `\` at
+  all, plus `\??\`, on top of the existing `..`/verbatim/8.3 rejections.
+- `strip_windows_prefix` also strips `\??\`, and `ProtectedPaths::reason_for`
+  now reports a non-drive-anchored path as protected-because-unjudgeable rather
+  than "not protected" — the lexical list stays as defence in depth, but it is
+  no longer the only thing between a rule pack and `C:\Windows`.
+
+### H8 — a zero-byte item permanently disabled the quarantine size cap
+
+Round 1's fix for M4 used `break`. Candidates are ordered `quarantined_at ASC`,
+so one empty `.tmp` at the head aborted eviction with nothing doomed, and a
+quarantine over its cap never shrank for the whole retention window. Now
+`continue`: a zero-byte item cannot reduce `over_by`, so it is skipped and real
+items keep being evicted. The loop consumes a finite snapshot, so it terminates.
+
+### M10 — `cleanup_partial` could still delete a user file
+
+`destination_existed` was sampled *before* the copy. A file appearing at `to`
+between probe and `create_new` made the copy fail `AlreadyExists` with the
+probe still saying "did not exist", so cleanup deleted it — and on the restore
+path `to` is a user path. `copy_file` and `copy_dir_recursive` now report
+whether **they** created `to`, and cleanup keys on that.
+
+### M11 — three safety tests self-skipped silently
+
+`scanner::symlinks_are_never_followed`,
+`executor::a_link_pointing_into_a_protected_directory_is_refused` and
+`cleaner::a_walk_root_that_resolves_into_a_protected_location_is_refused`
+asserted nothing on an unprivileged machine while the suite stayed green. The
+audit found **two more** the review had not named
+(`quarantine::symlinks_are_never_quarantined`,
+`quarantine::a_directory_containing_a_link_is_never_moved_across_volumes`) and
+one legitimately environment-dependent skip
+(`executor::an_8_3_alias_of_a_protected_directory_is_refused`). All six now go
+through `core::test_support::privileged_operation_unavailable`, which **fails**
+unless `WINKNIFE_ALLOW_SKIP_LINK_TESTS=1` is set, and announces the skip on the
+process's real stderr so libtest's per-test capture cannot swallow it. CI does
+not set the variable and has a step that fails if anything else does. Three new
+privilege-free companions assert the same logic on every machine.
+
+### M12 — an in-crate test could arm the process-global OS-effects flag
+
+`arm_real_os_effects` was `pub(crate)`, so a `#[cfg(test)]` module could arm it
+and unlock the real `SystemPower`/`WindowsRecycleBin` for every later test in
+that binary. It is now `#[cfg(not(test))]` — a test that calls it does not
+compile — and the module header states exactly what is and is not guaranteed
+instead of overclaiming.
+
+### L6, L7
+
+- The trailing-dot/space comment was factually wrong. Ground truth:
+  `C:\Windows.\System32\ntoskrnl.exe` resolves (the dot is discarded),
+  `C:\Windows \System32\...` is NotFound. Trimming spaces is a harmless
+  over-refusal; the justification now says so.
+- `clippy.toml` disallows `std::fs::File::create` and
+  `std::fs::OpenOptions::truncate`. Both were verified to fire by compiling a
+  deliberate violation; no production code needed an `#[allow]`.
+
+**Verification.** Verdicts were read out of a compiled probe against the real
+`gate_path` / `resolve_root` / `parse_pack` / `execute`, not off the source.
+After the fix every attack spelling is `REFUSED` by the gate *and* `protected`
+by the list; the hostile pack is rejected at parse; the walk root is refused;
+`analyze` returns `DoNotDelete`/`InfoOnly`/`savings=0`; and the executor skips
+with `reclaimed=0`. `cargo fmt --all --check`, `cargo clippy --all-targets --
+-D warnings`, `cargo test` (283 green), `npm run check` (0 errors), `npm run
+build` all pass.
+
+**Deferred.** `quarantine::symlinks_are_never_quarantined` has no
+privilege-free companion — `take`'s refusal reads `symlink_metadata` directly,
+and mocking it means injecting a metadata probe into `Quarantine`, which is a
+design change this brief did not ask for. The copy layer's link handling *is*
+covered without privileges.
