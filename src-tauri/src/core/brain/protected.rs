@@ -60,6 +60,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::core::path_compare::{self, CanonicalPath};
 use crate::core::platform::EnvResolver;
 
 /// Why a path that climbs with `..` is refused outright.
@@ -247,6 +248,19 @@ impl ProtectedPaths {
     /// as a junction is involved, so the honest verdict is "not judgeable".
     /// Nothing legitimate reaches here with a `..` in it — the walker produces
     /// absolute paths and the rule-pack parser rejects the pattern outright.
+    ///
+    /// # Why this one comparison stays lexical
+    ///
+    /// Both sides are compared as normalised text, not resolved against the
+    /// disk, and that is deliberate. This runs one probe against every entry in
+    /// the list, for every file examined — resolving per entry would be a
+    /// syscall per entry per file. The disk lookup happens once instead, in the
+    /// two places that can afford it: [`widen`] resolves each entry when the
+    /// list is built, and [`Brain::path_refusal`] resolves the probe before it
+    /// asks. So by the time a comparison reaches here, both sides have already
+    /// been through [`crate::core::path_compare`].
+    ///
+    /// [`Brain::path_refusal`]: crate::core::brain::Brain::path_refusal
     pub fn reason_for(&self, path: &Path) -> Option<&str> {
         if has_traversal(path) {
             return Some(TRAVERSAL_REASON);
@@ -374,6 +388,11 @@ pub fn gate_path(path: &Path) -> GateVerdict {
 /// none of them can be compared with a list of `X:\...` entries.
 ///
 /// The returned clause is phrased to follow "because".
+///
+/// Deliberately a *text* check, and not routed through
+/// [`crate::core::path_compare`]: "how is this written?" is a question about the
+/// text by definition, and this runs before anything is resolved — refusing an
+/// unjudgeable spelling without touching it is the whole point of an allow-list.
 fn plain_local_shape(path: &Path) -> std::result::Result<(), String> {
     let Some(text) = path.to_str() else {
         return Err("it is not valid Unicode, so it has no comparable spelling".to_owned());
@@ -467,10 +486,12 @@ fn plain_local_shape(path: &Path) -> std::result::Result<(), String> {
 fn widen(entry: ProtectedEntry, into: &mut Vec<ProtectedEntry>) {
     let normalised = normalise(&entry.path);
 
+    // Only a plain local drive-letter path is resolved. A drive root entry is
+    // `C:`, and a bare name such as the volume-metadata folder belongs to no
+    // drive at all — resolving either would ask the disk about somewhere else.
     let canonical = plain_local_shape(&normalised)
         .ok()
-        .and_then(|()| dunce::canonicalize(&normalised).ok())
-        .map(|canonical| normalise(&canonical))
+        .map(|()| CanonicalPath::resolved(&normalised).to_path_buf())
         .filter(|canonical| canonical != &normalised);
 
     if let Some(canonical) = canonical {
@@ -490,112 +511,29 @@ fn widen(entry: ProtectedEntry, into: &mut Vec<ProtectedEntry>) {
 /// backslash-separated, no verbatim prefix, no trailing separator.
 ///
 /// Not `canonicalize`: that needs the path to exist, and the brain has to be
-/// able to judge a path it has only been told about. The executor does
-/// canonicalise, and calls this on the result.
+/// able to judge a path it has only been told about. [`widen`] resolves each
+/// entry against the disk on the way in, and the gate resolves the probe, so
+/// both sides of a `reason_for` comparison have already been through
+/// [`crate::core::path_compare`] by the time they meet.
 fn normalise(path: &Path) -> PathBuf {
-    let parts = split(path);
-    if parts.is_empty() {
-        return PathBuf::from("\\");
-    }
-    PathBuf::from(parts.join("\\"))
+    CanonicalPath::lexical(path).to_path_buf()
 }
 
 /// Split a path into comparable components. `C:\Windows\System32` becomes
 /// `["c:", "windows", "system32"]`.
 ///
-/// Deliberately text-based rather than `Path::components`: the normalisations
-/// below (verbatim prefix, trailing dot and space, lexical `..`) are Windows
-/// path semantics, and they have to apply identically whatever host the tests
-/// happen to run on.
+/// The Windows path text semantics — verbatim prefix, trailing dot and space,
+/// lexical `..`, the UNC share root that is one component and not two — live in
+/// [`crate::core::path_compare`], because three separate copies of them is how
+/// two spellings of one path came to be compared as raw text three reviews
+/// running.
 fn split(path: &Path) -> Vec<String> {
-    let raw = strip_windows_prefix(&path.to_string_lossy().replace('/', "\\"));
-
-    let mut parts: Vec<String> = Vec::new();
-    // How many leading components anchor the path. `..` never climbs past the
-    // anchor, matching Win32: `C:\..\Windows` is `C:\Windows`.
-    let mut anchor = 0usize;
-    let mut rest = raw.as_str();
-
-    // A UNC share root is two components that only mean anything together, so
-    // they are kept as one and can never be mistaken for a local directory.
-    if let Some(unc) = rest.strip_prefix("\\\\") {
-        let mut pieces = unc.splitn(3, '\\');
-        let server = pieces.next().unwrap_or_default();
-        let share = pieces.next().unwrap_or_default();
-        if !server.is_empty() && !share.is_empty() {
-            parts.push(format!(
-                "\\\\{}\\{}",
-                server.to_lowercase(),
-                share.to_lowercase()
-            ));
-            anchor = 1;
-            rest = pieces.next().unwrap_or("");
-        }
-    }
-
-    for part in rest.split('\\') {
-        match part {
-            "" | "." => continue,
-            ".." => {
-                if parts.len() > anchor {
-                    parts.pop();
-                }
-            }
-            _ => {
-                // Win32 discards a trailing dot when it resolves a name, so
-                // `C:\Windows.\System32\ntoskrnl.exe` opens the real file.
-                // A trailing space is *not* discarded — `C:\Windows \System32`
-                // is NotFound on a real machine — but trimming it too is a
-                // harmless over-refusal, and it costs nothing to be wrong in
-                // the direction that protects more (security review L6).
-                let trimmed = part.trim_end_matches(['.', ' ']).to_lowercase();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                if parts.is_empty() && is_drive(&trimmed) {
-                    anchor = 1;
-                }
-                parts.push(trimmed);
-            }
-        }
-    }
-    parts
-}
-
-/// Remove the `\\?\` verbatim, `\\.\` device or `\??\` NT-object prefix,
-/// putting a UNC path back into its ordinary `\\server\share` spelling.
-///
-/// All three name the same file the plain spelling does. `gate_path` refuses
-/// the device and NT-namespace forms outright; stripping them here keeps the
-/// lexical list useful as the second layer for a caller that only has text
-/// (security review C2e).
-fn strip_windows_prefix(raw: &str) -> String {
-    for prefix in ["\\\\?\\", "\\\\.\\", "\\??\\"] {
-        if let Some(rest) = raw.strip_prefix(prefix) {
-            let unc_marker = "unc\\";
-            if rest.len() >= unc_marker.len()
-                && rest[..unc_marker.len()].to_lowercase() == unc_marker
-            {
-                return format!("\\\\{}", &rest[unc_marker.len()..]);
-            }
-            return rest.to_owned();
-        }
-    }
-    raw.to_owned()
-}
-
-/// Whether a component is a drive specifier such as `c:`.
-fn is_drive(part: &str) -> bool {
-    let bytes = part.as_bytes();
-    bytes.len() == 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic()
+    CanonicalPath::lexical(path).parts().to_vec()
 }
 
 /// Whether a path contains a `..` component in any spelling.
 fn has_traversal(path: &Path) -> bool {
-    path.to_string_lossy()
-        .replace('/', "\\")
-        .split('\\')
-        .any(|part| part == "..")
+    path_compare::has_traversal(path)
 }
 
 #[cfg(test)]

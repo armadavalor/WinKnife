@@ -25,6 +25,7 @@ use crate::core::brain::{
     self, Brain, CompiledRule, GateVerdict, ProtectedPaths, RuleAction, RulePack,
 };
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::path_compare::CanonicalPath;
 use crate::core::platform::RecycleBin;
 use crate::core::scanner::{self, CancellationToken, WalkEntry};
 use crate::core::types::{Action, Finding, FindingKind, Recommendation, RiskBucket};
@@ -229,11 +230,15 @@ fn resolve_root(root: &Path, protected: &ProtectedPaths) -> RootVerdict {
                     canonical.display()
                 ));
             }
-            RootVerdict::Walk(canonical.to_string_lossy().to_lowercase())
+            // The identity that folds duplicate roots together. Through
+            // `path_compare`, so `%TEMP%` and `%LOCALAPPDATA%\Temp` still fold
+            // into one walk when the two variables disagree about how to spell
+            // the tree they share — lower-casing the text alone did not.
+            RootVerdict::Walk(CanonicalPath::resolved(&canonical).key())
         }
         // A rule pointing at a folder this machine does not have is not an
         // error; the walk simply finds nothing.
-        GateVerdict::Missing => RootVerdict::Walk(root.to_string_lossy().to_lowercase()),
+        GateVerdict::Missing => RootVerdict::Walk(CanonicalPath::resolved(root).key()),
         GateVerdict::Refused(why) => {
             RootVerdict::Refused(format!("it was not walked because {why}"))
         }
@@ -389,9 +394,14 @@ fn rule_key(finding: &Finding) -> Option<(String, String)> {
 }
 
 /// Keep the first finding for each path.
+///
+/// Keyed through [`CanonicalPath`], because "the same path" has to mean the same
+/// place and not the same string: two packs whose roots came from variables
+/// spelled differently would otherwise both offer the same file, and the user
+/// would be asked to approve it twice.
 fn dedupe_by_path(findings: &mut Vec<Finding>) {
     let mut seen = std::collections::HashSet::new();
-    findings.retain(|finding| seen.insert(finding.path.to_string_lossy().to_lowercase()));
+    findings.retain(|finding| seen.insert(CanonicalPath::resolved(&finding.path).key()));
 }
 
 /// Summary numbers for the header line after a scan.
