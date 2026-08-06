@@ -170,10 +170,15 @@ fn zooming_into_a_folder_is_a_single_directory_read() {
 }
 
 /// Cancellation has to actually stop the walk, not merely be offered.
+///
+/// **Not ignored.** It used to be, on the strength of the 100 000-file fixture —
+/// so cancellation-under-load, the one behaviour a user reaches for when a scan
+/// is taking too long, never ran on a default `cargo test` (security review
+/// L16). It builds its own cheap fixture instead: 12 000 files is enough to be
+/// walking when the token trips and costs a fraction of a second to create.
 #[test]
-#[ignore = "depends on the 100k fixture; run with --ignored"]
 fn cancelling_a_big_walk_stops_it_promptly() {
-    let root = synthetic_tree();
+    let root = cancellable_tree();
     let cancel = CancellationToken::new();
 
     // Trip the token once a few thousand entries have gone past, from inside the
@@ -196,5 +201,130 @@ fn cancelling_a_big_walk_stops_it_promptly() {
         scan.dirs.len() < 2_000,
         "a cancelled walk kept going: {} directories",
         scan.dirs.len()
+    );
+}
+
+/// Files in the cheap fixture the cancellation test uses.
+const CANCELLABLE_FILES: usize = 12_000;
+
+/// A tree big enough that a walk is still going when the token trips, and small
+/// enough to build on every run. Empty files: the walk never reads contents.
+fn cancellable_tree() -> PathBuf {
+    let root = std::env::temp_dir().join("winknife-perf-cancel");
+    let marker = root.join("COMPLETE");
+    if marker.is_file() {
+        return root;
+    }
+
+    for dir in 0..(CANCELLABLE_FILES / 100) {
+        let path = root.join(format!("d{dir:03}"));
+        std::fs::create_dir_all(&path).expect("fixture directory");
+        for file in 0..100 {
+            std::fs::write(path.join(format!("f{file:03}.bin")), []).expect("fixture file");
+        }
+    }
+    std::fs::write(&marker, b"complete").expect("marker");
+    root
+}
+
+/* -------------------------------------------------------------------------
+ * The other axis: depth (security review M21)
+ * ---------------------------------------------------------------------- */
+
+/// How deep the chain goes. Beyond `MAX_PATH`, deliberately — a `node_modules`
+/// tree or a deeply nested build output reaches this on real machines, and it is
+/// the axis the wide/shallow fixtures above never touched.
+const CHAIN_DEPTH: usize = 3_000;
+
+/// The budget. The aggregation wraps the walk, so it may cost a small multiple
+/// of it — not fourteen times it, which is what a per-directory O(depth) key
+/// cost before the arena was rekeyed: walk 5.34 s, `treemap::scan` 75.3 s.
+const DEPTH_OVERHEAD_BUDGET: f64 = 3.0;
+
+/// A single chain of `CHAIN_DEPTH` nested directories with one file at the
+/// bottom, created through the verbatim `\\?\` prefix so `MAX_PATH` does not
+/// stop it.
+fn deep_chain() -> Option<PathBuf> {
+    let root = std::env::temp_dir().join("winknife-perf-deep");
+    // Beside the tree, not inside it: the test asserts on the exact number of
+    // bytes and directories the chain holds, and a marker file in the root would
+    // be counted.
+    let marker = std::env::temp_dir().join("winknife-perf-deep.COMPLETE");
+    if marker.is_file() {
+        return Some(root);
+    }
+
+    // `\\?\` turns off Win32 path parsing, which is the only way to create a
+    // path this long. Everything after creation uses the ordinary spelling.
+    let mut building = PathBuf::from(format!("\\\\?\\{}", root.display()));
+    std::fs::create_dir_all(&building).ok()?;
+    for level in 0..CHAIN_DEPTH {
+        building.push(format!("d{level:04}"));
+        if std::fs::create_dir_all(&building).is_err() {
+            println!("this machine would not create a {CHAIN_DEPTH}-deep chain");
+            return None;
+        }
+    }
+    std::fs::write(building.join("leaf.bin"), vec![b'z'; 4_096]).ok()?;
+    std::fs::write(
+        PathBuf::from(format!("\\\\?\\{}", marker.display())),
+        b"complete",
+    )
+    .ok()?;
+    Some(root)
+}
+
+/// The depth axis of the same question the 100k test asks about width.
+///
+/// Ignored by default for the same reason its siblings are — it writes three
+/// thousand directories — but it is the case that found M21, and it is measured
+/// against the walk it wraps rather than against a wall-clock number, so the
+/// assertion means the same thing on a slow machine as on a fast one.
+#[test]
+#[ignore = "writes a 3000-deep directory chain; run with --ignored"]
+fn a_very_deep_tree_costs_a_small_multiple_of_its_walk() {
+    let Some(root) = deep_chain() else {
+        println!("skipped: no long-path support on this machine");
+        return;
+    };
+
+    // The walk alone, which is the floor any aggregation has to pay.
+    let walked = Instant::now();
+    let mut entries = 0u64;
+    winknife_lib::core::scanner::walk_with(
+        &root,
+        winknife_lib::core::scanner::WalkOptions {
+            report_links: true,
+            accurate_timestamps: false,
+        },
+        &CancellationToken::new(),
+        &mut |_| entries += 1,
+    );
+    let walk_ms = walked.elapsed().as_millis().max(1);
+
+    let scanned = Instant::now();
+    let scan = treemap::scan(&root, &CancellationToken::new(), None);
+    let scan_ms = scanned.elapsed().as_millis().max(1);
+
+    let overhead = scan_ms as f64 / walk_ms as f64;
+    println!("depth            : {CHAIN_DEPTH}");
+    println!("walk alone       : {walk_ms} ms  ({entries} entries)");
+    println!("treemap::scan    : {scan_ms} ms");
+    println!("overhead         : {overhead:.2}x  (budget {DEPTH_OVERHEAD_BUDGET:.1}x)");
+
+    assert_eq!(
+        scan.dirs.len(),
+        CHAIN_DEPTH + 1,
+        "one node per directory plus the root"
+    );
+    assert_eq!(
+        scan.root_total().expect("root aggregate").total_bytes,
+        4_096,
+        "and the leaf's bytes have to reach the root"
+    );
+    assert!(
+        overhead < DEPTH_OVERHEAD_BUDGET,
+        "aggregating a {CHAIN_DEPTH}-deep tree took {overhead:.2}x its own walk \
+         ({scan_ms} ms around {walk_ms} ms)"
     );
 }

@@ -206,26 +206,18 @@ pub fn scan(
     cancel: &CancellationToken,
     mut progress: Option<&mut dyn FnMut(&TreeProgress<'_>)>,
 ) -> TreeScan {
-    // `index[key]` is the position of a directory in `dirs`. Keyed through
-    // `CanonicalPath` rather than by text: a walk can hand back two spellings of
-    // one directory (an 8.3 alias in the root, a long name below it) and two
-    // spellings would otherwise become two folders whose sizes each miss half
-    // the files (standing rule, `docs/DECISIONS-NEEDED.md`).
-    let mut index: HashMap<String, usize> = HashMap::new();
-    let mut dirs: Vec<DirAggregate> = Vec::new();
-    let mut parents: Vec<Option<usize>> = Vec::new();
-    let mut depths: Vec<u32> = Vec::new();
+    let mut arena = DirArena::new(root);
     let mut links = Vec::new();
-    let mut last_parent: Option<(PathBuf, usize)> = None;
 
     let mut seen = 0u64;
     let summary = scanner::walk_with(
         root,
         WalkOptions {
             report_links: true,
-            // The treemap reads no clocks: every figure it shows is a size.
-            // Skipping the authoritative stat is what makes a whole-drive walk
-            // affordable (see `core::scanner`'s header for the measurement).
+            // The treemap reads no clocks: every figure it shows is a size, and
+            // it accepts that the listing's copy of a size can lag. Skipping the
+            // authoritative stat is what makes a whole-drive walk affordable
+            // (see `core::scanner`'s header for the measurement).
             accurate_timestamps: false,
         },
         cancel,
@@ -247,34 +239,15 @@ pub fn scan(
             }
 
             if entry.is_dir {
-                ensure_dir(
-                    &entry.path,
-                    root,
-                    &mut index,
-                    &mut dirs,
-                    &mut parents,
-                    &mut depths,
-                );
+                arena.ensure(&entry.path);
                 return;
             }
 
             let Some(parent) = entry.path.parent() else {
                 return;
             };
-            // The walk is depth-first and sorted, so a run of files shares one
-            // parent. Remembering the last one turns a canonical-key computation
-            // and a hash lookup *per file* into one per directory, which on a
-            // hundred thousand files is a hundred thousand allocations saved.
-            let slot = match &last_parent {
-                Some((path, slot)) if path == parent => *slot,
-                _ => {
-                    let slot =
-                        ensure_dir(parent, root, &mut index, &mut dirs, &mut parents, &mut depths);
-                    last_parent = Some((parent.to_path_buf(), slot));
-                    slot
-                }
-            };
-            let node = &mut dirs[slot];
+            let slot = arena.ensure(parent);
+            let node = &mut arena.dirs[slot];
             node.own_bytes = node.own_bytes.saturating_add(entry.size_bytes);
             node.total_bytes = node.total_bytes.saturating_add(entry.size_bytes);
             node.file_count += 1;
@@ -286,21 +259,28 @@ pub fn scan(
         },
     );
 
-    // A directory the walk could not list is marked rather than silently sized
-    // at zero. `unreadable` names the directory itself, which is usually already
-    // a node (its parent listed it) — if it is not, its nearest known ancestor
-    // still learns that something below it is missing.
+    // A path the walk could not read is marked rather than silently sized at
+    // zero. `unreadable` usually names a directory that is already a node (its
+    // parent listed it) — a file whose metadata call failed, or a directory
+    // nothing listed, is instead counted as a hole in its nearest known
+    // ancestor.
     for missing in &summary.unreadable {
-        match index.get(&key_of(missing)) {
-            Some(slot) => dirs[*slot].readable = false,
+        match arena.find(missing) {
+            Some(slot) => arena.dirs[slot].readable = false,
             None => {
-                if let Some(slot) = nearest_ancestor(missing, &index) {
-                    dirs[slot].unreadable_below += 1;
+                if let Some(slot) = arena.nearest_ancestor(missing) {
+                    arena.dirs[slot].unreadable_below += 1;
                 }
             }
         }
     }
 
+    let DirArena {
+        mut dirs,
+        parents,
+        depths,
+        ..
+    } = arena;
     aggregate_bottom_up(&mut dirs, &parents, &depths);
 
     TreeScan {
@@ -313,67 +293,232 @@ pub fn scan(
     }
 }
 
-/// The comparison key for a directory path.
+/// The comparison key for a whole directory path.
+///
+/// Used by the two oracles, which look one arbitrary path up at a time. The
+/// *scan* does not use it — see [`DirArena`] for why keying an arena on whole
+/// paths is quadratic.
 fn key_of(path: &Path) -> String {
-    // `lexical` rather than `resolved`: this runs once per directory entry on a
-    // walk of a whole drive, and resolving would be a syscall each time. The
-    // walk hands back paths it built itself by joining onto one root, so they
-    // are already one consistent spelling; the canonicalisation that matters
-    // (case, separators, trailing dots) is what `lexical` does.
-    CanonicalPath::lexical(path).key().to_owned()
+    // `lexical` rather than `resolved`: resolving would be a syscall per lookup.
+    // The walk hands back paths it built itself by joining onto one root, so
+    // they are already one consistent spelling; the canonicalisation that
+    // matters (case, separators, trailing dots) is what `lexical` does.
+    CanonicalPath::lexical(path).key()
 }
 
-/// Find or create the node for `path`, wiring it to its parent.
-fn ensure_dir(
-    path: &Path,
-    root: &Path,
-    index: &mut HashMap<String, usize>,
-    dirs: &mut Vec<DirAggregate>,
-    parents: &mut Vec<Option<usize>>,
-    depths: &mut Vec<u32>,
-) -> usize {
-    let key = key_of(path);
-    if let Some(slot) = index.get(&key) {
-        return *slot;
-    }
-
-    // The root has no parent inside the tree; everything else finds or creates
-    // one, which also fills in a directory the walk never listed directly.
-    let parent = if crate::core::path_compare::same_path(path, root) {
-        None
-    } else {
-        path.parent()
-            .filter(|parent| crate::core::path_compare::is_inside(root, parent))
-            .map(|parent| ensure_dir(parent, root, index, dirs, parents, depths))
-    };
-
-    let slot = dirs.len();
-    dirs.push(DirAggregate {
-        path: path.to_path_buf(),
-        total_bytes: 0,
-        own_bytes: 0,
-        file_count: 0,
-        dir_count: 0,
-        readable: true,
-        unreadable_below: 0,
-        compressed_below: 0,
-    });
-    depths.push(parent.map_or(0, |p| depths[p] + 1));
-    parents.push(parent);
-    index.insert(key, slot);
-    slot
+/// The directories a scan has found, and the index that finds them again.
+///
+/// # Why it is keyed the way it is
+///
+/// The index used to be `full canonical path string -> slot`, which is O(depth)
+/// to build *and* O(depth) to hash, for every directory — so indexing a tree
+/// cost O(depth²). Worse, a miss then asked `same_path` and `is_inside`, each of
+/// which canonicalises through the filesystem. Measured on a 3 000-deep tree:
+/// the walk took 5.34 s and `treemap::scan` around it took **75.3 s**
+/// (security review M21).
+///
+/// So a directory is keyed on **(its parent's slot, one normalised name)**. The
+/// parent is nearly always the node resolved a moment ago — the walk is
+/// depth-first and sorted, so entries arrive either as a run of siblings or as a
+/// descent — and the two-entry memo below turns that into one hash lookup of one
+/// short string. Nothing is canonicalised through the filesystem at all: a path
+/// the walk produced was built by joining onto `root`, so `strip_prefix` is
+/// exact rather than a comparison, and the case/trailing-dot folding that the
+/// standing rule about two spellings of one directory asks for is exactly what
+/// [`crate::core::path_compare::normalise_component`] does.
+#[derive(Debug)]
+struct DirArena {
+    root: PathBuf,
+    dirs: Vec<DirAggregate>,
+    parents: Vec<Option<usize>>,
+    depths: Vec<u32>,
+    /// `(parent slot, normalised name) -> slot`.
+    children: HashMap<(usize, String), usize>,
+    /// The root's slot, created on first use so a walk that saw nothing still
+    /// produces an empty tree rather than a zeroed one.
+    root_slot: Option<usize>,
+    /// Directories with no parent inside the tree, other than the root. Keyed on
+    /// the whole path because there is nothing to hang them off; there is
+    /// normally none of these at all.
+    detached: HashMap<String, usize>,
+    /// The last few directories resolved, newest first.
+    ///
+    /// A ring rather than a single entry because a sorted listing interleaves
+    /// files and subdirectories: `a.txt`, `bin/`, `c.txt` asks for *this*
+    /// directory, then for `bin`, then for this directory again. One slot would
+    /// miss on every such alternation and fall back to descending from the root,
+    /// which is the O(depth) path this whole structure exists to avoid.
+    recent: Vec<(PathBuf, usize)>,
 }
 
-/// The deepest known directory that contains `path`.
-fn nearest_ancestor(path: &Path, index: &HashMap<String, usize>) -> Option<usize> {
-    let mut current = path.parent();
-    while let Some(dir) = current {
-        if let Some(slot) = index.get(&key_of(dir)) {
-            return Some(*slot);
+/// How many resolved directories [`DirArena`] remembers. Four covers a listing
+/// that alternates between files and subdirectories at any depth; the lookup is
+/// a handful of path comparisons, which allocate nothing.
+const RECENT_SLOTS: usize = 4;
+
+impl DirArena {
+    fn new(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            dirs: Vec::new(),
+            parents: Vec::new(),
+            depths: Vec::new(),
+            children: HashMap::new(),
+            root_slot: None,
+            detached: HashMap::new(),
+            recent: Vec::with_capacity(RECENT_SLOTS),
         }
-        current = dir.parent();
     }
-    None
+
+    /// Find or create the node for `path`, wiring it to its parent.
+    fn ensure(&mut self, path: &Path) -> usize {
+        if let Some(slot) = self.recent_slot_of(path) {
+            return slot;
+        }
+        let slot = self.resolve(path);
+        self.remember(path, slot);
+        slot
+    }
+
+    fn resolve(&mut self, path: &Path) -> usize {
+        let Ok(relative) = path.strip_prefix(&self.root) else {
+            // Not under the root at all. The walk never produces one of these —
+            // it refuses to leave the tree — so this is a caller doing something
+            // unusual, and it gets its own parentless node rather than a guess
+            // about where it belongs.
+            return self.detached_slot(path);
+        };
+        if relative.as_os_str().is_empty() {
+            return self.root_slot();
+        }
+
+        // The common case by an enormous margin: the parent was resolved a
+        // moment ago, so this is one hash lookup on one short name.
+        if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
+            if let Some(parent_slot) = self.recent_slot_of(parent) {
+                return self.child(parent_slot, parent, name);
+            }
+        }
+
+        // Otherwise walk down from the root, creating whatever is missing. This
+        // also fills in a directory the walk never listed directly.
+        let mut slot = self.root_slot();
+        let mut here = self.root.clone();
+        for part in relative.components() {
+            let std::path::Component::Normal(name) = part else {
+                // `.`, `..` or a prefix cannot appear in a path the walk built
+                // by joining onto the root, and descending through one would be
+                // guessing about where it lands.
+                return self.detached_slot(path);
+            };
+            let parent = std::mem::take(&mut here);
+            slot = self.child(slot, &parent, name);
+            here = parent.join(name);
+            // Each level of the descent, against *its own* slot. Remembering the
+            // parent path against the child's slot instead made `SUB` a child of
+            // `Sub` rather than the same node.
+            self.remember(&here, slot);
+        }
+        slot
+    }
+
+    /// The slot for `name` under `parent_slot`, created if this is the first
+    /// time it has been seen. `parent_path` is only used to build the child's
+    /// own path when one is created.
+    fn child(&mut self, parent_slot: usize, parent_path: &Path, name: &std::ffi::OsStr) -> usize {
+        let key = (parent_slot, crate::core::path_compare::normalise_component(name));
+        if let Some(slot) = self.children.get(&key).copied() {
+            return slot;
+        }
+        let slot = self.push(parent_path.join(name), Some(parent_slot));
+        self.children.insert(key, slot);
+        slot
+    }
+
+    /// The slot of `path`, if the ring already knows it. A hit moves the entry
+    /// to the front, so a directory being read stays hot however deep it is.
+    fn recent_slot_of(&mut self, path: &Path) -> Option<usize> {
+        let found = self.recent.iter().position(|(known, _)| known == path)?;
+        let entry = self.recent.remove(found);
+        let slot = entry.1;
+        self.recent.insert(0, entry);
+        Some(slot)
+    }
+
+    fn remember(&mut self, path: &Path, slot: usize) {
+        if self.recent.iter().any(|(known, _)| known == path) {
+            return;
+        }
+        if self.recent.len() == RECENT_SLOTS {
+            self.recent.pop();
+        }
+        self.recent.insert(0, (path.to_path_buf(), slot));
+    }
+
+    fn root_slot(&mut self) -> usize {
+        match self.root_slot {
+            Some(slot) => slot,
+            None => {
+                let slot = self.push(self.root.clone(), None);
+                self.root_slot = Some(slot);
+                slot
+            }
+        }
+    }
+
+    fn detached_slot(&mut self, path: &Path) -> usize {
+        let key = key_of(path);
+        if let Some(slot) = self.detached.get(&key) {
+            return *slot;
+        }
+        let slot = self.push(path.to_path_buf(), None);
+        self.detached.insert(key, slot);
+        slot
+    }
+
+    fn push(&mut self, path: PathBuf, parent: Option<usize>) -> usize {
+        let slot = self.dirs.len();
+        self.dirs.push(DirAggregate {
+            path,
+            total_bytes: 0,
+            own_bytes: 0,
+            file_count: 0,
+            dir_count: 0,
+            readable: true,
+            unreadable_below: 0,
+            compressed_below: 0,
+        });
+        let depth = parent.map_or(0, |p| self.depths[p] + 1);
+        self.depths.push(depth);
+        self.parents.push(parent);
+        slot
+    }
+
+    /// The slot for `path`, without creating one.
+    fn find(&self, path: &Path) -> Option<usize> {
+        let relative = path.strip_prefix(&self.root).ok()?;
+        let mut slot = self.root_slot?;
+        for part in relative.components() {
+            let std::path::Component::Normal(name) = part else {
+                return None;
+            };
+            let key = crate::core::path_compare::normalise_component(name);
+            slot = *self.children.get(&(slot, key))?;
+        }
+        Some(slot)
+    }
+
+    /// The deepest known directory that contains `path`.
+    fn nearest_ancestor(&self, path: &Path) -> Option<usize> {
+        let mut current = path.parent();
+        while let Some(dir) = current {
+            if let Some(slot) = self.find(dir) {
+                return Some(slot);
+            }
+            current = dir.parent();
+        }
+        None
+    }
 }
 
 /// Roll every directory's numbers into its parent, deepest first.
@@ -586,11 +731,19 @@ pub fn children(path: &Path, root: &Path, oracle: &dyn SizeOracle) -> Result<Tre
         // The tail is still drawn, as one rectangle, so the children continue to
         // add up to the parent. Dropping it would leave a hole the user reads as
         // free space.
+        //
+        // `sized` is the *conjunction* of the rows it stands for, not `true`.
+        // Hardcoding `true` claimed the folded total was the whole truth even
+        // when some of the folded rows were floors — which is reachable on any
+        // cancelled scan, and `treemap_scan` deliberately caches and serves
+        // those (security review M20). One unsized row in the tail makes the
+        // tail unsized, exactly as `DirAggregate::sized` treats one unreadable
+        // descendant.
         rows.push(TreeChild {
             path: PathBuf::new(),
             name: format!("… {folded} smaller items"),
             size_bytes: bytes,
-            sized: true,
+            sized: tail.iter().all(|row| row.sized),
             is_dir: false,
             is_link: false,
             category: Category::Other,
@@ -855,6 +1008,122 @@ mod tests {
             .iter()
             .find(|dir| crate::core::path_compare::same_path(&dir.path, path))
             .unwrap_or_else(|| panic!("no aggregate for {}", path.display()))
+    }
+
+    /* --- the folded tail row (security review M20) ---------------------- */
+
+    /// An oracle that knows nothing, so every subdirectory comes back unsized.
+    #[derive(Debug, Default)]
+    struct BlindOracle;
+
+    impl SizeOracle for BlindOracle {
+        fn aggregate(&self, _path: &Path) -> Option<DirAggregate> {
+            None
+        }
+    }
+
+    #[test]
+    fn a_folded_tail_of_unsized_rows_is_not_claimed_to_be_sized() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // More subdirectories than the fold limit, none of which the oracle has
+        // an aggregate for. That is exactly the state a cancelled scan leaves,
+        // and `treemap_scan` deliberately caches and serves those.
+        for index in 0..(MAX_CHILDREN + 20) {
+            fs::create_dir_all(dir.path().join(format!("d{index:04}"))).expect("dirs");
+        }
+
+        let level = children(dir.path(), dir.path(), &BlindOracle).expect("level");
+        let tail = level.children.last().expect("a tail row");
+
+        assert_eq!(level.folded, 20);
+        assert_eq!(tail.item_count, 20);
+        assert!(
+            !tail.sized,
+            "the tail stands for rows whose size is unknown; saying `sized` is the \
+             silent zero this module rejects everywhere else"
+        );
+    }
+
+    #[test]
+    fn a_folded_tail_of_known_rows_is_still_sized() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for index in 0..(MAX_CHILDREN + 5) {
+            fs::write(dir.path().join(format!("f{index:04}.bin")), b"x").expect("write");
+        }
+
+        let level = children(dir.path(), dir.path(), &BlindOracle).expect("level");
+        let tail = level.children.last().expect("a tail row");
+        assert_eq!(level.folded, 5);
+        assert!(
+            tail.sized,
+            "files are measured directly, so a tail made only of files is a real total"
+        );
+    }
+
+    /* --- the arena's keying (security review M21) ----------------------- */
+
+    #[test]
+    fn a_deep_chain_is_indexed_once_per_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut deep = dir.path().to_path_buf();
+        for level in 0..40 {
+            deep.push(format!("d{level:02}"));
+        }
+        fs::create_dir_all(&deep).expect("dirs");
+        fs::write(deep.join("leaf.bin"), vec![b'z'; 700]).expect("write");
+
+        let scan = scan_at(dir.path());
+
+        assert_eq!(
+            scan.dirs.len(),
+            41,
+            "one node per directory plus the root, with no spelling counted twice"
+        );
+        assert_eq!(scan.root_total().expect("root").total_bytes, 700);
+        assert_eq!(scan.root_total().expect("root").dir_count, 40);
+        assert_eq!(aggregate_of(&scan, &deep).own_bytes, 700);
+    }
+
+    /// Two spellings of one directory must still fold into one node — that is
+    /// what the whole-path canonical key was there for, and the component key
+    /// has to keep it.
+    #[test]
+    fn two_spellings_of_one_directory_are_one_node() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("Sub")).expect("dirs");
+
+        let mut arena = DirArena::new(dir.path());
+        let first = arena.ensure(&dir.path().join("Sub"));
+        let second = arena.ensure(&dir.path().join("SUB"));
+        let third = arena.ensure(&dir.path().join("sub."));
+
+        assert_eq!(first, second, "case must not split a directory in two");
+        assert_eq!(first, third, "nor must a trailing dot Win32 discards");
+        assert_eq!(arena.dirs.len(), 2, "the root and one subdirectory");
+    }
+
+    #[test]
+    fn the_arena_finds_an_ancestor_for_a_path_it_has_never_seen() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut arena = DirArena::new(dir.path());
+        let sub = arena.ensure(&dir.path().join("sub"));
+
+        let buried = dir.path().join("sub").join("gone").join("deeper.txt");
+        assert_eq!(arena.find(&buried), None);
+        assert_eq!(arena.nearest_ancestor(&buried), Some(sub));
+    }
+
+    #[test]
+    fn a_path_outside_the_root_gets_its_own_parentless_node() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("mapped");
+        let mut arena = DirArena::new(&root);
+
+        let outside = arena.ensure(&dir.path().join("elsewhere"));
+        let again = arena.ensure(&dir.path().join("ELSEWHERE"));
+
+        assert_eq!(outside, again, "still one node per place");
+        assert_eq!(arena.parents[outside], None);
     }
 
     /// **The `du`-style oracle module spec 04's acceptance list asks for.**

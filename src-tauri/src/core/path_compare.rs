@@ -156,6 +156,34 @@ pub fn is_inside(outer: &Path, inner: &Path) -> bool {
     CanonicalPath::resolved(inner).is_within(&CanonicalPath::resolved(outer))
 }
 
+/// One path component, reduced to the spelling [`CanonicalPath`] compares.
+///
+/// Exposed so a caller that already knows where a component's *parent* sits can
+/// key on the component alone instead of rebuilding and hashing the whole path.
+/// The treemap's arena did the latter, which is O(depth) work per directory and
+/// so O(depth²) for the tree: on a 3 000-deep tree the aggregation took 75.3 s
+/// around a walk that took 5.34 s (security review M21).
+///
+/// It is the *same* normalisation [`CanonicalPath::lexical`] applies to each
+/// component — they share [`normalise_part`] — so a key built component by
+/// component and one built from a whole path agree.
+///
+/// Note that this cannot see `..`, a drive letter or a UNC root: those only mean
+/// anything in the context of the whole path. A caller descending component by
+/// component must reject anything that is not an ordinary name.
+pub fn normalise_component(name: &std::ffi::OsStr) -> String {
+    normalise_part(&name.to_string_lossy())
+}
+
+/// Win32 discards a trailing dot when it resolves a name, so
+/// `C:\Windows.\System32\ntoskrnl.exe` opens the real file. A trailing space is
+/// *not* discarded — `C:\Windows \System32` is NotFound on a real machine — but
+/// trimming it too is a harmless over-refusal, and it costs nothing to be wrong
+/// in the direction that protects more (security review L6).
+fn normalise_part(part: &str) -> String {
+    part.trim_end_matches(['.', ' ']).to_lowercase()
+}
+
 /// Whether `path` contains a `..` component in any spelling.
 ///
 /// Text-based on purpose: this runs *before* anything is resolved, precisely so
@@ -214,13 +242,7 @@ fn components(path: &Path) -> Vec<String> {
                 }
             }
             _ => {
-                // Win32 discards a trailing dot when it resolves a name, so
-                // `C:\Windows.\System32\ntoskrnl.exe` opens the real file.
-                // A trailing space is *not* discarded — `C:\Windows \System32`
-                // is NotFound on a real machine — but trimming it too is a
-                // harmless over-refusal, and it costs nothing to be wrong in
-                // the direction that protects more (security review L6).
-                let trimmed = part.trim_end_matches(['.', ' ']).to_lowercase();
+                let trimmed = normalise_part(part);
                 if trimmed.is_empty() {
                     continue;
                 }
