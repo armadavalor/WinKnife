@@ -47,6 +47,16 @@
 //! This list stays, as defence in depth for the cases [`gate_path`] hands back
 //! (`Local` and `Missing`) and for callers that only have text — but it is no
 //! longer the only thing between a rule pack and `C:\Windows`.
+//!
+//! # The list's own spelling counts too
+//!
+//! An allow-list gate that canonicalises the path it is asked about only helps
+//! if the entries it compares against are in the same spelling. `%TEMP%` on a
+//! great many real accounts is `C:\Users\USERNA~1\AppData\Local\Temp`, and
+//! `%WINDIR%`, `%USERPROFILE%` and `%ProgramFiles%` can arrive in 8.3 form too;
+//! a list built from those variables stored the short name while the gate asked
+//! about the long one, and the comparison missed. Every entry is therefore
+//! registered in both spellings on the way in — see [`widen`].
 
 use std::path::{Path, PathBuf};
 
@@ -97,18 +107,15 @@ impl ProtectedPaths {
         Self::default()
     }
 
-    /// Build from explicit entries. Every path is normalised on the way in, so
-    /// a caller cannot register an entry in a spelling the probe never matches.
+    /// Build from explicit entries. Every path is normalised *and* registered in
+    /// its canonical spelling on the way in, so a caller cannot register an
+    /// entry in a spelling the probe never matches (see [`widen`]).
     pub fn new(entries: Vec<ProtectedEntry>) -> Self {
-        Self {
-            entries: entries
-                .into_iter()
-                .map(|entry| ProtectedEntry {
-                    path: normalise(&entry.path),
-                    ..entry
-                })
-                .collect(),
+        let mut widened = Vec::with_capacity(entries.len());
+        for entry in entries {
+            widen(entry, &mut widened);
         }
+        Self { entries: widened }
     }
 
     /// Build a tree-scoped list from paths, with a generic reason. Used by
@@ -218,12 +225,9 @@ impl ProtectedPaths {
     }
 
     /// Add one more entry (used to register the quarantine root once it is
-    /// known).
+    /// known). Widened exactly as [`ProtectedPaths::new`] widens.
     pub fn push(&mut self, entry: ProtectedEntry) {
-        self.entries.push(ProtectedEntry {
-            path: normalise(&entry.path),
-            ..entry
-        });
+        widen(entry, &mut self.entries);
     }
 
     /// Every entry, for tests and diagnostics.
@@ -424,6 +428,62 @@ fn plain_local_shape(path: &Path) -> std::result::Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// Register one entry in every spelling the comparison has to recognise: the
+/// text it was written in, normalised, and — when the filesystem spells that
+/// same directory differently — its canonical form as well.
+///
+/// # Why an entry needs both spellings
+///
+/// `%TEMP%` on a great many real accounts is `C:\Users\USERNA~1\AppData\Local\
+/// Temp`, and `%WINDIR%`, `%USERPROFILE%` and `%ProgramFiles%` can reach us in
+/// 8.3 form too. A list built from those variables stored the short spelling,
+/// while [`gate_path`] canonicalised the path it was asked about and produced
+/// the long one. Two spellings of one directory, compared component by
+/// component, do not match — so a protected location quietly stopped being
+/// protected on exactly the machines whose environment is spelled that way.
+/// (CI found this: the GitHub runner's temp directory is `C:\Users\RUNNER~1\…`.)
+///
+/// Both spellings are kept rather than only the canonical one, because the two
+/// sides of the comparison do not always agree on which is which:
+///
+/// - The gate canonicalises, so it asks in the long form. The canonical entry
+///   is what answers it.
+/// - [`ProtectedPaths::reason_for`] is also the defence-in-depth layer for
+///   callers that only ever have text — a rule pack's own spelling, a path from
+///   the database — and that text may well be the short form the variable was
+///   in. The normalised raw entry is what answers *that*.
+///
+/// Adding a spelling only ever protects more, which is the direction to be
+/// wrong in. Nothing is ever dropped: a directory this machine does not have
+/// cannot be canonicalised, and losing the entry would turn a missing folder
+/// into an unprotected one.
+///
+/// Only a plain local drive-letter path is canonicalised. A drive root entry is
+/// `C:`, whose canonical form is that drive's *current directory* — a real path
+/// and the wrong one to protect exactly — and the volume-metadata entry is a
+/// bare name that belongs to no drive at all.
+fn widen(entry: ProtectedEntry, into: &mut Vec<ProtectedEntry>) {
+    let normalised = normalise(&entry.path);
+
+    let canonical = plain_local_shape(&normalised)
+        .ok()
+        .and_then(|()| dunce::canonicalize(&normalised).ok())
+        .map(|canonical| normalise(&canonical))
+        .filter(|canonical| canonical != &normalised);
+
+    if let Some(canonical) = canonical {
+        into.push(ProtectedEntry {
+            path: canonical,
+            scope: entry.scope,
+            reason: entry.reason.clone(),
+        });
+    }
+    into.push(ProtectedEntry {
+        path: normalised,
+        ..entry
+    });
 }
 
 /// The canonical text of a path for comparison purposes: lower-cased,
@@ -755,6 +815,136 @@ mod tests {
             protected.is_protected(Path::new("C:\\Program Files\\App\\a.exe")),
             "the long name it canonicalises to is what the gate sees"
         );
+    }
+
+    /// A directory with two real spellings: its 8.3 alias and its canonical
+    /// long name. `None` when nothing on this volume mints an alias, so the
+    /// caller can say so out loud rather than assert on a fixture that is not
+    /// there.
+    #[cfg(windows)]
+    fn aliased_dir(parent: &Path, name: &str) -> Option<(PathBuf, PathBuf)> {
+        let long = parent.join(name);
+        std::fs::create_dir_all(&long).expect("fixture dir");
+        let canonical = dunce::canonicalize(&long).expect("canonicalize");
+        let short = crate::core::test_support::short_path_name(&long)?;
+        (short != canonical).then_some((short, canonical))
+    }
+
+    /// The bug CI found, pinned: an entry registered in one spelling has to
+    /// match a probe in the other, because they are one directory.
+    ///
+    /// `%TEMP%` really is `C:\Users\USERNA~1\AppData\Local\Temp` on a great many
+    /// accounts — the GitHub runner's is — so a list built from such a variable
+    /// stored the short spelling while [`gate_path`] canonicalised the probe and
+    /// produced the long one. The comparison missed, and a protected location
+    /// silently stopped being protected.
+    #[cfg(windows)]
+    #[test]
+    fn an_entry_spelled_as_an_8_3_alias_still_matches_the_canonical_probe() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // A long name with spaces is what makes Windows mint an alias.
+        let Some((short, canonical)) = aliased_dir(dir.path(), "Protected Program Files") else {
+            crate::core::test_support::privileged_operation_unavailable(
+                "an_entry_spelled_as_an_8_3_alias_still_matches_the_canonical_probe",
+                "no 8.3 alias is available here (fsutil 8dot3name), so the two spellings \
+                 this test compares cannot be produced",
+            );
+            return;
+        };
+
+        let protected = ProtectedPaths::from_trees([short.clone()]);
+        let victim = canonical.join("kernel.sys");
+        assert!(
+            protected.is_protected(&victim),
+            "registered `{}`, probed `{}` — one directory, two spellings, and the gate \
+             always hands the canonical one to the list. Entries: {:?}",
+            short.display(),
+            victim.display(),
+            protected
+                .entries()
+                .iter()
+                .map(|entry| entry.path.display().to_string())
+                .collect::<Vec<_>>()
+        );
+        // And the short spelling keeps working, for the callers that only ever
+        // have the text a rule pack was written in.
+        assert!(protected.is_protected(&short.join("kernel.sys")));
+    }
+
+    /// The same thing where it actually bites in production: `%WINDIR%`,
+    /// `%USERPROFILE%` and `%ProgramFiles%` can all be handed to us in 8.3 form,
+    /// and the list the app runs on is built from exactly those.
+    #[cfg(windows)]
+    #[test]
+    fn environment_variables_spelled_as_8_3_aliases_still_protect_the_real_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let Some((short_windows, canonical_windows)) = aliased_dir(dir.path(), "Windows Stand In")
+        else {
+            crate::core::test_support::privileged_operation_unavailable(
+                "environment_variables_spelled_as_8_3_aliases_still_protect_the_real_directory",
+                "no 8.3 alias is available here (fsutil 8dot3name), so the two spellings \
+                 this test compares cannot be produced",
+            );
+            return;
+        };
+        let (short_profile, canonical_profile) =
+            aliased_dir(dir.path(), "Profile Stand In").expect("the same volume, the same setting");
+
+        let protected = ProtectedPaths::from_env(
+            &MapEnv::new()
+                .with("WINDIR", short_windows.to_string_lossy())
+                .with("USERPROFILE", short_profile.to_string_lossy()),
+            Path::new("C:\\app"),
+            Path::new("C:\\app\\q"),
+        );
+
+        assert!(
+            protected.is_protected(&canonical_windows.join("System32\\ntoskrnl.exe")),
+            "a `%WINDIR%` handed to us in 8.3 form must still protect the tree it names"
+        );
+        assert!(
+            protected.is_protected(&canonical_profile),
+            "the same for the profile root, which is exact-scoped"
+        );
+        assert!(
+            !protected.is_protected(&canonical_profile.join("Downloads")),
+            "widening the profile entry must not turn its exact scope into a tree"
+        );
+    }
+
+    /// Canonicalising an entry must not invent one. A drive root is `C:`, whose
+    /// canonical form is that drive's *current directory* — a real path, and the
+    /// wrong one to protect exactly. The floor has to survive the same
+    /// treatment on a machine that has those directories and one that does not.
+    #[test]
+    fn widening_never_invents_an_entry_out_of_a_shape_that_cannot_be_resolved() {
+        let protected = ProtectedPaths::from_env(
+            &MapEnv::new(),
+            Path::new("C:\\nonexistent-app-dir"),
+            Path::new("C:\\nonexistent-app-dir\\q"),
+        );
+
+        for path in [
+            "C:\\Windows\\System32",
+            "C:\\Program Files\\App\\a.exe",
+            "C:\\Program Files (x86)\\Old\\x.dll",
+            "C:\\ProgramData\\Vendor\\cache.db",
+            "C:\\",
+            "D:\\",
+            "C:\\nonexistent-app-dir\\q\\batch\\item",
+            "E:\\System Volume Information\\x",
+        ] {
+            assert!(
+                protected.is_protected(Path::new(path)),
+                "`{path}` must survive both the missing directories and the widening"
+            );
+        }
+        for path in ["C:\\Temp\\a.log", "C:\\Users\\dev\\Downloads\\x.zip"] {
+            assert!(
+                !protected.is_protected(Path::new(path)),
+                "`{path}` must not become protected by accident"
+            );
+        }
     }
 
     /// Security review C2: the gate is an allow-list. Every spelling that is

@@ -654,7 +654,7 @@ mod tests {
 
         // The list is written in long names, as the real one is.
         let long_dir = dunce::canonicalize(&protected_dir).expect("canonicalize");
-        let no_alias = match short_path_name(&victim) {
+        let no_alias = match crate::core::test_support::short_path_name(&victim) {
             None => true,
             Some(short) => short == dunce::canonicalize(&victim).expect("canonicalize"),
         };
@@ -669,7 +669,8 @@ mod tests {
             );
             return;
         }
-        let short_victim = short_path_name(&victim).expect("checked just above");
+        let short_victim =
+            crate::core::test_support::short_path_name(&victim).expect("checked just above");
 
         let brain = Brain::builder()
             .protected_paths(ProtectedPaths::from_trees([long_dir]))
@@ -824,30 +825,6 @@ mod tests {
         .expect("execute");
         assert_eq!(report.succeeded(), 1);
         assert!(!ordinary.exists());
-    }
-
-    /// The 8.3 alias of `path`, or `None` when the volume does not mint one.
-    #[cfg(windows)]
-    fn short_path_name(path: &Path) -> Option<PathBuf> {
-        use std::ffi::OsString;
-        use std::os::windows::ffi::{OsStrExt, OsStringExt};
-        use windows::core::PCWSTR;
-        use windows::Win32::Storage::FileSystem::GetShortPathNameW;
-
-        let wide: Vec<u16> = path
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        let mut buffer = vec![0u16; 1024];
-        // SAFETY: `wide` is NUL-terminated and outlives the call, and the
-        // buffer length the API is given is its real length in `u16`s.
-        let written =
-            unsafe { GetShortPathNameW(PCWSTR(wide.as_ptr()), Some(&mut buffer)) } as usize;
-        if written == 0 || written >= buffer.len() {
-            return None;
-        }
-        Some(PathBuf::from(OsString::from_wide(&buffer[..written])))
     }
 
     #[test]
