@@ -819,3 +819,72 @@ stay unsurfaced (architect deferred both to phase 3). No LLM layer, no treemap,
 no startup manager. `%WINDIR%\*.log` and `%WINDIR%\Downloaded Program Files` from
 module spec 02 are not shipped as rules at all, for the same protected-tree
 reason as the pack above.
+
+## 2026-08-06 — phase 2 review remediation
+
+Adversarial review of phase 2 blocked on one HIGH finding plus five smaller
+ones. The scoring pipeline and duplicates correctness were verified sound and
+are untouched.
+
+**H10 (the block) — the executor re-validated the gates but never the
+justification.** `apply_one` re-checked `path_refusal` and `lock_state`, both of
+which ask "is this still allowed?". Nothing asked "is this still *warranted*?" —
+`owner_process`, `min_age_hours`, `match`, `content_hash` and `full_hash`
+appeared nowhere in `executor.rs`. Analyze runs, the user reviews for as long as
+they like, execute acts on reasoning that may have expired. Two consequences,
+both reproduced: a duplicate edited into the newest unique file on the machine
+was still moved out under "Byte-for-byte identical to `<keeper>`"; and a browser
+cache scanned with Chrome closed was quarantined after Chrome was opened, because
+`owner_process_absent` governed the rating and not the action.
+
+Gate 4 now re-derives what the finding recorded and skips-and-reports on
+mismatch, never failing the batch. Duplicates: full re-hash against the stored
+hash, plus a check that the keeper still exists and is not another spelling of
+this same file — if the keeper vanished, quarantining the remaining copy would
+leave the user with none. Rules: the process probe re-asked **uncached** (the 2 s
+memo answers the question the scan asked), and `min_age_hours` / `min_size_bytes`
+/ `extensions` re-tested against fresh metadata. `full_hash` moved to
+`core::content_hash` so the scan and the re-check compute the same number and the
+executor does not reach up into a module.
+
+**A1 — the scan-time lock probe mutated the filesystem.** `SystemLockProbe`
+opened every candidate, which moves the last-access time on a volume where
+updates are enabled — and that timestamp is a signal `brain::score` reads back,
+so the scan mutated what it was measuring and the second scan of the day would
+find nothing safe. Fixed at the cause with Windows' documented suppression
+(`SetFileTime` with a last-access `FILETIME` of `{0xFFFFFFFF, 0xFFFFFFFF}`),
+falling back to a plain read-only open where the extra access right is refused.
+The two-clock reading stays as defence in depth.
+
+**M14 — walk-root folding silently disabled a rule.** `plan_walks` folds roots on
+canonical identity but kept the first rule's spelling, while `matches_path` is a
+text glob anchored to each rule's own spelling — so two rules sharing a canonical
+root spelled differently left every rule but the first unable to claim anything,
+with nothing reported. The fold is kept (walking twice is what L5 fixed) and the
+walked path is re-spelled into the absorbed rule's anchor. `plan_walks` also now
+reports any rule that reached no group at all.
+
+**M15** `copiesInSet` reported `Vec::capacity()`. **L10** `dwSize` is computed
+before the process snapshot opens, so no early return can leak the handle.
+**L11** the old-downloads property test folds in the `owner_process_running` axis
+it claimed to cover, and asserts its own case count.
+
+**A2 — docs corrected so the `%WINDIR%` contradiction cannot return.** Module
+spec 02's pack table says InfoOnly and drops the two `%WINDIR%` locations that
+were never shipped; `RULES-FORMAT.md` distinguishes a rule that *proposes an
+action* on a protected path (a test failure) from an informational one
+(permitted, and structurally unable to act); the pack's `reason` names the space
+at stake and points at both Windows tools that will reclaim it.
+
+**Decisions.** The justification gate verifies what a module *recorded* — every
+shipped module records one, but making that part of the `ToolModule` contract is
+a phase-3 change. The duplicate re-hash is full, never sampled: sampling would
+re-admit the crafted collision the scan exists to reject. The rule re-check does
+not re-test path globs (that is gate 2's question, asked properly) nor the
+cleaner's `MIN_QUIET_HOURS` (a module scan policy, not a rule criterion, and
+subsumed by every shipped rule's `min_age_hours`). The pack `reason` points at
+the size the UI already shows rather than interpolating a byte count, because
+rule reasons are static data shipped verbatim and placeholders would be a
+rule-pack format change. All recorded in `docs/DECISIONS-NEEDED.md`.
+
+**Deferred.** Nothing new. The phase-3 deferrals above still stand.
