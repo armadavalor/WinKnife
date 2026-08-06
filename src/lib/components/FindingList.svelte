@@ -45,6 +45,25 @@
 
   const selectable = $derived(risk !== "doNotDelete");
 
+  /**
+   * Packs the user has collapsed.
+   *
+   * Collapsed rather than expanded, so a group only ever hides itself once
+   * somebody has asked it to: a scan that found nine hundred temp files opens
+   * showing all of them, and the user folds away what they have decided about.
+   */
+  let collapsed = $state<Set<string>>(new Set());
+
+  function toggleCollapsed(packId: string): void {
+    const next = new Set(collapsed);
+    if (next.has(packId)) {
+      next.delete(packId);
+    } else {
+      next.add(packId);
+    }
+    collapsed = next;
+  }
+
   const groups = $derived.by<Group[]>(() => {
     const byPack = new Map<string, Group>();
     for (const row of rows) {
@@ -83,9 +102,11 @@
   <div class="flex flex-col gap-4">
     {#each groups as group (group.packId)}
       {@const state = groupState(group)}
+      {@const open = !collapsed.has(group.packId)}
       <section class="rounded-xl border border-surface-2 bg-surface-1">
         <header
           class="flex items-center gap-3 border-b border-surface-2 px-4 py-3"
+          class:border-b-0={!open}
         >
           {#if selectable}
             <input
@@ -102,7 +123,34 @@
             />
           {/if}
 
-          <span class="flex-1 text-sm font-medium">{group.packName}</span>
+          <button
+            type="button"
+            class="flex flex-1 items-center gap-2 text-left text-sm font-medium transition-colors hover:text-ink"
+            aria-expanded={open}
+            aria-controls="group-{risk}-{group.packId}"
+            onclick={() => toggleCollapsed(group.packId)}
+          >
+            <svg
+              class="size-3.5 shrink-0 text-ink-faint transition-transform"
+              style:transform={open ? "rotate(90deg)" : "none"}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+            <span>{group.packName}</span>
+            <span class="sr-only">
+              {open
+                ? t("cleaner.collapseGroup", { group: group.packName })
+                : t("cleaner.expandGroup", { group: group.packName })}
+            </span>
+          </button>
+
           <RiskBadge {risk} count={group.rows.length} />
           {#if group.bytes > 0}
             <span class="text-xs tabular-nums text-ink-muted">
@@ -111,7 +159,11 @@
           {/if}
         </header>
 
-        <ul class="divide-y divide-surface-2">
+        <ul
+          id="group-{risk}-{group.packId}"
+          class="divide-y divide-surface-2"
+          class:hidden={!open}
+        >
           {#each group.rows as row (row.recommendation.id)}
             <li class="flex items-start gap-3 px-4 py-3">
               {#if selectable}

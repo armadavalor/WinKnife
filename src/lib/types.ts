@@ -213,6 +213,26 @@ export interface CleanerSummary {
   blockedItems: number;
 }
 
+/** Narrow a duplicate finding's `meta` to {@link DuplicateFindingMeta}. */
+export function duplicateMeta(meta: unknown): DuplicateFindingMeta | null {
+  if (typeof meta !== "object" || meta === null) {
+    return null;
+  }
+  const candidate = meta as Record<string, unknown>;
+  if (
+    typeof candidate.setId !== "string" ||
+    typeof candidate.contentHash !== "string" ||
+    typeof candidate.keeper !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    setId: candidate.setId,
+    contentHash: candidate.contentHash,
+    keeper: candidate.keeper,
+  };
+}
+
 /** Narrow a finding's `meta` to {@link FindingMeta}. */
 export function findingMeta(meta: unknown): FindingMeta | null {
   if (typeof meta !== "object" || meta === null) {
@@ -233,6 +253,110 @@ export function findingMeta(meta: unknown): FindingMeta | null {
     itemCount:
       typeof candidate.itemCount === "number" ? candidate.itemCount : undefined,
   };
+}
+
+/* -------------------------------------------------------------------------
+ * modules/duplicates.rs
+ * ---------------------------------------------------------------------- */
+
+/** One copy inside a {@link DuplicateSet}. */
+export interface DuplicateCopy {
+  findingId: string;
+  path: string;
+  /** RFC 3339 UTC, or null. */
+  created: string | null;
+  modified: string | null;
+  /** Whether the heuristic suggests keeping this one. */
+  keeper: boolean;
+  keeperScore: number;
+  keeperReason: string;
+}
+
+/** A set of files with identical content. */
+export interface DuplicateSet {
+  id: string;
+  /** Hex blake3 of the content. */
+  contentHash: string;
+  /** Size of one copy. */
+  sizeBytes: number;
+  /** Every copy, keeper first. */
+  copies: DuplicateCopy[];
+  /** `sizeBytes * (copies - 1)`. */
+  wastedBytes: number;
+}
+
+/** A name excluded because it is a second name for a file already in the set. */
+export interface LinkedName {
+  path: string;
+  sameFileAs: string;
+  note: string;
+}
+
+/** What one duplicate scan produced. */
+export interface DuplicateScan {
+  findings: Finding[];
+  sets: DuplicateSet[];
+  linkedNames: LinkedName[];
+  skippedRoots: string[];
+  filesHashed: number;
+  cancelled: boolean;
+}
+
+/** What `start_duplicate_scan` hands back. */
+export interface DuplicateScanResult {
+  scanId: string;
+  scan: DuplicateScan;
+  /** One per copy. Never `safe`. */
+  recommendations: Recommendation[];
+  wastedBytes: number;
+}
+
+/** Metadata every duplicate finding carries. */
+export interface DuplicateFindingMeta {
+  setId: string;
+  contentHash: string;
+  keeper: boolean;
+}
+
+/** Extension classes the duplicates route filters by. */
+export type ExtensionClass = "all" | "images" | "video" | "documents" | "other";
+
+/* -------------------------------------------------------------------------
+ * commands.rs — settings
+ * ---------------------------------------------------------------------- */
+
+/** One rule pack as the settings page sees it. */
+export interface PackView {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  enabledByDefault: boolean;
+  ruleCount: number;
+}
+
+/** The cleaner's settings plus the packs that loaded. */
+export interface CleanerSettingsView {
+  packs: PackView[];
+}
+
+/** Duplicate-finder settings. */
+export interface DuplicatesSettings {
+  minSizeBytes: number;
+  roots: string[];
+}
+
+/** Quarantine retention, already validated by Rust. */
+export interface QuarantineSettings {
+  retentionDays: number;
+  maxBytes: number;
+}
+
+/** Everything the settings page reads and writes. */
+export interface AppSettings {
+  cleaner: CleanerSettingsView;
+  duplicates: DuplicatesSettings;
+  quarantine: QuarantineSettings;
 }
 
 /* -------------------------------------------------------------------------

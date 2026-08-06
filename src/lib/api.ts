@@ -10,7 +10,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
+  AppSettings,
   CleanerSummary,
+  DuplicateScanResult,
   ExecProgress,
   ExecReport,
   ModuleManifest,
@@ -59,6 +61,52 @@ export function listModules(): Promise<ModuleManifest[]> {
 /** Run a read-only scan and return its findings and recommendations. */
 export function startScan(moduleId: string): Promise<ScanResult> {
   return invoke<ScanResult>("start_scan", { moduleId });
+}
+
+/**
+ * Ask a running scan to stop.
+ *
+ * Resolves `false` when the scan already finished — the user pressed stop as the
+ * last file went through, which is not an error.
+ */
+export function cancelScan(scanId: string): Promise<boolean> {
+  return invoke<boolean>("cancel_scan", { scanId });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — duplicates
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Run a read-only duplicate scan.
+ *
+ * `roots` overrides the saved selection for this run only; omit it to use the
+ * saved roots, or the profile folders when nothing is saved.
+ */
+export function startDuplicateScan(
+  roots?: string[],
+): Promise<DuplicateScanResult> {
+  return invoke<DuplicateScanResult>("start_duplicate_scan", { roots });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — settings
+ * ---------------------------------------------------------------------- */
+
+/** Everything the settings page shows. */
+export function getSettings(): Promise<AppSettings> {
+  return invoke<AppSettings>("get_settings");
+}
+
+/**
+ * Save the settings page.
+ *
+ * Resolves with the settings **as stored**, which is not always what was sent:
+ * Rust re-validates the retention window and the duplicate size floor, so the
+ * page must render what it gets back rather than what it asked for.
+ */
+export function setSettings(settings: AppSettings): Promise<AppSettings> {
+  return invoke<AppSettings>("set_settings", { settingsIn: settings });
 }
 
 /** Re-fetch a scan the app already ran. */

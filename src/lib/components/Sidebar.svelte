@@ -94,7 +94,18 @@
     {/if}
   </div>
 
-  <div class="mt-auto flex flex-col gap-3">
+  <div class="mt-auto flex flex-col gap-1">
+    <a
+      href="/settings"
+      class="{linkClass} {isActive('/settings')
+        ? 'bg-surface-3 text-ink'
+        : 'text-ink-muted hover:bg-surface-2 hover:text-ink'}"
+      aria-current={isActive("/settings") ? "page" : undefined}
+    >
+      <ModuleIcon name="settings" />
+      {t("nav.settings")}
+    </a>
+
     <button
       type="button"
       class="{linkClass} w-full text-ink-muted hover:bg-surface-2 hover:text-ink"
@@ -111,7 +122,7 @@
       {/if}
     </button>
 
-    <p class="px-3 text-[0.7rem] text-ink-faint">
+    <p class="mt-2 px-3 text-[0.7rem] text-ink-faint">
       {t("status.phase")}
     </p>
   </div>

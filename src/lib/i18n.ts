@@ -53,8 +53,10 @@ const en = {
   "cleaner.executing": "Moving files to quarantine…",
   "cleaner.summary":
     "About {safe} can be reclaimed safely, and {review} needs your review.",
-  "cleaner.skippedRules":
-    "Some rules could not run on this machine because their folders are not set: {rules}",
+  "cleaner.skippedRules": "Some rules could not run on this machine: {rules}",
+  "cleaner.collapseGroup": "Collapse {group}",
+  "cleaner.expandGroup": "Expand {group}",
+  "cleaner.groupCount": "{count} items",
   "cleaner.safeHint": "selected by default",
   "cleaner.reviewHint": "pick these one by one",
   "cleaner.blockedHint": "shown for information, no action offered",
@@ -74,6 +76,73 @@ const en = {
   "cleaner.doneBody":
     "Reclaimed {size}. Everything moved is in quarantine if you want it back.",
   "cleaner.openQuarantine": "Open quarantine",
+
+  "nav.settings": "Settings",
+
+  "duplicates.intro":
+    "The scan reads your files and never writes to them. It compares sizes first, then the ends of each file, then the whole thing — so two files are only ever called duplicates when every byte matches.",
+  "duplicates.scan": "Find duplicates",
+  "duplicates.scanAgain": "Scan again",
+  "duplicates.scanning": "Comparing files…",
+  "duplicates.stop": "Stop",
+  "duplicates.stopping": "Stopping…",
+  "duplicates.cancelled":
+    "Stopped before finishing, so nothing is listed. Partial results would only be half an answer.",
+  "duplicates.summary": "{size} wasted in {sets} duplicate sets",
+  "duplicates.empty": "No duplicates found in the folders that were scanned.",
+  "duplicates.hashed": "{count} files read in full",
+  "duplicates.setLabel": "{count} copies · {size} each",
+  "duplicates.wasted": "{size} wasted",
+  "duplicates.keeper": "Suggested keeper",
+  "duplicates.makeKeeper": "Keep this one instead",
+  "duplicates.keepNewest": "Keep the newest",
+  "duplicates.keepOldest": "Keep the oldest",
+  "duplicates.selectAll": "Select every non-keeper",
+  "duplicates.selectNone": "Clear the selection",
+  "duplicates.filterClass": "File type",
+  "duplicates.filterMinSize": "Smallest set to show",
+  "duplicates.classAll": "Everything",
+  "duplicates.classImages": "Images",
+  "duplicates.classVideo": "Video",
+  "duplicates.classDocuments": "Documents",
+  "duplicates.classOther": "Other",
+  "duplicates.linkedTitle": "Excluded: same file under another name",
+  "duplicates.skippedRoots": "Some folders were not scanned: {roots}",
+  "duplicates.selection": "{count} copies selected · {size}",
+  "duplicates.remove": "Move copies to quarantine",
+  "duplicates.confirmTitle": "Move {count} copies to quarantine?",
+  "duplicates.confirmBody":
+    "This frees about {size}. The suggested keeper of every set stays where it is.",
+  "duplicates.doneTitle": "Done",
+  "duplicates.doneBody":
+    "Reclaimed {size}. Everything moved is in quarantine if you want it back.",
+
+  "settings.title": "Settings",
+  "settings.subtitle":
+    "Everything here is stored locally. Values that could make the app unsafe are corrected on save, and the page shows you what was actually stored.",
+  "settings.loading": "Loading settings…",
+  "settings.error": "Could not load your settings.",
+  "settings.save": "Save settings",
+  "settings.saving": "Saving…",
+  "settings.saved": "Saved.",
+  "settings.adjusted":
+    "Some values were outside the allowed range and have been corrected.",
+  "settings.packsTitle": "Cleaner rule packs",
+  "settings.packsSubtitle":
+    "A pack that is off is not scanned at all — not scanned and hidden, but never walked.",
+  "settings.packDefaultOn": "on by default",
+  "settings.packDefaultOff": "off by default",
+  "settings.packRules": "{count} rules",
+  "settings.duplicatesTitle": "Duplicate finder",
+  "settings.minSize": "Ignore files smaller than",
+  "settings.minSizeHint":
+    "Below {size} the scan finds noise rather than duplicates, so that is the floor.",
+  "settings.quarantineTitle": "Quarantine",
+  "settings.retentionDays": "Keep removed files for",
+  "settings.retentionHint":
+    "Between {min} and {max} days. A retention of zero would make everything purgeable on the next start, so it is not allowed.",
+  "settings.maxBytes": "Stop the quarantine growing past",
+  "settings.days": "days",
 
   "quarantine.title": "Quarantine",
   "quarantine.subtitle":
@@ -117,7 +186,7 @@ const en = {
   "shutdown.dryRunBanner":
     "This build was started with --dry-run: the timer counts down and warns you, but nothing is actually shut down. The action is written to the log instead.",
 
-  "status.phase": "Phase 1 — first blood",
+  "status.phase": "Phase 2 — brain + duplicates",
 } as const;
 
 /** Every key the dictionary knows. */
