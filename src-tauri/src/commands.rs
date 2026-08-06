@@ -105,6 +105,8 @@ pub struct Services {
     pub brain: Brain,
     /// The recycle bin, real on Windows and a stub everywhere else.
     pub recycle_bin: Arc<dyn RecycleBin>,
+    /// Autostart entries, for `Action::DisableStartupEntry`.
+    pub startup: Arc<dyn executor::StartupControl>,
     /// Directory the rule packs were loaded from, for diagnostics.
     pub rules_dir: PathBuf,
 }
@@ -270,6 +272,7 @@ pub async fn execute<R: Runtime>(
             conn,
             brain: &services.brain,
             recycle_bin: services.recycle_bin.as_ref(),
+            startup: services.startup.as_ref(),
         };
         let mut emit = |done: u64, total: u64, finding: &crate::core::types::Finding| {
             // The final tick always goes out; the rest are throttled.

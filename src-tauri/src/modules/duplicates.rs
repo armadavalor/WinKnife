@@ -53,7 +53,9 @@ use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
 use crate::core::path_compare;
 use crate::core::platform::{file_identity, EnvResolver, FileId};
 use crate::core::scanner::{self, CancellationToken};
-use crate::core::types::{Action, Finding, FindingKind, Recommendation, RiskBucket};
+use crate::core::types::{
+    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+};
 
 /// Files below this are not worth a person's attention (module spec 03).
 pub const DEFAULT_MIN_SIZE_BYTES: u64 = 1024 * 1024;
@@ -768,6 +770,21 @@ pub fn analyze(scan: &DuplicateScan, brain: &Brain) -> Vec<Recommendation> {
                 0
             };
 
+            // The machine-checkable half of the reason: the executor re-hashes
+            // this copy and confirms the keeper is still on disk before it moves
+            // anything (architect addition A, phase 3). It is the same shape the
+            // finding's `meta` carries for the UI — one is for a person, one is
+            // for gate 4.
+            let justification = Justification::DuplicateOf {
+                content_hash: set.content_hash.clone(),
+                keeper: copy.keeper,
+                keeper_path: set
+                    .copies
+                    .iter()
+                    .find(|c| c.keeper)
+                    .map(|c| c.path.clone()),
+            };
+
             match Recommendation::new(
                 vec![copy.finding_id],
                 risk,
@@ -775,6 +792,7 @@ pub fn analyze(scan: &DuplicateScan, brain: &Brain) -> Vec<Recommendation> {
                 action,
                 reason,
                 savings,
+                justification,
             ) {
                 Ok(rec) => recommendations.push(rec),
                 Err(err) => tracing::error!(

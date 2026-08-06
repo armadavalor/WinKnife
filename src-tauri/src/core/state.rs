@@ -169,7 +169,7 @@ impl CancelRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{Action, FindingKind, RiskBucket};
+    use crate::core::types::{Action, FindingKind, Justification, RiskBucket};
 
     fn result(module: &str) -> ScanResult {
         let finding = Finding::new(module, "C:\\Temp\\a.tmp", FindingKind::File);
@@ -180,6 +180,10 @@ mod tests {
             Action::Quarantine,
             "temp file",
             100,
+            Justification::Rule {
+                pack_id: "windows-temp".to_owned(),
+                rule_id: "temp-old".to_owned(),
+            },
         )
         .expect("recommendation");
         ScanResult {
@@ -243,6 +247,10 @@ mod tests {
                 },
                 "because",
                 bytes,
+                Justification::Rule {
+                    pack_id: "windows-temp".to_owned(),
+                    rule_id: "temp-old".to_owned(),
+                },
             )
             .expect("recommendation")
         };

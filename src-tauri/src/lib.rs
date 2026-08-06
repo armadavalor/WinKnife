@@ -189,6 +189,10 @@ pub fn run() {
                 quarantine,
                 brain,
                 recycle_bin: core::platform::real_recycle_bin(),
+                // No module produces `DisableStartupEntry` yet, so the executor
+                // refuses one per item and says so. The startup manager replaces
+                // this with a real control.
+                startup: Arc::new(core::executor::NoStartupControl),
                 rules_dir,
             });
             app.manage(Database::new(connection));

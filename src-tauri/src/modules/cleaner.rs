@@ -28,7 +28,9 @@ use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
 use crate::core::path_compare::CanonicalPath;
 use crate::core::platform::RecycleBin;
 use crate::core::scanner::{self, CancellationToken, WalkEntry};
-use crate::core::types::{Action, Finding, FindingKind, Recommendation, RiskBucket};
+use crate::core::types::{
+    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+};
 
 /// Files touched more recently than this are left alone whatever a rule says:
 /// something is probably still writing them.
@@ -505,6 +507,15 @@ pub fn analyze_at(findings: &[Finding], brain: &Brain, now: DateTime<Utc>) -> Ve
             0
         };
 
+        // The machine-checkable half of the reason. A finding the walk produced
+        // always names the rule that matched it; a finding that somehow does not
+        // can only ever be informational, which is what the executor's gate 1
+        // then enforces (architect addition A, phase 3).
+        let justification = match rule_key(finding) {
+            Some((pack_id, rule_id)) => Justification::Rule { pack_id, rule_id },
+            None => Justification::Informational,
+        };
+
         match Recommendation::new(
             vec![finding.id],
             verdict.bucket,
@@ -512,6 +523,7 @@ pub fn analyze_at(findings: &[Finding], brain: &Brain, now: DateTime<Utc>) -> Ve
             action,
             verdict.reason,
             savings,
+            justification,
         ) {
             Ok(rec) => recommendations.push(rec),
             Err(err) => tracing::error!(
@@ -2094,6 +2106,10 @@ mod tests {
                 },
                 "because",
                 bytes,
+                Justification::Rule {
+                    pack_id: "windows-temp".to_owned(),
+                    rule_id: "temp-old".to_owned(),
+                },
             )
             .expect("recommendation")
         };

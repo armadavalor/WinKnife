@@ -130,8 +130,102 @@ impl Action {
     }
 }
 
+/// Where an autostart entry lives, which is also how it is disabled.
+///
+/// In `core` rather than in `modules::startup` because [`Justification`] names
+/// it and the executor has to re-derive it — the same reason [`FindingKind`] has
+/// `RegistryEntry` and `ScheduledTask` variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub enum StartupSource {
+    /// A value under a `Run` or `RunOnce` key in `HKEY_CURRENT_USER`.
+    CurrentUserRun,
+    /// The same, in `HKEY_LOCAL_MACHINE`.
+    LocalMachineRun,
+    /// The same, under `WOW6432Node` — the 32-bit view of `HKLM`.
+    LocalMachineRun32,
+    /// A shortcut in this user's Startup folder.
+    UserStartupFolder,
+    /// A shortcut in the all-users Startup folder.
+    CommonStartupFolder,
+    /// A scheduled task with a logon trigger.
+    ScheduledTask,
+}
+
+/// **Why** a recommendation proposes what it proposes, in a form the executor
+/// can re-derive from the machine at execute time.
+///
+/// # Why this is part of the contract rather than a convention
+///
+/// The executor's fourth gate re-checks that a recommendation is still
+/// *warranted*, not merely still permitted (`core::executor`). Until phase 3 it
+/// did that by sniffing a finding's free-form `meta` for shapes it recognised,
+/// so a module that recorded nothing fell through to the first three gates and
+/// its actions were never re-verified. Every shipped module happened to record
+/// something, so nothing reachable was unchecked — but "happened to" is not a
+/// guarantee, and the fix the architect asked for is structural: a mutating
+/// action **cannot be constructed** without a justification gate 4 understands
+/// ([`Recommendation::validate`]).
+///
+/// [`Justification::Informational`] is the escape hatch and is deliberately
+/// useless: it is only valid on a non-mutating action, so choosing it does not
+/// let a module act without being checked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[non_exhaustive]
+pub enum Justification {
+    /// Nothing is proposed, so there is nothing to re-derive. Rejected on any
+    /// mutating action.
+    Informational,
+    /// A rule pack's rule matched. The executor re-loads the rule and re-tests
+    /// the criteria that can have changed since the scan.
+    #[serde(rename_all = "camelCase")]
+    Rule {
+        /// Pack that matched.
+        pack_id: String,
+        /// Rule inside it.
+        rule_id: String,
+    },
+    /// The file is a redundant copy. The executor re-hashes it and checks the
+    /// keeper is still there.
+    #[serde(rename_all = "camelCase")]
+    DuplicateOf {
+        /// blake3 of the contents when the set was formed.
+        content_hash: String,
+        /// Whether this copy is the one the set nominated to keep.
+        keeper: bool,
+        /// The copy this one was declared identical to.
+        keeper_path: Option<PathBuf>,
+    },
+    /// An autostart entry. The executor re-reads it from its source and refuses
+    /// if it has moved, vanished, or now points at a different program.
+    #[serde(rename_all = "camelCase")]
+    StartupEntry {
+        /// Where it lives, which is also how it gets disabled.
+        source: StartupSource,
+        /// Value name, shortcut file name or task path — whatever identifies it
+        /// inside that source.
+        key: String,
+        /// The command line as the scan read it. A different one now means the
+        /// entry was replaced while the review screen was open.
+        command: String,
+    },
+}
+
+impl Justification {
+    /// Whether this justification is something gate 4 can actually re-derive.
+    ///
+    /// Only [`Justification::Informational`] is not, which is why it may never
+    /// accompany a mutating action.
+    pub fn is_verifiable(&self) -> bool {
+        !matches!(self, Self::Informational)
+    }
+}
+
 /// A suggestion about one or more findings. Always carries a `reason` — no
-/// unexplained suggestions (CLAUDE.md hard rules).
+/// unexplained suggestions (CLAUDE.md hard rules) — and, when it proposes to
+/// change anything, a [`Justification`] the executor can re-derive.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Recommendation {
@@ -149,6 +243,9 @@ pub struct Recommendation {
     pub reason: String,
     /// Bytes reclaimed if the user approves.
     pub savings_bytes: u64,
+    /// The machine-checkable half of `reason`, re-derived by the executor's
+    /// fourth gate before anything happens.
+    pub justification: Justification,
 }
 
 impl Recommendation {
@@ -156,8 +253,9 @@ impl Recommendation {
     ///
     /// # Errors
     /// Returns [`CoreError::InvalidRecommendation`] when the reason is blank,
-    /// the confidence is out of range, no findings are referenced, or an
-    /// action is proposed for a [`RiskBucket::DoNotDelete`] item.
+    /// the confidence is out of range, no findings are referenced, an action is
+    /// proposed for a [`RiskBucket::DoNotDelete`] item, or a mutating action
+    /// carries a justification the executor cannot re-derive.
     pub fn new(
         finding_ids: Vec<Uuid>,
         risk: RiskBucket,
@@ -165,6 +263,7 @@ impl Recommendation {
         action: Action,
         reason: impl Into<String>,
         savings_bytes: u64,
+        justification: Justification,
     ) -> Result<Self> {
         let candidate = Self {
             id: Uuid::new_v4(),
@@ -174,14 +273,38 @@ impl Recommendation {
             action,
             reason: reason.into(),
             savings_bytes,
+            justification,
         };
         candidate.validate()?;
         Ok(candidate)
     }
 
+    /// A recommendation that proposes nothing, for the red bucket and for rows
+    /// that exist only to tell the user something.
+    ///
+    /// # Errors
+    /// See [`Recommendation::new`].
+    pub fn informational(
+        finding_ids: Vec<Uuid>,
+        risk: RiskBucket,
+        confidence: u8,
+        reason: impl Into<String>,
+        savings_bytes: u64,
+    ) -> Result<Self> {
+        Self::new(
+            finding_ids,
+            risk,
+            confidence,
+            Action::InfoOnly,
+            reason,
+            savings_bytes,
+            Justification::Informational,
+        )
+    }
+
     /// Re-check the invariants. The executor calls this before touching
     /// anything, so a hand-built recommendation cannot smuggle a mutating
-    /// action past the red bucket.
+    /// action past the red bucket — or past gate 4.
     ///
     /// # Errors
     /// See [`Recommendation::new`].
@@ -204,6 +327,16 @@ impl Recommendation {
             return invalid(format!(
                 "action {:?} is not allowed for a {:?} item",
                 self.action, self.risk
+            ));
+        }
+        // The structural half of the executor's fourth gate: something that
+        // changes the machine has to arrive with a reason the executor can check
+        // against the machine, or it cannot be built at all.
+        if self.action.is_mutating() && !self.justification.is_verifiable() {
+            return invalid(format!(
+                "action {:?} needs a justification the executor can re-verify, \
+                 and `Informational` is not one",
+                self.action
             ));
         }
         Ok(())
@@ -297,6 +430,15 @@ mod tests {
         vec![Uuid::nil()]
     }
 
+    /// A justification gate 4 can re-derive, for the tests that are about
+    /// something else.
+    fn a_rule() -> Justification {
+        Justification::Rule {
+            pack_id: "windows-temp".to_owned(),
+            rule_id: "temp-old".to_owned(),
+        }
+    }
+
     #[test]
     fn risk_bucket_wire_format_matches_typescript() {
         let json = serde_json::to_string(&[
@@ -353,6 +495,7 @@ mod tests {
             Action::Quarantine,
             "   ",
             10,
+            a_rule(),
         )
         .expect_err("blank reason must be rejected");
         assert!(matches!(err, CoreError::InvalidRecommendation(_)));
@@ -367,6 +510,7 @@ mod tests {
             Action::Quarantine,
             "temp file",
             10,
+            a_rule(),
         )
         .expect_err("confidence above 100 must be rejected");
         assert!(matches!(err, CoreError::InvalidRecommendation(_)));
@@ -381,6 +525,7 @@ mod tests {
             Action::Quarantine,
             "temp file",
             10,
+            a_rule(),
         )
         .expect_err("a recommendation without findings must be rejected");
         assert!(matches!(err, CoreError::InvalidRecommendation(_)));
@@ -396,6 +541,7 @@ mod tests {
                 action,
                 "inside C:\\Windows",
                 0,
+                a_rule(),
             )
             .expect_err("red bucket must never carry a mutating action");
             assert!(matches!(err, CoreError::InvalidRecommendation(_)));
@@ -404,16 +550,81 @@ mod tests {
 
     #[test]
     fn do_not_delete_may_carry_info_only() {
-        let rec = Recommendation::new(
+        let rec = Recommendation::informational(
             finding_ids(),
             RiskBucket::DoNotDelete,
             100,
-            Action::InfoOnly,
             "protected system path",
             0,
         )
         .expect("info-only is allowed for the red bucket");
         assert_eq!(rec.action, Action::InfoOnly);
+        assert_eq!(rec.justification, Justification::Informational);
+    }
+
+    /// **Architect addition A.** A module cannot build something that changes
+    /// the machine without handing the executor a reason it can re-derive. This
+    /// is the structural half of gate 4: before phase 3 the gate skipped any
+    /// finding that recorded nothing, and the guarantee was "modules that record
+    /// a justification get it verified" rather than "every action is verified".
+    #[test]
+    fn a_mutating_action_cannot_be_built_without_a_verifiable_justification() {
+        for action in [Action::Quarantine, Action::DisableStartupEntry] {
+            let err = Recommendation::new(
+                finding_ids(),
+                RiskBucket::Safe,
+                95,
+                action,
+                "looks fine to me",
+                10,
+                Justification::Informational,
+            )
+            .expect_err("a mutating action needs a re-derivable justification");
+            match err {
+                CoreError::InvalidRecommendation(message) => assert!(
+                    message.contains("re-verify"),
+                    "the refusal must say why: `{message}`"
+                ),
+                other => panic!("expected an invalid-recommendation error, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn every_justification_except_informational_is_verifiable() {
+        assert!(!Justification::Informational.is_verifiable());
+        assert!(a_rule().is_verifiable());
+        assert!(Justification::DuplicateOf {
+            content_hash: "abc".to_owned(),
+            keeper: false,
+            keeper_path: Some(PathBuf::from("C:\\a.bin")),
+        }
+        .is_verifiable());
+        assert!(Justification::StartupEntry {
+            source: StartupSource::CurrentUserRun,
+            key: "OneDrive".to_owned(),
+            command: "C:\\OneDrive.exe".to_owned(),
+        }
+        .is_verifiable());
+    }
+
+    #[test]
+    fn justification_is_a_tagged_union_for_typescript() {
+        let json = serde_json::to_string(&a_rule()).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"kind":"rule","packId":"windows-temp","ruleId":"temp-old"}"#
+        );
+        let startup = serde_json::to_string(&Justification::StartupEntry {
+            source: StartupSource::LocalMachineRun32,
+            key: "Updater".to_owned(),
+            command: "u.exe".to_owned(),
+        })
+        .expect("serialize");
+        assert_eq!(
+            startup,
+            r#"{"kind":"startupEntry","source":"localMachineRun32","key":"Updater","command":"u.exe"}"#
+        );
     }
 
     #[test]
@@ -425,12 +636,17 @@ mod tests {
             Action::Quarantine,
             "not opened in 11 months",
             2_048,
+            a_rule(),
         )
         .expect("valid recommendation");
         let json = serde_json::to_string(&rec).expect("serialize");
         let back: Recommendation = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(rec, back);
         assert!(json.contains(r#""savingsBytes":2048"#), "got {json}");
+        assert!(
+            json.contains(r#""justification":{"kind":"rule""#),
+            "got {json}"
+        );
     }
 
     #[test]

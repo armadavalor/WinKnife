@@ -78,6 +78,39 @@ export type ActionKind =
   | "ignore"
   | "infoOnly";
 
+/** Where an autostart entry lives, which is also how it gets disabled. */
+export type StartupSource =
+  | "currentUserRun"
+  | "localMachineRun"
+  | "localMachineRun32"
+  | "userStartupFolder"
+  | "commonStartupFolder"
+  | "scheduledTask";
+
+/**
+ * The machine-checkable half of a recommendation's `reason`.
+ *
+ * Rust re-derives this at execute time (the executor's fourth gate) and refuses
+ * the item when it no longer holds. A mutating action cannot be constructed
+ * carrying `informational`, so anything the UI can offer to apply arrives with
+ * something the backend will re-check.
+ */
+export type Justification =
+  | { kind: "informational" }
+  | { kind: "rule"; packId: string; ruleId: string }
+  | {
+      kind: "duplicateOf";
+      contentHash: string;
+      keeper: boolean;
+      keeperPath: string | null;
+    }
+  | {
+      kind: "startupEntry";
+      source: StartupSource;
+      key: string;
+      command: string;
+    };
+
 /** A suggestion about one or more findings. Always carries a `reason`. */
 export interface Recommendation {
   id: string;
@@ -89,6 +122,8 @@ export interface Recommendation {
   /** Human-readable justification, shown next to every item. */
   reason: string;
   savingsBytes: number;
+  /** What Rust re-verifies before it acts. */
+  justification: Justification;
 }
 
 /** Outcome of applying one recommendation to one finding. */

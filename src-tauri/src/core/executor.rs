@@ -52,7 +52,8 @@ use crate::core::error::Result;
 use crate::core::platform::RecycleBin;
 use crate::core::quarantine::Quarantine;
 use crate::core::types::{
-    Action, ExecItemResult, ExecOutcome, ExecReport, Finding, FindingKind, Recommendation,
+    Action, ExecItemResult, ExecOutcome, ExecReport, Finding, FindingKind, Justification,
+    Recommendation, StartupSource,
 };
 
 /// One unit of work: a recommendation paired with the finding it acts on.
@@ -62,6 +63,66 @@ pub struct ExecUnit<'a> {
     pub recommendation: &'a Recommendation,
     /// The finding it refers to.
     pub finding: &'a Finding,
+}
+
+/// An autostart entry as it stands on the machine *right now*.
+///
+/// The executor's own reading of what `modules::startup` owns — the same
+/// arrangement as the TypeScript type mirrors, and for the same reason: `core`
+/// must not depend on `modules`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveStartupEntry {
+    /// The command line the entry currently runs.
+    pub command: String,
+    /// Whether it currently runs at all.
+    pub enabled: bool,
+    /// Whether Windows owns it. These are shown greyed and never toggled
+    /// (module spec 05), and gate 4 refuses one that reaches this far.
+    pub os_owned: bool,
+}
+
+/// What the executor needs from whatever owns autostart entries.
+///
+/// Small on purpose: gate 4 has to be able to re-read an entry, and the disable
+/// itself has to be reversible. Nothing here can delete anything, because there
+/// is no method that could.
+pub trait StartupControl: Send + Sync {
+    /// Read the entry at `source`/`key` as it stands now.
+    ///
+    /// `Ok(None)` means it is no longer there, which gate 4 treats as a refusal
+    /// rather than as success.
+    ///
+    /// # Errors
+    /// Returns an error when the source itself could not be read.
+    fn read(&self, source: StartupSource, key: &str) -> Result<Option<LiveStartupEntry>>;
+
+    /// Stop the entry running at the next logon, reversibly.
+    ///
+    /// # Errors
+    /// Returns an error when the change was refused (an `HKLM` entry needs
+    /// elevation) or the entry is unknown.
+    fn disable(&self, source: StartupSource, key: &str) -> Result<()>;
+}
+
+/// A control that refuses everything, for the batches that contain no autostart
+/// entry at all.
+///
+/// Used by the tests and by any caller that has not composed a startup service:
+/// refusing is the safe direction, and a refusal is reported per item rather
+/// than failing the batch.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoStartupControl;
+
+impl StartupControl for NoStartupControl {
+    fn read(&self, _source: StartupSource, _key: &str) -> Result<Option<LiveStartupEntry>> {
+        Ok(None)
+    }
+
+    fn disable(&self, _source: StartupSource, key: &str) -> Result<()> {
+        Err(crate::core::error::CoreError::UnknownStartupEntry(
+            key.to_owned(),
+        ))
+    }
 }
 
 /// Everything the executor is allowed to touch.
@@ -74,6 +135,8 @@ pub struct ExecEnvironment<'a> {
     pub brain: &'a Brain,
     /// The recycle bin, for the one action that is not a quarantine move.
     pub recycle_bin: &'a dyn RecycleBin,
+    /// Autostart entries, for [`Action::DisableStartupEntry`].
+    pub startup: &'a dyn StartupControl,
 }
 
 /// Per-request confirmations, separate from the services in
@@ -212,6 +275,16 @@ fn apply_one(
         ));
     }
 
+    // Disabling an autostart entry is the other mutating action, and it is not a
+    // file operation at all: the "path" of a `Run` value is a registry path and
+    // the "path" of a task is a slash-separated task name, neither of which
+    // gates 2 and 3 can judge (they would refuse both as unjudgeable spellings).
+    // What protects an autostart entry is that Windows may own it, and gate 4
+    // re-reads exactly that below.
+    if unit.recommendation.action == Action::DisableStartupEntry {
+        return disable_startup_entry(unit, env);
+    }
+
     if unit.recommendation.action != Action::Quarantine {
         return skipped(format!(
             "action `{:?}` is not supported yet",
@@ -280,55 +353,48 @@ fn apply_one(
  * Gate 4: is the reason still true?
  * ---------------------------------------------------------------------- */
 
-/// What a duplicate recommendation was justified by, as `modules::duplicates`
-/// wrote it into the finding's `meta`.
-///
-/// Mirrored by hand, like the TypeScript types are: the module owns the shape
-/// and this is the executor's reading of it. A finding that does not carry these
-/// fields is not a duplicate finding and is not checked here.
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DuplicateJustification {
-    /// blake3 of the contents when the set was formed.
-    content_hash: String,
-    /// Whether this copy is the one the set nominated to keep.
-    keeper: bool,
-    /// The copy this one was declared identical to.
-    keeper_path: Option<std::path::PathBuf>,
-}
-
-/// What a cleaner recommendation was justified by, as `modules::cleaner` wrote
-/// it into the finding's `meta`.
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RuleJustification {
-    /// The pack that matched.
-    pack_id: String,
-    /// The rule that matched.
-    rule_id: String,
-}
-
 /// Why the recommendation's own reasoning no longer holds, or `None`.
 ///
-/// Dispatches on what the finding recorded rather than on who produced it, so a
-/// module that records a justification gets it re-checked and one that records
-/// none is left exactly where the first three gates put it. That last case is a
-/// deliberate limit and not an oversight: the executor cannot re-derive a
-/// justification that was never written down, and requiring every module to
-/// write one is a change to the module contract rather than to this file
-/// (`docs/DECISIONS-NEEDED.md`, phase 2 review).
+/// # What changed in phase 3
+///
+/// This used to sniff the *finding's* free-form `meta` for shapes it recognised,
+/// so a module that recorded nothing fell through to the first three gates and
+/// its actions were never re-verified. Every shipped module happened to record
+/// something, so nothing reachable from the UI was unchecked — but the guarantee
+/// was "modules that record a justification get it verified" rather than "every
+/// action is verified" (`docs/DECISIONS-NEEDED.md`, phase 2 review H10).
+///
+/// The justification is now part of the contract: [`Recommendation::validate`]
+/// refuses to build a mutating action carrying
+/// [`Justification::Informational`], and gate 1 above runs that validation on
+/// every unit. So by the time control reaches here, anything that can still act
+/// is carrying a justification this function knows how to re-derive — the
+/// `Informational` arm below is unreachable for a mutating action rather than a
+/// silent fall-through.
 fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Option<String> {
-    let finding = unit.finding;
-
-    if let Ok(duplicate) = serde_json::from_value::<DuplicateJustification>(finding.meta.clone()) {
-        return duplicate_refusal(&duplicate, &finding.path);
+    match &unit.recommendation.justification {
+        // Gate 1 has already refused a mutating action carrying this, so
+        // reaching here means the action changes nothing.
+        Justification::Informational => None,
+        Justification::Rule { pack_id, rule_id } => {
+            rule_refusal(pack_id, rule_id, unit.finding, env.brain)
+        }
+        Justification::DuplicateOf {
+            content_hash,
+            keeper,
+            keeper_path,
+        } => duplicate_refusal(
+            content_hash,
+            *keeper,
+            keeper_path.as_deref(),
+            &unit.finding.path,
+        ),
+        Justification::StartupEntry {
+            source,
+            key,
+            command,
+        } => startup_refusal(*source, key, command, env),
     }
-
-    if let Ok(rule) = serde_json::from_value::<RuleJustification>(finding.meta.clone()) {
-        return rule_refusal(&rule, finding, env.brain);
-    }
-
-    None
 }
 
 /// Re-verify a "this is a redundant copy" reason against the disk right now.
@@ -336,11 +402,16 @@ fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Opti
 /// Ordered cheapest-and-most-catastrophic first: losing the last copy is worse
 /// than moving a file whose bytes changed, and both are cheaper to detect than
 /// a full re-hash.
-fn duplicate_refusal(duplicate: &DuplicateJustification, path: &std::path::Path) -> Option<String> {
+fn duplicate_refusal(
+    content_hash: &str,
+    keeper: bool,
+    keeper_path: Option<&std::path::Path>,
+    path: &std::path::Path,
+) -> Option<String> {
     // The keeper is offered as information only, never as an action. If one
     // reaches here the set has been mangled somewhere upstream; refuse rather
     // than reason about it.
-    if duplicate.keeper {
+    if keeper {
         return Some(
             "skipped: this is the copy the scan suggested keeping, so it is not \
              ours to remove"
@@ -348,7 +419,7 @@ fn duplicate_refusal(duplicate: &DuplicateJustification, path: &std::path::Path)
         );
     }
 
-    let Some(keeper_path) = &duplicate.keeper_path else {
+    let Some(keeper_path) = keeper_path else {
         return Some(
             "skipped: the scan did not record which copy this one was compared \
              against, so that it is still there cannot be confirmed"
@@ -385,7 +456,7 @@ fn duplicate_refusal(duplicate: &DuplicateJustification, path: &std::path::Path)
     // cross-volume copy. Reading the file twice is the price of the reason
     // being true.
     match crate::core::content_hash::full_hash(path) {
-        Ok(hash) if hash == duplicate.content_hash => None,
+        Ok(hash) if hash == content_hash => None,
         Ok(_) => Some(format!(
             "skipped: `{}` has changed since the scan, so it is no longer a copy \
              of anything — its current contents exist nowhere else",
@@ -406,16 +477,11 @@ fn duplicate_refusal(duplicate: &DuplicateJustification, path: &std::path::Path)
 /// that question belongs to gate 2, which asks it properly. What can have
 /// changed is the machine's state and the file's own metadata, which is what
 /// `match` is about.
-fn rule_refusal(
-    justification: &RuleJustification,
-    finding: &Finding,
-    brain: &Brain,
-) -> Option<String> {
-    let Some(rule) = brain.rule(&justification.pack_id, &justification.rule_id) else {
+fn rule_refusal(pack_id: &str, rule_id: &str, finding: &Finding, brain: &Brain) -> Option<String> {
+    let Some(rule) = brain.rule(pack_id, rule_id) else {
         return Some(format!(
-            "skipped: the rule `{}/{}` that suggested this is no longer loaded, so \
-             its reasoning cannot be confirmed",
-            justification.pack_id, justification.rule_id
+            "skipped: the rule `{pack_id}/{rule_id}` that suggested this is no \
+             longer loaded, so its reasoning cannot be confirmed"
         ));
     };
 
@@ -500,6 +566,97 @@ fn rule_refusal(
                 finding.path.display()
             ));
         }
+    }
+
+    None
+}
+
+/// Turn an autostart entry off, reversibly.
+///
+/// Gate 4 runs first and does all the checking: it re-reads the entry from its
+/// source and refuses when it has gone, when Windows owns it, or when it now
+/// runs a different program than the one the user was shown. Only then is the
+/// flag flipped.
+fn disable_startup_entry(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> (ExecOutcome, u64) {
+    if let Some(reason) = justification_refusal(unit, env) {
+        tracing::warn!(
+            entry = %unit.finding.path.display(),
+            reason = reason.as_str(),
+            "refused to disable an autostart entry whose justification no longer holds"
+        );
+        return (ExecOutcome::Skipped { reason }, 0);
+    }
+
+    let Justification::StartupEntry { source, key, .. } = &unit.recommendation.justification else {
+        // Unreachable: `validate` refuses a mutating action with an
+        // unverifiable justification, and gate 4 above accepted this one.
+        return (
+            ExecOutcome::Skipped {
+                reason: "skipped: this is not an autostart entry".to_owned(),
+            },
+            0,
+        );
+    };
+
+    match env.startup.disable(*source, key) {
+        // No bytes are reclaimed by turning something off, and saying otherwise
+        // would put an invented figure in the report.
+        Ok(()) => (ExecOutcome::Succeeded, 0),
+        Err(err) => (
+            ExecOutcome::Failed {
+                error: err.to_string(),
+            },
+            0,
+        ),
+    }
+}
+
+/// Re-verify an autostart reason against the machine right now.
+fn startup_refusal(
+    source: StartupSource,
+    key: &str,
+    command: &str,
+    env: &ExecEnvironment<'_>,
+) -> Option<String> {
+    let live = match env.startup.read(source, key) {
+        Ok(Some(live)) => live,
+        Ok(None) => {
+            return Some(format!(
+                "skipped: `{key}` is no longer in this autostart location, so there \
+                 is nothing left to turn off"
+            ))
+        }
+        Err(err) => {
+            return Some(format!(
+                "skipped: `{key}` could not be re-read before changing it: {err}"
+            ))
+        }
+    };
+
+    // Module spec 05: OS entries are shown greyed with the toggle disabled. That
+    // is a UI statement; this is the enforcement, and it runs whatever the UI
+    // sent.
+    if live.os_owned {
+        return Some(format!(
+            "skipped: `{key}` is part of Windows, and WinKnife does not turn off \
+             the operating system's own startup entries"
+        ));
+    }
+
+    if !live.enabled {
+        return Some(format!("skipped: `{key}` is already disabled"));
+    }
+
+    // The premise of the whole row — "this program runs at logon" — names a
+    // specific program. If the entry now runs a different one, the signature
+    // check, the impact tier and the known-app verdict the user was shown were
+    // all about something else.
+    if live.command != command {
+        return Some(format!(
+            "skipped: `{key}` now runs a different program than the one this was \
+             about (`{}` rather than `{command}`)",
+            live.command
+        ));
     }
 
     None
@@ -654,6 +811,49 @@ mod tests {
         finding
     }
 
+    /// A pack whose single rule declares no `match` criteria at all, so gate 4
+    /// finds it loaded and has nothing left to re-check.
+    ///
+    /// Every brain these tests build loads it. That is not a convenience: since
+    /// phase 3 a mutating action *cannot be constructed* without a justification
+    /// gate 4 can re-derive, so a test that wants to reach the quarantine has to
+    /// supply one that resolves — which is exactly the property being asserted.
+    fn fixture_pack() -> crate::core::brain::RulePack {
+        const JSON: &str = r#"{
+            "id": "executor-fixture",
+            "name": "Executor fixture",
+            "version": 1,
+            "module": "cleaner",
+            "enabled_by_default": true,
+            "description": "One rule with no criteria, for the executor's own tests.",
+            "rules": [
+                {
+                    "id": "anything",
+                    "paths": ["%FIXTURE%\\**"],
+                    "score": { "base": 95, "max_bucket": "safe" },
+                    "action": "quarantine",
+                    "reason": "A fixture rule that asserts nothing about the file."
+                }
+            ]
+        }"#;
+        crate::core::brain::rules::compile_pack(
+            "executor-fixture",
+            JSON,
+            &crate::core::platform::MapEnv::new()
+                .with("USERPROFILE", "C:\\WinKnifeFixture")
+                .with("FIXTURE", "C:\\WinKnifeFixture"),
+        )
+        .expect("the executor fixture pack")
+    }
+
+    /// The justification the fixture pack answers for.
+    fn a_rule() -> Justification {
+        Justification::Rule {
+            pack_id: "executor-fixture".to_owned(),
+            rule_id: "anything".to_owned(),
+        }
+    }
+
     fn quarantine_rec(finding: &Finding) -> Recommendation {
         Recommendation::new(
             vec![finding.id],
@@ -662,6 +862,7 @@ mod tests {
             Action::Quarantine,
             "temporary file older than 24h",
             finding.size_bytes,
+            a_rule(),
         )
         .expect("valid recommendation")
     }
@@ -669,6 +870,7 @@ mod tests {
     fn brain() -> Brain {
         Brain::builder()
             .protected_paths(ProtectedPaths::empty())
+            .packs(vec![fixture_pack()])
             .lock_probe(Arc::new(AlwaysUnlocked))
             .build()
     }
@@ -679,6 +881,7 @@ mod tests {
             conn: &h.conn,
             brain,
             recycle_bin: bin,
+            startup: &NoStartupControl,
         }
     }
 
@@ -775,6 +978,7 @@ mod tests {
         let h = harness();
         let brain = Brain::builder()
             .protected_paths(ProtectedPaths::empty())
+            .packs(vec![fixture_pack()])
             .lock_probe(Arc::new(SystemLockProbe))
             .build();
         let bin = StubRecycleBin::default();
@@ -842,6 +1046,7 @@ mod tests {
         let h = harness();
         let brain = Brain::builder()
             .protected_paths(ProtectedPaths::empty())
+            .packs(vec![fixture_pack()])
             .lock_probe(Arc::new(AlwaysLocked))
             .build();
         let bin = StubRecycleBin::default();
@@ -874,6 +1079,7 @@ mod tests {
 
         let brain = Brain::builder()
             .protected_paths(ProtectedPaths::from_trees([protected_dir.clone()]))
+            .packs(vec![fixture_pack()])
             .lock_probe(Arc::new(AlwaysUnlocked))
             .build();
         let bin = StubRecycleBin::default();
@@ -887,6 +1093,7 @@ mod tests {
             Action::Quarantine,
             "a buggy rule claimed this was safe",
             8,
+            a_rule(),
         )
         .expect("recommendation");
 
@@ -943,6 +1150,7 @@ mod tests {
 
         let brain = Brain::builder()
             .protected_paths(ProtectedPaths::from_trees([long_dir]))
+            .packs(vec![fixture_pack()])
             .lock_probe(Arc::new(AlwaysUnlocked))
             .build();
         let bin = StubRecycleBin::default();
@@ -999,6 +1207,7 @@ mod tests {
 
         let brain = Brain::builder()
             .protected_paths(ProtectedPaths::from_trees([protected_dir.clone()]))
+            .packs(vec![fixture_pack()])
             .lock_probe(Arc::new(AlwaysUnlocked))
             .build();
         let bin = StubRecycleBin::default();
@@ -1048,6 +1257,7 @@ mod tests {
 
         let brain = Brain::builder()
             .protected_paths(ProtectedPaths::from_trees([protected_dir.clone()]))
+            .packs(vec![fixture_pack()])
             .lock_probe(Arc::new(AlwaysUnlocked))
             .build();
         let bin = StubRecycleBin::default();
@@ -1153,11 +1363,10 @@ mod tests {
         let bin = StubRecycleBin::default();
         let path = write(&h.work, "informational.txt", b"data");
         let finding = finding_at(&path, 4);
-        let rec = Recommendation::new(
+        let rec = Recommendation::informational(
             vec![finding.id],
             RiskBucket::DoNotDelete,
             100,
-            Action::InfoOnly,
             "inside a protected location",
             0,
         )
@@ -1673,6 +1882,10 @@ mod tests {
             Action::Quarantine,
             "Cached page data Chrome will rebuild on demand.",
             16,
+            Justification::Rule {
+                pack_id: "browser-cache".to_owned(),
+                rule_id: "chrome-cache".to_owned(),
+            },
         )
         .expect("recommendation");
 
@@ -1740,6 +1953,10 @@ mod tests {
             Action::Quarantine,
             "Cached page data Chrome will rebuild on demand.",
             16,
+            Justification::Rule {
+                pack_id: "browser-cache".to_owned(),
+                rule_id: "chrome-cache".to_owned(),
+            },
         )
         .expect("recommendation");
 
@@ -1790,6 +2007,10 @@ mod tests {
             Action::Quarantine,
             "Cached page data Chrome will rebuild on demand.",
             16,
+            Justification::Rule {
+                pack_id: "browser-cache".to_owned(),
+                rule_id: "chrome-cache".to_owned(),
+            },
         )
         .expect("recommendation");
 
@@ -1829,7 +2050,19 @@ mod tests {
         let victim = write(&h.work, "orphan.tmp", b"data");
 
         let finding = cleaner_finding(&victim, 4, "browser-cache", "chrome-cache");
-        let rec = quarantine_rec(&finding);
+        let rec = Recommendation::new(
+            vec![finding.id],
+            RiskBucket::Safe,
+            95,
+            Action::Quarantine,
+            "a pack that has since been switched off suggested this",
+            4,
+            Justification::Rule {
+                pack_id: "browser-cache".to_owned(),
+                rule_id: "chrome-cache".to_owned(),
+            },
+        )
+        .expect("recommendation");
 
         let report = execute(
             &[ExecUnit {
@@ -1851,22 +2084,51 @@ mod tests {
         assert!(victim.exists());
     }
 
-    /// A justification the executor cannot re-derive must not silently become a
-    /// justification it approves of, and it must not become a batch-wide stop
-    /// either: the first three gates still stand. This pins the documented
-    /// limit so it is a decision rather than a gap somebody finds later.
+    /// **Architect addition A, at the executor.** This test used to assert the
+    /// opposite: a finding that recorded nothing was quarantined on the strength
+    /// of the first three gates alone, and that gap was pinned as a decision.
+    ///
+    /// It is now closed structurally. `Recommendation::validate` refuses to build
+    /// a mutating action carrying `Justification::Informational`, and gate 1 runs
+    /// that same validation on every unit — so a hand-forged one (a struct
+    /// literal, or a payload deserialised from an older build) is *failed*, not
+    /// quietly acted on.
     #[test]
-    fn a_finding_that_recorded_no_justification_is_left_to_the_first_three_gates() {
+    fn an_action_with_nothing_for_gate_four_to_check_cannot_be_built_or_executed() {
         let h = harness();
         let brain = brain();
         let bin = StubRecycleBin::default();
-        let plain = write(&h.work, "no-meta.tmp", b"data");
-        let finding = finding_at(&plain, 4); // `meta` is Null
-        let rec = quarantine_rec(&finding);
+        let plain = write(&h.work, "no-justification.tmp", b"data");
+        let finding = finding_at(&plain, 4);
+
+        // The constructor refuses outright.
+        assert!(Recommendation::new(
+            vec![finding.id],
+            RiskBucket::Safe,
+            95,
+            Action::Quarantine,
+            "no recorded reasoning at all",
+            4,
+            Justification::Informational,
+        )
+        .is_err());
+
+        // And the executor refuses the hand-forged struct the constructor would
+        // never have produced, rather than falling through to gates 1-3.
+        let forged = Recommendation {
+            id: Uuid::new_v4(),
+            finding_ids: vec![finding.id],
+            risk: RiskBucket::Safe,
+            confidence: 95,
+            action: Action::Quarantine,
+            reason: "no recorded reasoning at all".to_owned(),
+            savings_bytes: 4,
+            justification: Justification::Informational,
+        };
 
         let report = execute(
             &[ExecUnit {
-                recommendation: &rec,
+                recommendation: &forged,
                 finding: &finding,
             }],
             &env(&h, &brain, &bin),
@@ -1875,8 +2137,15 @@ mod tests {
         )
         .expect("execute");
 
-        assert_eq!(report.succeeded(), 1);
-        assert!(!plain.exists());
+        match outcome_for(&report, &plain) {
+            ExecOutcome::Failed { error } => assert!(
+                error.contains("re-verify"),
+                "the failure must name the missing guarantee: `{error}`"
+            ),
+            other => panic!("expected a failure, got {other:?}"),
+        }
+        assert!(plain.exists(), "nothing unverifiable may be acted on");
+        assert_eq!(report.batch_id, None);
     }
 
     /// One stale item must not take the rest of the batch with it — the same
