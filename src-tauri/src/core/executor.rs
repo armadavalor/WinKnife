@@ -654,13 +654,22 @@ mod tests {
 
         // The list is written in long names, as the real one is.
         let long_dir = dunce::canonicalize(&protected_dir).expect("canonicalize");
-        let Some(short_victim) = short_path_name(&victim) else {
-            // 8.3 alias generation is disabled on this volume.
-            return;
+        let no_alias = match short_path_name(&victim) {
+            None => true,
+            Some(short) => short == dunce::canonicalize(&victim).expect("canonicalize"),
         };
-        if short_victim == dunce::canonicalize(&victim).expect("canonicalize") {
+        if no_alias {
+            // M11: 8.3 alias generation is a per-volume setting nothing in this
+            // test can turn on, so this skip is real — but it is now visible,
+            // and the mock-based companion below asserts the same gate logic on
+            // every machine.
+            crate::core::test_support::privileged_operation_unavailable(
+                "an_8_3_alias_of_a_protected_directory_is_refused",
+                "8.3 alias generation is disabled on this volume (fsutil 8dot3name)",
+            );
             return;
         }
+        let short_victim = short_path_name(&victim).expect("checked just above");
 
         let brain = Brain::builder()
             .protected_paths(ProtectedPaths::from_trees([long_dir]))
@@ -709,7 +718,11 @@ mod tests {
 
         let door = h.work.join("innocent");
         if std::os::windows::fs::symlink_dir(&protected_dir, &door).is_err() {
-            // Creating links needs developer mode or elevation.
+            // M11: loud, not silent. This used to `return` and pass.
+            crate::core::test_support::privileged_operation_unavailable(
+                "a_link_pointing_into_a_protected_directory_is_refused",
+                "creating a directory symlink needs Developer Mode or elevation",
+            );
             return;
         }
         let through_the_door = door.join("kernel.sys");

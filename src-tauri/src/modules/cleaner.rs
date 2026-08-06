@@ -1014,7 +1014,11 @@ mod tests {
         let real_windows = fixture.root.join("Windows");
         let door = temp.join("innocent");
         if std::os::windows::fs::symlink_dir(&real_windows, &door).is_err() {
-            // Creating links needs developer mode or elevation.
+            // M11: loud, not silent. This used to `return` and pass.
+            crate::core::test_support::privileged_operation_unavailable(
+                "a_walk_root_that_resolves_into_a_protected_location_is_refused",
+                "creating a directory symlink needs Developer Mode or elevation",
+            );
             return;
         }
 

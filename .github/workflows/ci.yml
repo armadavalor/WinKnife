@@ -51,6 +51,23 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
+      # The three link-dependent safety tests (the walker never follows a link,
+      # a link into a protected directory is refused, a walk root that resolves
+      # into one is refused) fail rather than skip unless
+      # WINKNIFE_ALLOW_SKIP_LINK_TESTS=1 is set. That opt-out exists for a
+      # developer machine without Developer Mode; CI must never set it, because
+      # `windows-latest` runs elevated enough to create symlinks and therefore
+      # really does exercise them. This step makes "somebody set it" a build
+      # failure rather than a silent loss of coverage (security review M11).
+      - name: Refuse to let safety tests skip
+        shell: pwsh
+        run: |
+          if ($env:WINKNIFE_ALLOW_SKIP_LINK_TESTS) {
+            Write-Error "WINKNIFE_ALLOW_SKIP_LINK_TESTS is set in CI; the link-dependent safety tests would skip."
+            exit 1
+          }
+          Write-Host "Link-dependent safety tests will run for real."
+
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test

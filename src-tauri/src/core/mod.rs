@@ -15,6 +15,8 @@ pub mod quarantine;
 pub mod scanner;
 pub mod settings;
 pub mod state;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod types;
 
 pub use error::{ApiError, CoreError, Result};

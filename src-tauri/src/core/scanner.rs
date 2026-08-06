@@ -286,7 +286,11 @@ mod tests {
         let made = std::os::unix::fs::symlink(&outside, inside.join("link")).is_ok();
 
         if !made {
-            // Symlink creation needs developer mode or elevation on Windows.
+            // M11: loud, not silent. This used to `return` and pass.
+            crate::core::test_support::privileged_operation_unavailable(
+                "symlinks_are_never_followed",
+                "creating a directory symlink needs Developer Mode or elevation",
+            );
             return;
         }
 
@@ -295,6 +299,36 @@ mod tests {
             !entries.iter().any(|e| e.path.ends_with("secret.txt")),
             "the walker followed a link out of its tree"
         );
+    }
+
+    /// The privilege-free companion to the test above: whatever the tree
+    /// contains, every entry a walk reports is inside the root it was given.
+    /// That is the invariant a followed link breaks, and it is asserted on
+    /// every machine, privileged or not (security review M11).
+    #[test]
+    fn a_walk_never_reports_anything_outside_its_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = dir.path().join("outside");
+        let inside = dir.path().join("inside");
+        fs::create_dir_all(outside.join("deep")).expect("dirs");
+        fs::create_dir_all(inside.join("sub/deeper")).expect("dirs");
+        fs::write(outside.join("deep/secret.txt"), b"do not walk here").expect("write");
+        fs::write(inside.join("sub/deeper/ours.txt"), b"fine").expect("write");
+
+        let root = dunce::canonicalize(&inside).expect("canonicalize");
+        let (entries, summary) = collect(&inside, &CancellationToken::new());
+
+        assert!(entries.iter().any(|e| e.path.ends_with("ours.txt")));
+        assert!(summary.entries_seen > 0);
+        for entry in &entries {
+            let seen = dunce::canonicalize(&entry.path).expect("canonicalize entry");
+            assert!(
+                seen.starts_with(&root),
+                "`{}` is outside the walk root `{}`",
+                seen.display(),
+                root.display()
+            );
+        }
     }
 
     #[test]

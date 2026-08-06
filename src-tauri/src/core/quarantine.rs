@@ -1665,7 +1665,11 @@ mod tests {
         let made = std::os::unix::fs::symlink(&target, &link).is_ok();
 
         if !made {
-            // Creating symlinks needs developer mode or elevation on Windows.
+            // M11: loud, not silent. This used to `return` and pass.
+            crate::core::test_support::privileged_operation_unavailable(
+                "symlinks_are_never_quarantined",
+                "creating a file symlink needs Developer Mode or elevation",
+            );
             return;
         }
 
@@ -2522,8 +2526,13 @@ mod tests {
         #[cfg(not(windows))]
         let made = std::os::unix::fs::symlink(&payload, &link).is_ok();
         if !made {
-            // Creating links needs developer mode or elevation on Windows;
-            // `copy_dir_recursive` is covered by the entry-shape test below.
+            // M11: loud, not silent. `copy_dir_recursive`'s link handling is
+            // additionally covered without privileges by
+            // `the_copy_reports_links_instead_of_following_them` below.
+            crate::core::test_support::privileged_operation_unavailable(
+                "a_directory_containing_a_link_is_never_moved_across_volumes",
+                "creating a file symlink needs Developer Mode or elevation",
+            );
             return;
         }
 
