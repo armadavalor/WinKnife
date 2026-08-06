@@ -48,6 +48,7 @@ use uuid::Uuid;
 
 use crate::core::error::{CoreError, Result};
 use crate::core::executor::{LiveStartupEntry, StartupControl};
+use crate::core::ledger;
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
 use crate::core::platform::{
     EnvResolver, Hive, RegValue, Registry, Signature, SignatureProbe, TaskScheduler,
@@ -477,8 +478,20 @@ impl StartupService {
             // switched off, and they have to be listed or the user cannot put
             // them back.
             match disabled_links(conn, source) {
-                Ok(rows) => {
-                    for row in rows {
+                Ok(held) => {
+                    // A row nobody can parse is a shortcut this app is holding
+                    // and cannot name. Saying so is the whole difference between
+                    // a skip and a disappearance (security review H11).
+                    if held.unreadable_rows > 0 {
+                        unreadable.push(format!(
+                            "{label} (disabled list): {} ledger row(s) could not be read, so \
+                             the shortcut(s) they describe are still switched off and are not \
+                             listed below. The files themselves are untouched in WinKnife's \
+                             `{DISABLED_LINKS_DIR}` folder.",
+                            held.unreadable_rows
+                        ));
+                    }
+                    for row in held.links {
                         let display = Path::new(&row.file_name)
                             .file_stem()
                             .map(|s| s.to_string_lossy().into_owned())
@@ -670,9 +683,14 @@ pub fn is_disabled_flag(bytes: &[u8]) -> bool {
 
 /// The `StartupApproved` payload for a given state.
 ///
-/// `previous` is the value that is already there, if any: its high bits are kept
-/// so this app cooperates with whatever variant the Windows build uses instead
-/// of overwriting it with an assumption.
+/// `previous` is the value that is already there, if any: **the seven high bits
+/// of its first byte** are kept, so this app cooperates with whatever flag
+/// variant the Windows build uses instead of overwriting it with an assumption.
+/// Bytes 1-3 are not carried over — they are the documented padding between the
+/// flag and the `FILETIME` at offset 4, Windows writes `00 00 00` there, and
+/// this writes the same. Bytes 4-11 are ours to set: they are the timestamp of
+/// *this* change (security review L13, which found the doc claiming more than
+/// the code does).
 pub fn approval_payload(enabled: bool, previous: Option<&[u8]>, now: DateTime<Utc>) -> Vec<u8> {
     let base = previous
         .and_then(|bytes| bytes.first().copied())
@@ -812,11 +830,39 @@ pub struct DisabledLink {
     pub disabled_at: DateTime<Utc>,
 }
 
-/// Every shortcut currently held for one source.
+/// What one source's ledger holds, including what could not be read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DisabledLinks {
+    /// Shortcuts this app is holding.
+    pub links: Vec<DisabledLink>,
+    /// Rows whose id or timestamp no longer parses, and which are therefore not
+    /// in `links`.
+    ///
+    /// These used to be dropped with `filter_map`, which is the worst of the
+    /// three options: the shortcut is still in the managed folder, the UI shows
+    /// nothing, and `read_entry` falls through to the Startup folder and reports
+    /// the entry as enabled — so a re-disable hits the unique index and orphans
+    /// the file deterministically (security review H11). Skipping a row is safe;
+    /// hiding the fact that it exists is not, exactly as with
+    /// [`crate::core::quarantine::QuarantineStats::unreadable_rows`].
+    pub unreadable_rows: u64,
+    /// Rows whose stored file is definitely not there any more, cleared by
+    /// [`ledger::reconcile`]: a crash between a restore's move and its `DELETE`
+    /// leaves one behind, and it would otherwise show a shortcut as disabled
+    /// forever while it sits enabled in the Startup folder.
+    pub reconciled_rows: u64,
+}
+
+/// Every shortcut currently held for one source, with the rows that could not
+/// be read counted rather than dropped.
+///
+/// Read-only: rows [`ledger::reconcile`] finds stale are reported, not deleted.
+/// A listing is not the place to write to the ledger, and the row is harmless
+/// once nobody believes it.
 ///
 /// # Errors
 /// Returns an error if the ledger cannot be read.
-pub fn disabled_links(conn: &Connection, source: StartupSource) -> Result<Vec<DisabledLink>> {
+pub fn disabled_links(conn: &Connection, source: StartupSource) -> Result<DisabledLinks> {
     let mut stmt = conn.prepare(
         "SELECT id, file_name, original_path, stored_path, disabled_at
          FROM startup_disabled_link WHERE source = ?1 ORDER BY file_name",
@@ -833,25 +879,38 @@ pub fn disabled_links(conn: &Connection, source: StartupSource) -> Result<Vec<Di
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    Ok(rows
-        .into_iter()
-        .filter_map(|(id, file_name, original_path, stored_path, at)| {
-            Some(DisabledLink {
-                id: Uuid::parse_str(&id).ok()?,
-                source,
-                file_name,
-                original_path,
-                stored_path,
-                disabled_at: DateTime::parse_from_rfc3339(&at).ok()?.with_timezone(&Utc),
-            })
-        })
-        .collect())
+    let mut held = DisabledLinks::default();
+    for (id, file_name, original_path, stored_path, at) in rows {
+        let Some(link) = parse_link(source, &id, file_name, original_path, stored_path, &at) else {
+            held.unreadable_rows += 1;
+            continue;
+        };
+        if ledger::reconcile(Path::new(&link.stored_path)).is_current() {
+            held.links.push(link);
+        } else {
+            tracing::warn!(
+                row = %link.id,
+                stored = %link.stored_path,
+                "a disabled-shortcut row names a file that is not there; \
+                 the shortcut has already gone home and the row is ignored"
+            );
+            held.reconciled_rows += 1;
+        }
+    }
+    Ok(held)
 }
 
 /// One shortcut by source and file name.
 ///
+/// A row that exists but cannot be parsed is an **error**, not a `None`. `None`
+/// means "this app is not holding that shortcut", which sends `read_entry` on to
+/// the Startup folder and lets a re-disable collide with the unique index — the
+/// second route to the orphan in H11. Refusing is the only honest answer when
+/// the ledger says something about this exact entry that we cannot read.
+///
 /// # Errors
-/// Returns an error if the ledger cannot be read.
+/// Returns an error if the ledger cannot be read, or if the row for this entry
+/// does not parse.
 pub fn find_disabled_link(
     conn: &Connection,
     source: StartupSource,
@@ -873,16 +932,67 @@ pub fn find_disabled_link(
         )
         .optional()?;
 
-    Ok(row.and_then(|(id, original_path, stored_path, at)| {
-        Some(DisabledLink {
-            id: Uuid::parse_str(&id).ok()?,
-            source,
-            file_name: file_name.to_owned(),
-            original_path,
-            stored_path,
-            disabled_at: DateTime::parse_from_rfc3339(&at).ok()?.with_timezone(&Utc),
-        })
-    }))
+    let Some((id, original_path, stored_path, at)) = row else {
+        return Ok(None);
+    };
+    let link = parse_link(
+        source,
+        &id,
+        file_name.to_owned(),
+        original_path,
+        stored_path,
+        &at,
+    )
+    .ok_or_else(|| {
+        CoreError::UnknownStartupEntry(format!(
+            "the ledger row for `{file_name}` cannot be read (id `{id}`, disabled at `{at}`), \
+             so WinKnife will not act on it — the shortcut itself is untouched"
+        ))
+    })?;
+
+    // A row whose stored file has gone is a restore that committed its move and
+    // then lost its `DELETE`. The shortcut is back in the Startup folder, so the
+    // truthful answer is "not held".
+    if !ledger::reconcile(Path::new(&link.stored_path)).is_current() {
+        tracing::warn!(
+            row = %link.id,
+            stored = %link.stored_path,
+            "ignoring a disabled-shortcut row whose file is not there"
+        );
+        return Ok(None);
+    }
+    Ok(Some(link))
+}
+
+/// Build a [`DisabledLink`] from its stored columns, or `None` when one of the
+/// two parsed fields no longer parses.
+fn parse_link(
+    source: StartupSource,
+    id: &str,
+    file_name: String,
+    original_path: String,
+    stored_path: String,
+    at: &str,
+) -> Option<DisabledLink> {
+    let Ok(id) = Uuid::parse_str(id) else {
+        tracing::error!(value = id, "unparsable uuid in the disabled-shortcut ledger");
+        return None;
+    };
+    let Ok(disabled_at) = DateTime::parse_from_rfc3339(at) else {
+        tracing::error!(
+            value = at,
+            "unparsable timestamp in the disabled-shortcut ledger"
+        );
+        return None;
+    };
+    Some(DisabledLink {
+        id,
+        source,
+        file_name,
+        original_path,
+        stored_path,
+        disabled_at: disabled_at.with_timezone(&Utc),
+    })
 }
 
 fn record_disabled_link(conn: &Connection, link: &DisabledLink) -> Result<()> {
@@ -946,20 +1056,25 @@ impl StartupService {
             }
             StartupSource::UserStartupFolder | StartupSource::CommonStartupFolder => {
                 if let Some(link) = find_disabled_link(conn, source, key)? {
+                    let command = link.original_path;
                     return Ok(Some(LiveStartupEntry {
-                        command: link.original_path,
+                        os_owned: self.folder_entry_is_os_owned(source, key, &command),
+                        command,
                         enabled: false,
-                        os_owned: false,
                     }));
                 }
                 let Some(folder) = self.paths.folder(source) else {
                     return Ok(None);
                 };
                 let path = folder.join(key);
-                Ok(path.is_file().then(|| LiveStartupEntry {
-                    command: path.to_string_lossy().into_owned(),
+                if !path.is_file() {
+                    return Ok(None);
+                }
+                let command = path.to_string_lossy().into_owned();
+                Ok(Some(LiveStartupEntry {
+                    os_owned: self.folder_entry_is_os_owned(source, key, &command),
+                    command,
                     enabled: true,
-                    os_owned: false,
                 }))
             }
             StartupSource::ScheduledTask => {
@@ -975,6 +1090,36 @@ impl StartupService {
                 }))
             }
         }
+    }
+
+    /// Whether Windows owns a Startup-folder shortcut.
+    ///
+    /// The same two questions [`StartupService::describe`] asks — does the
+    /// known-app list mark it as part of Windows, and does the shortcut point
+    /// inside the Windows directory — asked at toggle time as well as at scan
+    /// time. `read_entry` used to hardcode `false` here, so an entry the list
+    /// marks `os: true` greyed out in the UI but sailed through `set_enabled`'s
+    /// refusal. Only reachable today as an *enable*, which is harmless, but the
+    /// gate is not there to be harmless in the cases we happen to have thought
+    /// of (security review L14).
+    fn folder_entry_is_os_owned(
+        &self,
+        source: StartupSource,
+        file_name: &str,
+        command: &str,
+    ) -> bool {
+        let target = executable_of(command);
+        let publisher = target
+            .as_deref()
+            .and_then(|path| self.signatures.check(path).publisher().map(str::to_owned));
+        let name = Path::new(file_name)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_else(|| file_name.to_owned());
+        self.known
+            .lookup(&name, command, publisher.as_deref())
+            .is_some_and(|app| app.os)
+            || self.is_windows_owned(source, file_name, target.as_deref())
     }
 
     /// Turn an entry on or off. Never deletes anything.
@@ -1041,8 +1186,19 @@ impl StartupService {
         Ok(())
     }
 
-    /// Move a shortcut into the module-managed folder and record where it came
-    /// from.
+    /// Record where a shortcut came from, then move it into the module-managed
+    /// folder.
+    ///
+    /// That order is the whole point, and it used to be the other way round: the
+    /// `.lnk` was moved and *then* the row was written, so a ledger write that
+    /// failed — a full disk, a locked database, `SQLITE_BUSY`, the
+    /// `startup_disabled_link_origin` unique index firing — left the shortcut
+    /// out of the Startup folder with nothing recording where it had gone. It
+    /// was never deleted, and it was also never again visible to the user
+    /// (security review H11).
+    ///
+    /// It goes through [`ledger::ledgered_move`] rather than re-deriving the
+    /// order here, because re-deriving it is exactly what went wrong.
     fn stash_link(
         &self,
         conn: &Connection,
@@ -1061,25 +1217,40 @@ impl StartupService {
         // with the same file name without one hiding the other.
         let id = Uuid::new_v4();
         let stored = self.paths.disabled.join(format!("{id}-{file_name}"));
-        // Through `core::quarantine`, which is the only place in this crate
-        // allowed to move user data: it renames when it can, copies and verifies
-        // when it must, and never overwrites an occupied destination.
-        crate::core::quarantine::move_user_file(&original, &stored)?;
+        let link = DisabledLink {
+            id,
+            source,
+            file_name: file_name.to_owned(),
+            original_path: original.to_string_lossy().into_owned(),
+            stored_path: stored.to_string_lossy().into_owned(),
+            disabled_at: now,
+        };
 
-        record_disabled_link(
+        let mut write = |tx: &Connection| record_disabled_link(tx, &link);
+        let mut undo = |tx: &Connection| forget_disabled_link(tx, id);
+        ledger::ledgered_move(
             conn,
-            &DisabledLink {
-                id,
-                source,
-                file_name: file_name.to_owned(),
-                original_path: original.to_string_lossy().into_owned(),
-                stored_path: stored.to_string_lossy().into_owned(),
-                disabled_at: now,
+            "startup stash",
+            ledger::LedgerStep::Claim {
+                write: &mut write,
+                undo: &mut undo,
             },
+            // The move primitive renames when it can, copies and verifies when
+            // it must, and never overwrites an occupied destination. It cannot
+            // be reached without the `Recorded` this closure is handed.
+            |recorded| ledger::move_user_file(recorded, &original, &stored),
         )
     }
 
-    /// Put a stashed shortcut back exactly where it was.
+    /// Put a stashed shortcut back exactly where it was, then forget the row.
+    ///
+    /// A [`ledger::LedgerStep::Retire`], not a `Claim`: dropping the row first
+    /// would leave the `.lnk` in the managed folder with nothing pointing at it
+    /// if the move then failed, which is the same orphan from the other
+    /// direction. The row is dropped only once the shortcut is back in the
+    /// Startup folder, where the user can see it without our help — and a row
+    /// left behind by a crash in that gap is cleared by
+    /// [`ledger::reconcile`] the next time it is read.
     fn restore_link(
         &self,
         conn: &Connection,
@@ -1088,11 +1259,20 @@ impl StartupService {
     ) -> Result<()> {
         let link = find_disabled_link(conn, source, file_name)?
             .ok_or_else(|| CoreError::UnknownStartupEntry(file_name.to_owned()))?;
-        crate::core::quarantine::move_user_file(
-            Path::new(&link.stored_path),
-            Path::new(&link.original_path),
-        )?;
-        forget_disabled_link(conn, link.id)
+
+        let mut write = |tx: &Connection| forget_disabled_link(tx, link.id);
+        ledger::ledgered_move(
+            conn,
+            "startup restore",
+            ledger::LedgerStep::Retire { write: &mut write },
+            |recorded| {
+                ledger::move_user_file(
+                    recorded,
+                    Path::new(&link.stored_path),
+                    Path::new(&link.original_path),
+                )
+            },
+        )
     }
 }
 
@@ -1622,6 +1802,7 @@ mod tests {
         assert!(!shortcut.exists(), "the shortcut left the Startup folder");
         let stashed = disabled_links(&world.conn, StartupSource::UserStartupFolder)
             .expect("ledger")
+            .links
             .pop()
             .expect("a recorded row");
         assert!(
@@ -1650,9 +1831,275 @@ mod tests {
             payload,
             "byte-identical"
         );
-        assert!(disabled_links(&world.conn, StartupSource::UserStartupFolder)
-            .expect("ledger")
-            .is_empty());
+        assert_eq!(
+            disabled_links(&world.conn, StartupSource::UserStartupFolder).expect("ledger"),
+            DisabledLinks::default(),
+            "the row is gone and nothing was left unreadable behind it"
+        );
+    }
+
+    /// `read_entry` used to hardcode `os_owned: false` for Startup-folder
+    /// entries, so an entry the known-app list marks as part of Windows greyed
+    /// out in the UI and was still let through `set_enabled`'s refusal
+    /// (security review L14). Only reachable as an enable today; closed anyway.
+    #[test]
+    fn a_startup_folder_shortcut_windows_owns_is_refused_by_the_toggle_too() {
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        // `is_windows_owned` asks whether the program sits inside the Windows
+        // directory, which the fixture points at `<tempdir>/Windows`.
+        let windows = world._dir.path().join("Windows");
+        std::fs::create_dir_all(&windows).expect("windows dir");
+        let program = windows.join("SystemThing.exe");
+        std::fs::write(&program, b"MZ").expect("write");
+
+        let shortcut = world.user_startup.join("SystemThing.lnk");
+        std::fs::write(&shortcut, program.to_string_lossy().as_bytes()).expect("write");
+        // The shortcut's "command" is its own path, so point the entry at the
+        // program by giving the ledger the program's path as the original.
+        let live = world
+            .service
+            .read_entry(
+                &world.conn,
+                StartupSource::UserStartupFolder,
+                "SystemThing.lnk",
+            )
+            .expect("read")
+            .expect("the shortcut is there");
+        assert!(!live.os_owned, "a .lnk is not itself inside C:\\Windows");
+
+        // Now the same question for an entry whose command really does name a
+        // program inside the Windows directory, which is the shape the gate is
+        // for.
+        assert!(
+            world.service.folder_entry_is_os_owned(
+                StartupSource::UserStartupFolder,
+                "SystemThing.lnk",
+                &program.to_string_lossy(),
+            ),
+            "a shortcut to a program inside the Windows directory is Windows'"
+        );
+    }
+
+    /* --- the orphan is impossible (security review H11) ----------------- */
+
+    /// Everything a stash left behind, from the user's point of view.
+    ///
+    /// The bug was never "the file was deleted" — it never was. It was that the
+    /// shortcut left the Startup folder while nothing recorded where it went,
+    /// so it was gone from the only interface the user has. These three numbers
+    /// are that statement.
+    fn after_a_failed_stash(world: &World, shortcut: &Path) -> (bool, usize, usize) {
+        let managed = std::fs::read_dir(&world.service.paths.disabled)
+            .map(|entries| entries.flatten().count())
+            .unwrap_or(0);
+        let listed = world
+            .service
+            .scan(&world.conn)
+            .entries
+            .iter()
+            .filter(|entry| entry.key == "Thing.lnk")
+            .count();
+        (shortcut.is_file(), managed, listed)
+    }
+
+    /// The reproduction, with the ledger write failing at exactly the point that
+    /// produced the orphan: the row cannot be written, so the shortcut must not
+    /// move.
+    ///
+    /// `query_only` is the read-only database the reviewer used — the shape of a
+    /// full disk, a locked file or `SQLITE_BUSY`.
+    #[test]
+    fn a_ledger_that_cannot_be_written_leaves_the_shortcut_where_it_is() {
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        let shortcut = world.user_startup.join("Thing.lnk");
+        std::fs::write(&shortcut, b"payload").expect("write");
+
+        world
+            .conn
+            .pragma_update(None, "query_only", "ON")
+            .expect("make the ledger read-only");
+
+        let failure = world
+            .service
+            .set_enabled(
+                &world.conn,
+                StartupSource::UserStartupFolder,
+                "Thing.lnk",
+                false,
+                Utc::now(),
+            )
+            .expect_err("a ledger that cannot record must refuse the disable");
+        assert!(
+            matches!(failure, CoreError::Db(_)),
+            "the database failure has to reach the caller: {failure:?}"
+        );
+
+        world
+            .conn
+            .pragma_update(None, "query_only", "OFF")
+            .expect("restore");
+
+        let (still_there, managed, listed) = after_a_failed_stash(&world, &shortcut);
+        println!("[H11] ledger write refused : {failure}");
+        println!("[H11] .lnk still in the Startup folder? {still_there}");
+        println!("[H11] managed folder holds  : {managed} file(s)");
+        println!("[H11] listed by the module  : {listed} row(s)");
+        println!(
+            "[H11] ORPHANED (moved out, no record, invisible to the UI)? {}",
+            !still_there && listed == 0
+        );
+        assert!(
+            still_there,
+            "the shortcut must still be in the Startup folder"
+        );
+        assert_eq!(managed, 0, "nothing may have moved into the managed folder");
+        assert_eq!(listed, 1, "and it must still be listed by the module");
+        assert!(
+            world.service.scan(&world.conn).entries[0].enabled,
+            "it never got switched off, so it must not read as switched off"
+        );
+    }
+
+    /// The second shape of the same failure: the `startup_disabled_link_origin`
+    /// unique index fires because a row for this (source, file name) is already
+    /// there. Before the fix the file moved first, so the collision left the
+    /// `.lnk` in the managed folder with no row of its own.
+    #[test]
+    fn a_colliding_ledger_row_leaves_the_shortcut_where_it_is() {
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        let shortcut = world.user_startup.join("Thing.lnk");
+        std::fs::write(&shortcut, b"payload").expect("write");
+
+        // A row that already claims this (source, file name), pointing at a
+        // stored file that really exists so `reconcile` does not clear it.
+        std::fs::create_dir_all(&world.service.paths.disabled).expect("managed folder");
+        let squatter = world.service.paths.disabled.join("squatter.lnk");
+        std::fs::write(&squatter, b"older").expect("write");
+        record_disabled_link(
+            &world.conn,
+            &DisabledLink {
+                id: Uuid::new_v4(),
+                source: StartupSource::UserStartupFolder,
+                file_name: "Thing.lnk".to_owned(),
+                original_path: shortcut.to_string_lossy().into_owned(),
+                stored_path: squatter.to_string_lossy().into_owned(),
+                disabled_at: Utc::now(),
+            },
+        )
+        .expect("seed the collision");
+
+        let failure = world
+            .service
+            .stash_link(
+                &world.conn,
+                StartupSource::UserStartupFolder,
+                "Thing.lnk",
+                Utc::now(),
+            )
+            .expect_err("the unique index must refuse the second row");
+        assert!(matches!(failure, CoreError::Db(_)), "got {failure:?}");
+
+        assert!(
+            shortcut.is_file(),
+            "the shortcut must still be in the Startup folder"
+        );
+        let managed: Vec<String> = std::fs::read_dir(&world.service.paths.disabled)
+            .expect("managed folder")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            managed,
+            vec!["squatter.lnk".to_owned()],
+            "nothing new may have been moved in"
+        );
+    }
+
+    /// A row nobody can parse is a shortcut this app is holding and cannot name.
+    /// It is counted and announced, never dropped on the floor — dropping it was
+    /// the second route to the orphan, because `read_entry` then fell through to
+    /// the folder and a re-disable hit the unique index.
+    #[test]
+    fn a_ledger_row_that_does_not_parse_is_surfaced_rather_than_dropped() {
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        std::fs::create_dir_all(&world.service.paths.disabled).expect("managed folder");
+        let stored = world.service.paths.disabled.join("held.lnk");
+        std::fs::write(&stored, b"held").expect("write");
+
+        world
+            .conn
+            .execute(
+                "INSERT INTO startup_disabled_link
+                    (id, source, file_name, original_path, stored_path, disabled_at)
+                 VALUES ('not-a-uuid', 'user-startup', 'Thing.lnk', 'C:\\x\\Thing.lnk', ?1, 'never')",
+                [stored.to_string_lossy()],
+            )
+            .expect("insert a corrupt row");
+
+        let held = disabled_links(&world.conn, StartupSource::UserStartupFolder).expect("ledger");
+        assert!(held.links.is_empty());
+        assert_eq!(held.unreadable_rows, 1, "the row has to be counted");
+
+        let scan = world.service.scan(&world.conn);
+        assert!(
+            scan.unreadable.iter().any(|line| line.contains("could not be read")),
+            "and announced to the user: {:?}",
+            scan.unreadable
+        );
+
+        // And nothing may treat the entry as absent, because that is what let a
+        // re-disable collide with the unique index.
+        let refusal = world
+            .service
+            .read_entry(&world.conn, StartupSource::UserStartupFolder, "Thing.lnk")
+            .expect_err("an unreadable row for this exact entry must refuse");
+        assert!(
+            matches!(refusal, CoreError::UnknownStartupEntry(_)),
+            "got {refusal:?}"
+        );
+    }
+
+    /// The crash window a restore leaves open: the move committed, the `DELETE`
+    /// did not. The shortcut is back in the Startup folder, so the row is stale
+    /// and must not keep reporting the entry as switched off.
+    #[test]
+    fn a_row_whose_stored_file_has_gone_home_is_reconciled() {
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        let shortcut = world.user_startup.join("Thing.lnk");
+        std::fs::write(&shortcut, b"payload").expect("write");
+
+        record_disabled_link(
+            &world.conn,
+            &DisabledLink {
+                id: Uuid::new_v4(),
+                source: StartupSource::UserStartupFolder,
+                file_name: "Thing.lnk".to_owned(),
+                original_path: shortcut.to_string_lossy().into_owned(),
+                stored_path: world
+                    .service
+                    .paths
+                    .disabled
+                    .join("never-written.lnk")
+                    .to_string_lossy()
+                    .into_owned(),
+                disabled_at: Utc::now(),
+            },
+        )
+        .expect("seed a stale row");
+
+        let held = disabled_links(&world.conn, StartupSource::UserStartupFolder).expect("ledger");
+        assert!(held.links.is_empty());
+        assert_eq!(held.reconciled_rows, 1);
+
+        let live = world
+            .service
+            .read_entry(&world.conn, StartupSource::UserStartupFolder, "Thing.lnk")
+            .expect("read")
+            .expect("the shortcut is in the folder");
+        assert!(
+            live.enabled,
+            "the file is in the Startup folder, so it runs, whatever a stale row says"
+        );
     }
 
     #[test]

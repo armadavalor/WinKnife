@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::error::{CoreError, Result};
+use crate::core::ledger;
 use crate::core::path_compare;
 
 /// Directory name under the app data dir.
@@ -352,27 +353,32 @@ impl Quarantine {
         // Ledger first: if the move succeeds and the process then dies, the row
         // already knows where the file came from. A row without a file is
         // recoverable; a file without a row is not.
-        insert_item(conn, &item)?;
-
-        if let Err(failure) = move_path(path, &destination) {
-            // The move failed, so the row describes something that never
-            // happened. Drop it rather than leaving a phantom in the drawer —
-            // and say so out loud if even that does not work, because a
-            // swallowed failure here is exactly the phantom it was meant to
-            // prevent (security review M3).
-            if let Err(cleanup) = conn.execute(
+        //
+        // Through `core::ledger` rather than by hand. This function got the
+        // order right and said why in a comment, and the startup manager then
+        // read the comment, called this file's move primitive, and wrote the
+        // bookkeeping around it backwards anyway (security review H11). The
+        // order is a type now, and this is one of its callers.
+        let mut write = |tx: &Connection| insert_item(tx, &item);
+        let mut undo = |tx: &Connection| {
+            tx.execute(
                 "DELETE FROM quarantine WHERE id = ?1",
                 [item_id.to_string()],
-            ) {
-                tracing::error!(
-                    item = %item_id,
-                    error = %cleanup,
-                    "could not drop the ledger row for a move that never happened; \
-                     the drawer may offer to restore an item that was never taken"
-                );
-            }
-            return Err(failure.into_error(path, &destination));
-        }
+            )?;
+            Ok(())
+        };
+        ledger::ledgered_move(
+            conn,
+            "quarantine take",
+            ledger::LedgerStep::Claim {
+                write: &mut write,
+                undo: &mut undo,
+            },
+            |_| {
+                move_path(path, &destination)
+                    .map_err(|failure| failure.into_error(path, &destination))
+            },
+        )?;
 
         tracing::info!(
             item = %item_id,
@@ -404,45 +410,49 @@ impl Quarantine {
             )));
         }
 
-        // Mark the row before the move, mirroring `take`. A row that says
-        // "restored" while the file is still here leaks a little disk; a row
-        // that says "held" while the file has already gone home is a phantom
-        // the drawer offers to restore a second time (security review M2).
+        // A `Claim`, not a `Retire`: the row is *marked* rather than dropped, so
+        // it still names both the quarantine path and the original afterwards
+        // and the file never stops being findable. That is what makes marking
+        // before the move safe here — a row that says "restored" while the file
+        // is still in the drawer leaks a little disk, while a row that says
+        // "held" after the file has gone home is a phantom the drawer offers to
+        // restore a second time (security review M2).
         let now = Utc::now();
-        conn.execute(
-            "UPDATE quarantine SET restored_at = ?2 WHERE id = ?1",
-            rusqlite::params![item_id.to_string(), timestamp(now)],
+        let mut write = |tx: &Connection| {
+            tx.execute(
+                "UPDATE quarantine SET restored_at = ?2 WHERE id = ?1",
+                rusqlite::params![item_id.to_string(), timestamp(now)],
+            )?;
+            Ok(())
+        };
+        let mut undo = |tx: &Connection| {
+            tx.execute(
+                "UPDATE quarantine SET restored_at = NULL WHERE id = ?1",
+                [item_id.to_string()],
+            )?;
+            Ok(())
+        };
+        let (target, renamed) = ledger::ledgered_move(
+            conn,
+            "quarantine restore",
+            ledger::LedgerStep::Claim {
+                write: &mut write,
+                undo: &mut undo,
+            },
+            |_| self.move_out(&item),
         )?;
 
-        match self.move_out(&item) {
-            Ok((target, renamed)) => {
-                tracing::info!(
-                    item = %item_id,
-                    restored_to = %target.display(),
-                    renamed,
-                    "restored from quarantine"
-                );
-                Ok(RestoreOutcome {
-                    item_id,
-                    restored_to: target,
-                    renamed,
-                })
-            }
-            Err(err) => {
-                if let Err(reset) = conn.execute(
-                    "UPDATE quarantine SET restored_at = NULL WHERE id = ?1",
-                    [item_id.to_string()],
-                ) {
-                    tracing::error!(
-                        item = %item_id,
-                        error = %reset,
-                        "could not un-mark a restore that failed; the item is still held \
-                         but the drawer will no longer show it"
-                    );
-                }
-                Err(err)
-            }
-        }
+        tracing::info!(
+            item = %item_id,
+            restored_to = %target.display(),
+            renamed,
+            "restored from quarantine"
+        );
+        Ok(RestoreOutcome {
+            item_id,
+            restored_to: target,
+            renamed,
+        })
     }
 
     /// Move one item back out, claiming its destination exclusively.
@@ -1371,11 +1381,20 @@ fn copy_dir_recursive(
 /// module keeps its own ledger so the move is reversible; what it borrows here
 /// is the primitive, not the policy.
 ///
+/// # Why a module cannot call this
+///
+/// It used to be `pub`, and the startup manager called it and then wrote its
+/// ledger row afterwards — the one order that turns a failed write into a file
+/// nobody can find (security review H11). It is visible only inside `core` now,
+/// and the way in from a module is [`crate::core::ledger::move_user_file`],
+/// which demands a [`crate::core::ledger::Recorded`] that only a committed
+/// ledger row can produce.
+///
 /// # Errors
 /// Returns [`CoreError::Quarantine`] when the source is missing, the
 /// destination is occupied, or the move fails; [`CoreError::VerifyFailed`] when
 /// a cross-volume copy did not match, in which case the original is untouched.
-pub fn move_user_file(from: &Path, to: &Path) -> Result<()> {
+pub(in crate::core) fn move_user_file(from: &Path, to: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(from).map_err(|err| {
         CoreError::Quarantine(format!("cannot inspect `{}`: {err}", from.display()))
     })?;

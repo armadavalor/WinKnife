@@ -10,6 +10,7 @@ pub mod error;
 pub mod events;
 pub mod executor;
 pub mod history;
+pub mod ledger;
 pub mod logging;
 pub mod module;
 pub mod path_compare;
