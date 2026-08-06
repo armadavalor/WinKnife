@@ -339,3 +339,50 @@ found late and blamed on something else.
 - **The duplicate candidate list is held in memory** — fine for V1 behind the
   size floor. If anyone points it at a whole drive we stream it; that belongs in
   the backlog, not in this phase.
+
+---
+
+## Open items raised during the phase 2 review remediation
+
+- [ ] 2026-08-06 (phase 2 review, H10): the executor's new justification gate
+      re-checks **what the finding recorded**. A finding whose `meta` carries
+      neither a duplicate hash nor a pack/rule id is left to the first three
+      gates exactly as before, because there is no recorded reasoning to
+      re-derive. Every shipped module records one, so nothing reachable from the
+      UI is unchecked — but the guarantee is "modules that record a
+      justification get it verified", not "every action is verified". Closing
+      that gap means making a recorded justification part of the module
+      contract (`ToolModule`), which is a phase-3 change and not this brief's.
+- [ ] 2026-08-06 (phase 2 review, H10): the gate re-tests the rule's own `match`
+      criteria and **not** `modules::cleaner::MIN_QUIET_HOURS`. The quiet period
+      is a module-level scan policy rather than a rule criterion, and lifting it
+      into `core` to re-check it would put a cleaner constant in the executor.
+      Every shipped rule declares `min_age_hours` of 24 or more, which subsumes
+      the one-hour quiet period for all of them; a future pack that declares no
+      age at all would not get a freshness re-check. Revisit if one ships.
+- [ ] 2026-08-06 (phase 2 review, H10): the duplicate re-check re-reads the file
+      in full. That is a second read of every *approved* item — not of every
+      candidate — and the quarantine move is about to read every byte anyway on
+      a cross-volume copy. Sampling was rejected outright: it would re-admit
+      exactly the crafted collision `a_crafted_collision_is_not_a_duplicate`
+      exists to forbid. If this ever shows up in a profile, the answer is to
+      skip the re-read when the file's size *and* modification time are both
+      unchanged since the scan — a cheap conservative pre-filter — not a
+      partial hash.
+- [ ] 2026-08-06 (phase 2 review, A2): the architect asked the
+      `windows-update-leftovers` reason to "name the size found". Rule `reason`
+      strings are static data and ship to the UI verbatim
+      (`docs/RULES-FORMAT.md`), so a literal byte count cannot appear in one
+      without adding placeholder interpolation to the rule-pack format — new
+      scope, and a format change ripples to every pack and to the schema. Safest
+      interpretation taken: the reason names the space *by pointing at the
+      figure the row already shows* and names both safe alternatives (Settings →
+      System → Storage, and Disk Cleanup). If interpolation is wanted, `{size}`
+      in `reason` expanded by the brain is the obvious shape — decide it as a
+      format change rather than as a one-pack special case.
+- [ ] 2026-08-06 (phase 2 review, M14): the walk-root fold now re-anchors an
+      absorbed rule's globs by re-spelling the walked path, which keeps one walk
+      per directory. The alternative the review offered — one group per spelling
+      — was not taken because it undoes the L5 optimisation on precisely the
+      case that motivated it (`%TEMP%` in 8.3 form against a long-form
+      `%LOCALAPPDATA%\Temp`, which is the stock layout on this machine).

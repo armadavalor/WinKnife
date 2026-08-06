@@ -9,11 +9,18 @@ Purpose: find reclaimable junk, present it in 3 risk buckets with reasons, clean
 | recycle-bin | shell API (not raw `$Recycle.Bin` walk) | Safe |
 | browser-cache | Chrome/Edge/Firefox/Brave cache dirs (NOT cookies/profiles) | Safe, skip if browser running → NeedsReview |
 | thumbnail-icon-cache | `%LOCALAPPDATA%\Microsoft\Windows\Explorer\*.db` | Safe |
-| windows-update-leftovers | `%WINDIR%\SoftwareDistribution\Download` | NeedsReview |
-| crash-dumps-logs | `%LOCALAPPDATA%\CrashDumps`, `*.dmp`, `%WINDIR%\*.log` patterns | Safe/NeedsReview per rule |
+| windows-update-leftovers (off by default) | `%WINDIR%\SoftwareDistribution\Download` | InfoOnly (see below) |
+| crash-dumps-logs | `%LOCALAPPDATA%\CrashDumps`, `*.dmp` patterns | Safe/NeedsReview per rule |
 | old-downloads | `%USERPROFILE%\Downloads`, untouched > 180 days | NeedsReview (never Safe) |
-| installer-leftovers | `%TEMP%` `*.msi/*.exe` >30 days, `%WINDIR%\Downloaded Program Files` | NeedsReview |
+| installer-leftovers | `%TEMP%` `*.msi/*.exe` >30 days | NeedsReview |
 | dev-caches (own pack, off by default) | npm/pip/cargo/gradle caches | NeedsReview |
+
+**Why `windows-update-leftovers` is InfoOnly, and why two `%WINDIR%` locations are gone.**
+`%WINDIR%` is a tree-scoped protected path, and CLAUDE.md's hard rule is that a protected path can never receive a Safe rating *or* a delete action. A NeedsReview row there would have been a button this app must never render, so the pack ships `action: info_only` with `max_bucket: do_not_delete` — it can report the location and is structurally incapable of proposing anything about it. That is not a workaround for the rule; the red bucket being informational is the honesty feature, and this pack is its first real case. Its `reason` therefore has to earn the row: name the space involved and point at the tool that *will* clear it.
+
+The two other `%WINDIR%` locations this table used to name — `%WINDIR%\*.log` (in `crash-dumps-logs`) and `%WINDIR%\Downloaded Program Files` (in `installer-leftovers`) — are deliberately **not shipped**. They sit in the same protected tree, so they could only ever be informational too, and one informational rule makes the point where three would be noise pretending to be coverage. Both packs cover their profile-scoped locations instead.
+
+`%WINDIR%` gets **no carve-out**, now or later. A documented exception is how a protected-path list erodes: the mechanism outlives the justification, and the next contributor argues their directory is just as safe. (Architect resolution, `docs/DECISIONS-NEEDED.md` — phase 2.)
 
 Red bucket (DoNotDelete) is **produced, not targeted**: anything the walker surfaces that hits protected paths, locked files, unknown-but-system-adjacent locations. Shown with reason, no action button — this is the honesty feature.
 
