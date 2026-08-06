@@ -71,6 +71,78 @@ pub(crate) fn short_path_name(path: &std::path::Path) -> Option<std::path::PathB
     )))
 }
 
+/// Create a directory **junction** at `link` pointing at `target`.
+///
+/// # Why this exists
+///
+/// Five safety tests need a reparse point — "the walker never follows a link",
+/// "a link into a protected directory is refused", "a walk root that resolves
+/// into a protected location is refused", "a link is never quarantined", "a
+/// directory containing a link is never moved across volumes". All five reached
+/// for `symlink_dir`/`symlink_file`, which need Developer Mode or elevation, so
+/// on an ordinary developer machine all five failed loudly and asserted nothing.
+/// Only CI ever ran them.
+///
+/// A junction is the other reparse point Windows has. It differs from a symlink
+/// in exactly two ways that do not matter here — it only points at directories,
+/// and it is resolved on the machine that stores it — and in one that matters a
+/// great deal: **any standard user can create one.** `dunce::canonicalize`
+/// resolves it identically, `std::fs::FileType::is_symlink` reports it as a
+/// link, and `jwalk` refuses to follow it. So a junction-based companion asserts
+/// the same guarantee on every machine, and a junction probe is what proved the
+/// last two real bugs (`docs/DECISIONS-NEEDED.md`, architect resolution).
+///
+/// Shelling out to `cmd.exe` is the architect-approved way to do it: the
+/// alternative is hand-rolling `FSCTL_SET_REPARSE_POINT`, which is a page of
+/// `unsafe` in a test helper.
+///
+/// Returns `false` when the junction could not be created — the callers treat
+/// that as a real failure, because there is no privilege left to blame.
+#[cfg(windows)]
+pub(crate) fn make_junction(link: &std::path::Path, target: &std::path::Path) -> bool {
+    use std::process::{Command, Stdio};
+
+    // `cmd.exe` reads a forward slash as the start of a switch, so
+    // `C:\x\AppData/Local\y` becomes `Invalid switch - "Local"`. Rust accepts
+    // either separator and several fixtures build paths with `/`, so the
+    // separator is normalised here rather than at each call site.
+    let backslashed = |path: &std::path::Path| {
+        std::ffi::OsString::from(path.to_string_lossy().replace('/', "\\"))
+    };
+
+    // `mklink` is a `cmd.exe` builtin, not an executable, so it has to be run
+    // through the shell. `/J` is the junction flag; `/D` would be the symlink
+    // that needs the privilege this helper exists to avoid.
+    let output = Command::new("cmd.exe")
+        .arg("/C")
+        .arg("mklink")
+        .arg("/J")
+        .arg(backslashed(link))
+        .arg(backslashed(target))
+        .stdin(Stdio::null())
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => link.exists(),
+        Ok(output) => {
+            announce(&format!(
+                "mklink /J {} {} failed: {}{}",
+                link.display(),
+                target.display(),
+                String::from_utf8_lossy(&output.stdout).trim(),
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+            false
+        }
+        Err(err) => {
+            announce(&format!(
+                "could not run cmd.exe to create a junction: {err}"
+            ));
+            false
+        }
+    }
+}
+
 /// Called when a privileged operation a safety test depends on is unavailable.
 ///
 /// Panics — the test fails — unless [`ALLOW_SKIP_LINK_TESTS`] is set to `1`, in

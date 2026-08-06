@@ -1854,6 +1854,46 @@ mod tests {
         assert!(target.exists(), "the target must be untouched");
     }
 
+    /// The same refusal for a **junction**, which any standard user can create —
+    /// so this asserts on every developer machine rather than only in CI
+    /// (`docs/DECISIONS-NEEDED.md`, architect resolution before phase 2).
+    ///
+    /// Moving a junction moves the door, not the room: the tree it points at
+    /// would be left dangling and the quarantine would hold something it cannot
+    /// put back.
+    #[cfg(windows)]
+    #[test]
+    fn junctions_are_never_quarantined() {
+        let h = harness(RetentionPolicy::default());
+        let target = h.work.join("real-tree");
+        fs::create_dir_all(&target).expect("dir");
+        write(&target, "payload.txt", b"data");
+
+        let link = h.work.join("door");
+        assert!(
+            crate::core::test_support::make_junction(&link, &target),
+            "`mklink /J` needs no privilege, so a failure here is a real one"
+        );
+        assert!(
+            fs::symlink_metadata(&link)
+                .expect("the junction exists")
+                .is_symlink(),
+            "the premise: Windows reports a junction as a link"
+        );
+
+        let batch = h.quarantine.start_batch();
+        let err = h
+            .quarantine
+            .take(&h.conn, batch, &link)
+            .expect_err("junctions must be refused");
+        assert!(matches!(err, CoreError::Quarantine(_)), "got {err}");
+        assert!(link.exists(), "the junction must be left alone");
+        assert!(
+            target.join("payload.txt").exists(),
+            "the tree behind it must be untouched"
+        );
+    }
+
     #[test]
     fn taking_a_missing_path_leaves_no_ledger_row() {
         let h = harness(RetentionPolicy::default());
@@ -2719,6 +2759,38 @@ mod tests {
         assert!(link.symlink_metadata().is_ok(), "the link must survive");
         assert_eq!(fs::read(&payload).expect("read"), b"the data");
         assert!(!target.exists(), "the half-copy is cleaned up");
+    }
+
+    /// The same refusal when the link inside the tree is a **junction**, which
+    /// needs no privilege — so this asserts on every developer machine rather
+    /// than only in CI (`docs/DECISIONS-NEEDED.md`, architect resolution before
+    /// phase 2).
+    #[cfg(windows)]
+    #[test]
+    fn a_directory_containing_a_junction_is_never_moved_across_volumes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tree = dir.path().join("tree");
+        let payload = write(&tree, "real.txt", b"the data");
+        let elsewhere = dir.path().join("elsewhere");
+        fs::create_dir_all(&elsewhere).expect("dir");
+
+        let link = tree.join("door");
+        assert!(
+            crate::core::test_support::make_junction(&link, &elsewhere),
+            "`mklink /J` needs no privilege, so a failure here is a real one"
+        );
+
+        let target = dir.path().join("copied");
+        let err = copy_verify_remove(&tree, &target).expect_err("junctions must refuse the move");
+
+        assert!(matches!(err, CoreError::Quarantine(_)), "got {err}");
+        assert!(
+            err.to_string().contains("link"),
+            "the refusal must say why: {err}"
+        );
+        assert!(tree.is_dir(), "the original tree must survive");
+        assert!(link.exists(), "the junction must survive");
+        assert_eq!(fs::read(&payload).expect("read"), b"the data");
     }
 
     /// M7 without needing link privileges: the copy reports links rather than

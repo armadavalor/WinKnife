@@ -301,6 +301,39 @@ mod tests {
         );
     }
 
+    /// The same guarantee through a **junction**, which any standard user can
+    /// create — so unlike the symlink test above, this one asserts on every
+    /// developer machine rather than only in CI
+    /// (`docs/DECISIONS-NEEDED.md`, architect resolution before phase 2).
+    #[cfg(windows)]
+    #[test]
+    fn junctions_are_never_followed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = dir.path().join("outside");
+        let inside = dir.path().join("inside");
+        fs::create_dir_all(&outside).expect("dirs");
+        fs::create_dir_all(&inside).expect("dirs");
+        fs::write(outside.join("secret.txt"), b"do not walk here").expect("write");
+
+        let door = inside.join("door");
+        assert!(
+            crate::core::test_support::make_junction(&door, &outside),
+            "`mklink /J` needs no privilege, so a failure here is a real one"
+        );
+        assert!(
+            fs::symlink_metadata(&door)
+                .expect("the junction exists")
+                .is_symlink(),
+            "the premise: Windows reports a junction as a link"
+        );
+
+        let (entries, _) = collect(&inside, &CancellationToken::new());
+        assert!(
+            !entries.iter().any(|e| e.path.ends_with("secret.txt")),
+            "the walker followed a junction out of its tree"
+        );
+    }
+
     /// The privilege-free companion to the test above: whatever the tree
     /// contains, every entry a walk reports is inside the root it was given.
     /// That is the invariant a followed link breaks, and it is asserted on

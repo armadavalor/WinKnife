@@ -743,6 +743,56 @@ mod tests {
         assert!(victim.exists(), "the file behind the link must survive");
     }
 
+    /// The same refusal through a **junction**, which needs no privilege — so
+    /// this asserts on every developer machine rather than only in CI
+    /// (`docs/DECISIONS-NEEDED.md`, architect resolution before phase 2).
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_pointing_into_a_protected_directory_is_refused() {
+        let h = harness();
+        let protected_dir = h.work.join("Windows");
+        std::fs::create_dir_all(&protected_dir).expect("dir");
+        let victim = write(&protected_dir, "kernel.sys", b"critical");
+
+        let door = h.work.join("innocent-junction");
+        assert!(
+            crate::core::test_support::make_junction(&door, &protected_dir),
+            "`mklink /J` needs no privilege, so a failure here is a real one"
+        );
+        let through_the_door = door.join("kernel.sys");
+
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::from_trees([protected_dir.clone()]))
+            .lock_probe(Arc::new(AlwaysUnlocked))
+            .build();
+        let bin = StubRecycleBin::default();
+
+        assert!(
+            brain.protection_reason(&through_the_door).is_none(),
+            "the premise: the junction's own path is not lexically protected"
+        );
+
+        let finding = finding_at(&through_the_door, 8);
+        let rec = quarantine_rec(&finding);
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        assert!(
+            matches!(report.items[0].outcome, ExecOutcome::Skipped { .. }),
+            "got {:?}",
+            report.items[0].outcome
+        );
+        assert!(victim.exists(), "the file behind the junction must survive");
+    }
+
     /// Security review C2: the execute-time gate accepts only a plain local
     /// drive-letter path. Every other spelling is skipped with a reason, and
     /// the file it names is left exactly where it is.

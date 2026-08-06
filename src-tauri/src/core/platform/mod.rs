@@ -19,17 +19,21 @@
 //! only `lib.rs::run()` can do (security review H5).
 
 pub(crate) mod env;
+pub(crate) mod file_id;
 pub(crate) mod guard;
 pub(crate) mod lock;
 pub(crate) mod power;
+pub(crate) mod process;
 pub(crate) mod recycle_bin;
 
 use std::sync::Arc;
 
 pub use env::{EnvResolver, MapEnv, SystemEnv};
+pub use file_id::{file_identity, FileId};
 pub use guard::real_os_effects_armed;
 pub use lock::{AlwaysUnlocked, LockProbe, LockState, SystemLockProbe};
 pub use power::{DryRunPower, PowerAction, PowerController, PowerEvent};
+pub use process::{CachedProcessProbe, ProcessProbe, StubProcessProbe, SystemProcessProbe};
 pub use recycle_bin::{RecycleBin, RecycleBinStats, StubRecycleBin};
 
 // `cfg(not(test))` mirrors the definition: the arming function does not exist

@@ -1,41 +1,45 @@
-//! Rule engine and hard gates (ARCHITECTURE section 4).
+//! Rule engine, hard gates and scoring (ARCHITECTURE section 4).
 //!
-//! **Phase 1 scope: gates only.** The scoring pipeline the architecture
-//! describes has four steps; this phase implements step 1 (hard gates) and a
-//! degenerate step 2 (a rule declares a bucket and that is the bucket). Steps 3
-//! and 4 — heuristic modifiers and score thresholds — are phase 2. `score.base`
-//! is parsed and validated so today's packs stay valid, and deliberately not
-//! consulted, because a half-implemented score is worse than none.
+//! The full four-step pipeline, in the order it runs:
 //!
-//! The gates, in the order they run:
+//! 1. **Hard gates.** A protected path → `DoNotDelete`, confidence 100, stop.
+//!    Nothing a rule pack says can override this, which is why the list is Rust
+//!    and not JSON. Then a locked file → `DoNotDelete`: a file another program
+//!    is holding open is not ours to move.
+//! 2. **Rule match** → the rule's `score.base` and its `score.max_bucket`.
+//! 3. **Heuristic modifiers** — idle age, size, known cache directory, and the
+//!    owning process being open (`core::brain::score`).
+//! 4. **Thresholds** — ≥85 Safe, 40–84 NeedsReview, <40 DoNotDelete — capped by
+//!    the rule's `max_bucket`, which is a ceiling a rule can never earn its way
+//!    through.
 //!
-//! 1. **Protected path** → `DoNotDelete`, confidence 100, stop. Nothing a rule
-//!    pack says can override this, which is why the list is Rust and not JSON.
-//! 2. **Locked file** → `DoNotDelete`. A file another program is holding open
-//!    is not ours to move.
-//! 3. **Rule match** → the rule's declared bucket, its reason, its action.
-//! 4. **No rule matched** → `DoNotDelete` with an honest "we do not recognise
-//!    this" reason. The red bucket is produced, not targeted (module spec 02).
+//! When nothing matches at all the answer is `DoNotDelete` with an honest "we do
+//! not recognise this" reason. The red bucket is produced, not targeted (module
+//! spec 02).
+//!
+//! Phase 1 implemented step 1 and a degenerate step 2 (a rule declared a bucket
+//! and that was the bucket) while parsing and ignoring `score.base`. Phase 2
+//! turns the field on; packs written against phase 1 keep working, because a
+//! caller with no metadata passes [`score::Signals::unknown`] and gets the base
+//! score through unchanged.
 
 pub mod protected;
 pub mod rules;
+pub mod score;
 
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::core::platform::{AlwaysUnlocked, LockProbe, LockState};
+use crate::core::platform::{AlwaysUnlocked, LockProbe, LockState, ProcessProbe, StubProcessProbe};
 use crate::core::types::{Action, Finding, FindingKind, RiskBucket};
 
 pub use protected::{gate_path, GateVerdict, ProtectedEntry, ProtectedPaths, Scope};
 pub use rules::{CompiledRule, MaxBucket, RuleAction, RulePack, RuleSpec};
+pub use score::{Scored, Signals};
 
 /// Confidence reported for a hard-gate decision: no rule, no heuristic, no
 /// doubt.
 pub const GATE_CONFIDENCE: u8 = 100;
-
-/// Confidence reported for a plain rule match while scoring is unimplemented.
-/// Phase 2 replaces this with the computed score.
-pub const RULE_MATCH_CONFIDENCE: u8 = 90;
 
 /// Why a verdict came out the way it did. Useful in tests and in the log; the
 /// UI only ever sees `reason`.
@@ -66,6 +70,9 @@ pub struct Verdict {
     pub source: VerdictSource,
     /// Pack and rule that matched, when one did.
     pub rule: Option<(String, String)>,
+    /// The score and every modifier that fired, when scoring ran at all. `None`
+    /// for a hard-gate verdict, which no score can argue with.
+    pub scored: Option<Scored>,
 }
 
 impl Verdict {
@@ -93,6 +100,7 @@ pub struct Brain {
     protected: ProtectedPaths,
     packs: Arc<Vec<RulePack>>,
     lock_probe: Arc<dyn LockProbe>,
+    process_probe: Arc<dyn ProcessProbe>,
 }
 
 impl std::fmt::Debug for Brain {
@@ -121,6 +129,7 @@ impl Brain {
             protected: ProtectedPaths::empty(),
             packs: Arc::new(Vec::new()),
             lock_probe: Arc::new(AlwaysUnlocked),
+            process_probe: Arc::new(StubProcessProbe::none()),
         }
     }
 
@@ -200,12 +209,35 @@ impl Brain {
         self.lock_probe.probe(path)
     }
 
-    /// Classify a path that a rule already matched.
+    /// Whether the process a rule names in `owner_process_absent` is running.
     ///
-    /// `check_lock` exists because the two callers want different things: the
-    /// cleaner's `analyze` probes the filesystem, while table-driven tests pass
-    /// paths that do not exist and only care about the path gates.
+    /// `false` for a rule that names none — "no owner declared" is not the same
+    /// question as "the owner is closed", but it produces the same modifier
+    /// (none), which is the honest answer either way.
+    pub fn owner_process_running(&self, rule: &CompiledRule) -> bool {
+        rule.spec
+            .match_
+            .owner_process_absent
+            .as_deref()
+            .is_some_and(|name| self.process_probe.is_running(name))
+    }
+
+    /// Classify a path that a rule already matched, with no metadata.
+    ///
+    /// Equivalent to [`Brain::classify_with`] and [`Signals::unknown`]: the rule's
+    /// base score goes through untouched. Table-driven gate tests use it,
+    /// because they pass paths that do not exist and only care about the gates.
     pub fn classify(&self, path: &Path, matched: Option<&CompiledRule>) -> Verdict {
+        self.classify_with(path, matched, &Signals::unknown())
+    }
+
+    /// The full pipeline: gates, then the rule's base score, then heuristics.
+    pub fn classify_with(
+        &self,
+        path: &Path,
+        matched: Option<&CompiledRule>,
+        signals: &Signals,
+    ) -> Verdict {
         // Gate 1: protected paths beat everything, including a rule that
         // claims otherwise. This is the line CLAUDE.md calls a hard rule — and
         // it is the *same* gate the executor runs, so the rating the user sees
@@ -219,6 +251,7 @@ impl Brain {
                 reason: refusal.reason,
                 source: VerdictSource::ProtectedPath,
                 rule: matched.map(|rule| (rule.pack_id.clone(), rule.spec.id.clone())),
+                scored: None,
             };
         }
 
@@ -232,10 +265,11 @@ impl Brain {
                 reason: format!("left alone: {}", lock.reason()),
                 source: VerdictSource::Locked,
                 rule: matched.map(|rule| (rule.pack_id.clone(), rule.spec.id.clone())),
+                scored: None,
             };
         }
 
-        self.classify_by_rule(matched)
+        self.classify_by_rule(matched, signals)
     }
 
     /// Classify a finding.
@@ -246,14 +280,24 @@ impl Brain {
     /// and asking anyway made an empty-able bin look permanently locked. Those
     /// findings go straight to the rule.
     pub fn classify_finding(&self, finding: &Finding, matched: Option<&CompiledRule>) -> Verdict {
-        if finding.kind == FindingKind::RecycleBinItem {
-            return self.classify_by_rule(matched);
-        }
-        self.classify(&finding.path, matched)
+        self.classify_finding_with(finding, matched, &Signals::unknown())
     }
 
-    /// Steps 2 and 4 of the pipeline, with no path gates.
-    fn classify_by_rule(&self, matched: Option<&CompiledRule>) -> Verdict {
+    /// [`Brain::classify_finding`] with the heuristic signals filled in.
+    pub fn classify_finding_with(
+        &self,
+        finding: &Finding,
+        matched: Option<&CompiledRule>,
+        signals: &Signals,
+    ) -> Verdict {
+        if finding.kind == FindingKind::RecycleBinItem {
+            return self.classify_by_rule(matched, signals);
+        }
+        self.classify_with(&finding.path, matched, signals)
+    }
+
+    /// Steps 2, 3 and 4 of the pipeline, with no path gates.
+    fn classify_by_rule(&self, matched: Option<&CompiledRule>, signals: &Signals) -> Verdict {
         let Some(rule) = matched else {
             // Gate 4: honest ignorance. The red bucket is produced, not
             // targeted — this is the honesty feature from module spec 02.
@@ -264,11 +308,25 @@ impl Brain {
                 reason: "no rule recognises this location, so it is left alone".to_owned(),
                 source: VerdictSource::Unknown,
                 rule: None,
+                scored: None,
             };
         };
 
-        // Step 2: the rule's declared bucket, unmodified. No scoring in phase 1.
-        let bucket = rule.bucket();
+        // Steps 2-4. `score.base` is the starting point, the heuristics move it,
+        // the thresholds read it and `max_bucket` caps the answer.
+        //
+        // The brain asks the process list itself rather than trusting the caller
+        // to remember: a caller that forgot would rate a browser cache green
+        // with the browser open, which is the exact bug `owner_process_absent`
+        // exists to prevent. The caller's own answer is OR-ed in so a pure
+        // `score::score` test can still force the signal.
+        let signals = Signals {
+            owner_process_running: signals.owner_process_running
+                || self.owner_process_running(rule),
+            ..*signals
+        };
+        let scored = score::score(rule.spec.score.base, rule.spec.score.max_bucket, &signals);
+        let bucket = scored.bucket;
         let action = match (bucket, rule.spec.action) {
             (RiskBucket::DoNotDelete, _) | (_, RuleAction::InfoOnly) => Action::InfoOnly,
             (_, RuleAction::Quarantine | RuleAction::EmptyRecycleBin) => Action::Quarantine,
@@ -276,17 +334,54 @@ impl Brain {
 
         Verdict {
             bucket,
+            // The score *is* the confidence: one number, computed once. A red
+            // verdict is a certainty rather than a low score, so it reports the
+            // gate's confidence instead.
             confidence: if bucket == RiskBucket::DoNotDelete {
                 GATE_CONFIDENCE
             } else {
-                RULE_MATCH_CONFIDENCE
+                scored.score
             },
             action,
-            reason: rule.spec.reason.clone(),
+            reason: reason_for(rule, &scored),
             source: VerdictSource::Rule,
             rule: Some((rule.pack_id.clone(), rule.spec.id.clone())),
+            scored: Some(scored),
         }
     }
+}
+
+/// The user-facing sentence for a scored rule match.
+///
+/// The rule's own `reason` ships verbatim (`docs/RULES-FORMAT.md`) and is always
+/// the whole string when nothing overrode the rule. When a heuristic pushed the
+/// item below the bucket the rule asked for, a second sentence says which one —
+/// otherwise the user reads "safe to remove" next to a yellow row.
+fn reason_for(rule: &CompiledRule, scored: &Scored) -> String {
+    if !scored.was_downgraded() {
+        return rule.spec.reason.clone();
+    }
+
+    let note = if scored.fired(score::OWNER_RUNNING_LABEL) {
+        match rule.spec.match_.owner_process_absent.as_deref() {
+            Some(process) => format!(
+                " {process} is running right now, so this is left for you to decide rather than \
+                 treated as safe."
+            ),
+            None => {
+                " The program that owns this data is running, so this needs your review.".to_owned()
+            }
+        }
+    } else if scored.fired("idle:fresh") {
+        " Something used this in the last day, so it needs your review first.".to_owned()
+    } else {
+        format!(
+            " Scored {} out of 100 here, which is below the bar for removing it automatically.",
+            scored.score
+        )
+    };
+
+    format!("{}{note}", rule.spec.reason)
 }
 
 /// Assembles a [`Brain`]. Everything is injectable so a test never depends on
@@ -296,6 +391,7 @@ pub struct BrainBuilder {
     protected: Option<ProtectedPaths>,
     packs: Vec<RulePack>,
     lock_probe: Option<Arc<dyn LockProbe>>,
+    process_probe: Option<Arc<dyn ProcessProbe>>,
 }
 
 impl BrainBuilder {
@@ -320,12 +416,25 @@ impl BrainBuilder {
         self
     }
 
+    /// Set the process probe backing `owner_process_absent`.
+    #[must_use]
+    pub fn process_probe(mut self, probe: Arc<dyn ProcessProbe>) -> Self {
+        self.process_probe = Some(probe);
+        self
+    }
+
     /// Build it.
     pub fn build(self) -> Brain {
         Brain {
             protected: self.protected.unwrap_or_else(ProtectedPaths::empty),
             packs: Arc::new(self.packs),
             lock_probe: self.lock_probe.unwrap_or_else(|| Arc::new(AlwaysUnlocked)),
+            // Nothing running is the default a test wants: a rule with no
+            // `owner_process_absent` never asks, and one that does gets a
+            // deterministic answer instead of the developer's browser.
+            process_probe: self
+                .process_probe
+                .unwrap_or_else(|| Arc::new(StubProcessProbe::none())),
         }
     }
 }
@@ -803,7 +912,9 @@ mod tests {
             verdict.rule,
             Some(("windows-temp".to_owned(), "user-temp-files".to_owned()))
         );
-        assert_eq!(verdict.confidence, RULE_MATCH_CONFIDENCE);
+        // With no signals the confidence is the rule's own `score.base`.
+        assert_eq!(verdict.confidence, 90);
+        assert_eq!(verdict.scored.expect("scored").base, 90);
     }
 
     #[test]
@@ -860,6 +971,760 @@ mod tests {
         let finding = Finding::new("cleaner", "C:\\Windows\\a.dll", FindingKind::File);
         let verdict = brain.classify_finding(&finding, None);
         assert_eq!(verdict.source, VerdictSource::ProtectedPath);
+    }
+
+    /* ---------------------------------------------------------------------
+     * The scoring pipeline (phase 2, task 1)
+     * ------------------------------------------------------------------ */
+
+    /// A rule pack written on the fly so a case can name any base score and any
+    /// ceiling without editing the shipped packs.
+    fn scoring_pack(rules: &str) -> RulePack {
+        let json = format!(
+            r#"{{
+                "id": "scoring",
+                "name": "Scoring Fixtures",
+                "version": 1,
+                "module": "cleaner",
+                "enabled_by_default": true,
+                "description": "Rules that exist to pin the scoring table.",
+                "rules": [{rules}]
+            }}"#
+        );
+        compile_pack(
+            "scoring",
+            &json,
+            &MapEnv::new().with("TEMP", "C:\\Users\\dev\\AppData\\Local\\Temp"),
+        )
+        .expect("the scoring fixture pack must compile")
+    }
+
+    /// One rule, parameterised by the two fields the pipeline reads.
+    fn scoring_rule(id: &str, base: u8, max_bucket: &str, extra: &str) -> String {
+        format!(
+            r#"{{
+                "id": "{id}",
+                "paths": ["%TEMP%\\**"],
+                "score": {{ "base": {base}, "max_bucket": "{max_bucket}" }},
+                "action": "{}",
+                "reason": "Fixture rule {id}."{extra}
+            }}"#,
+            if max_bucket == "do_not_delete" {
+                "info_only"
+            } else {
+                "quarantine"
+            }
+        )
+    }
+
+    /// **The scoring table.** Path + rule + signals → bucket, score, source.
+    ///
+    /// Every modifier in `brain::score` and every gate in `Brain::classify_with`
+    /// appears at least once, including the four the acceptance criteria call
+    /// out by name: a high base score held down by `max_bucket`, a protected
+    /// path with a Safe rule, a locked file, and an old file against a fresh one
+    /// across a threshold.
+    ///
+    /// Prints the table it asserts, so `--nocapture` shows the evidence rather
+    /// than just a pass.
+    #[test]
+    fn the_scoring_table() {
+        struct Locked;
+        impl LockProbe for Locked {
+            fn probe(&self, _path: &Path) -> LockState {
+                LockState::InUse
+            }
+        }
+
+        const TEMP: &str = "C:\\Users\\dev\\AppData\\Local\\Temp";
+        const BIG: u64 = 200 * 1024 * 1024;
+
+        let pack = scoring_pack(
+            &[
+                scoring_rule("green-90", 90, "safe", ""),
+                scoring_rule("green-86", 86, "safe", ""),
+                scoring_rule("edge-85", 85, "safe", ""),
+                scoring_rule("edge-84", 84, "safe", ""),
+                scoring_rule("borderline-80", 80, "safe", ""),
+                scoring_rule("yellow-50", 50, "needs_review", ""),
+                scoring_rule("edge-40", 40, "safe", ""),
+                scoring_rule("edge-39", 39, "safe", ""),
+                scoring_rule("capped-100", 100, "needs_review", ""),
+                scoring_rule("informational", 95, "do_not_delete", ""),
+                scoring_rule(
+                    "browser-92",
+                    92,
+                    "safe",
+                    r#", "match": { "owner_process_absent": "chrome.exe" }"#,
+                ),
+                scoring_rule(
+                    "browser-100",
+                    100,
+                    "safe",
+                    r#", "match": { "owner_process_absent": "chrome.exe" }"#,
+                ),
+                scoring_rule(
+                    "downloads-45",
+                    45,
+                    "needs_review",
+                    r#", "match": { "min_age_hours": 4320 }"#,
+                ),
+            ]
+            .join(","),
+        );
+
+        let env = MapEnv::new()
+            .with("WINDIR", "C:\\Windows")
+            .with("ProgramFiles", "C:\\Program Files")
+            .with("USERPROFILE", "C:\\Users\\dev");
+        let protected =
+            ProtectedPaths::from_env(&env, Path::new("C:\\app"), Path::new("C:\\app\\quarantine"));
+
+        let brain = |locked: bool, chrome: bool| {
+            let mut builder = Brain::builder()
+                .protected_paths(protected.clone())
+                .packs(vec![pack.clone()])
+                .process_probe(Arc::new(if chrome {
+                    StubProcessProbe::running(["chrome.exe"])
+                } else {
+                    StubProcessProbe::none()
+                }));
+            if locked {
+                builder = builder.lock_probe(Arc::new(Locked));
+            }
+            builder.build()
+        };
+
+        struct Case<'a> {
+            what: &'a str,
+            path: &'a str,
+            rule: Option<&'a str>,
+            signals: Signals,
+            locked: bool,
+            chrome: bool,
+            bucket: RiskBucket,
+            score: Option<u8>,
+            source: VerdictSource,
+        }
+
+        let case = |what, path, rule: Option<&'static str>, bucket, score, source| Case {
+            what,
+            path,
+            rule,
+            signals: Signals::unknown(),
+            locked: false,
+            chrome: false,
+            bucket,
+            score,
+            source,
+        };
+        let idle = |days: i64| Signals {
+            idle_days: Some(days),
+            ..Signals::unknown()
+        };
+
+        let cases = vec![
+            /* --- step 4: bare thresholds, no modifiers ------------------- */
+            case(
+                "base 90 clears the green threshold",
+                "a.tmp",
+                Some("green-90"),
+                RiskBucket::Safe,
+                Some(90),
+                VerdictSource::Rule,
+            ),
+            case(
+                "85 is green: the threshold is inclusive",
+                "b.tmp",
+                Some("edge-85"),
+                RiskBucket::Safe,
+                Some(85),
+                VerdictSource::Rule,
+            ),
+            case(
+                "84 is one point short and lands yellow",
+                "c.tmp",
+                Some("edge-84"),
+                RiskBucket::NeedsReview,
+                Some(84),
+                VerdictSource::Rule,
+            ),
+            case(
+                "40 is yellow: the lower threshold is inclusive too",
+                "d.tmp",
+                Some("edge-40"),
+                RiskBucket::NeedsReview,
+                Some(40),
+                VerdictSource::Rule,
+            ),
+            case(
+                "39 is below the bar and lands red",
+                "e.tmp",
+                Some("edge-39"),
+                RiskBucket::DoNotDelete,
+                None,
+                VerdictSource::Rule,
+            ),
+            case(
+                "a mid-range base score is yellow",
+                "f.tmp",
+                Some("yellow-50"),
+                RiskBucket::NeedsReview,
+                Some(50),
+                VerdictSource::Rule,
+            ),
+            /* --- step 4: max_bucket is a ceiling, never a floor ---------- */
+            Case {
+                what: "a base of 100 held down by max_bucket: needs_review",
+                score: Some(100),
+                bucket: RiskBucket::NeedsReview,
+                ..case(
+                    "",
+                    "g.tmp",
+                    Some("capped-100"),
+                    RiskBucket::NeedsReview,
+                    Some(100),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "the same rule, with every bonus firing, still cannot go green",
+                signals: Signals {
+                    idle_days: Some(400),
+                    size_bytes: BIG,
+                    in_known_cache_dir: true,
+                    owner_process_running: false,
+                },
+                ..case(
+                    "",
+                    "h.tmp",
+                    Some("capped-100"),
+                    RiskBucket::NeedsReview,
+                    Some(100),
+                    VerdictSource::Rule,
+                )
+            },
+            case(
+                "max_bucket: do_not_delete makes a base of 95 informational",
+                "i.tmp",
+                Some("informational"),
+                RiskBucket::DoNotDelete,
+                None,
+                VerdictSource::Rule,
+            ),
+            /* --- step 3: idle age, both directions ----------------------- */
+            Case {
+                what: "an old file crosses up over the green threshold",
+                signals: idle(400),
+                score: Some(90),
+                ..case(
+                    "",
+                    "j.tmp",
+                    Some("borderline-80"),
+                    RiskBucket::Safe,
+                    Some(90),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "the same rule on a fresh file crosses down out of green",
+                signals: idle(0),
+                score: Some(65),
+                ..case(
+                    "",
+                    "k.tmp",
+                    Some("borderline-80"),
+                    RiskBucket::NeedsReview,
+                    Some(65),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "cold (30-179 days) adds five",
+                signals: idle(60),
+                score: Some(85),
+                ..case(
+                    "",
+                    "l.tmp",
+                    Some("borderline-80"),
+                    RiskBucket::Safe,
+                    Some(85),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "warm (7-29 days) adds two and is not enough on its own",
+                signals: idle(10),
+                score: Some(82),
+                ..case(
+                    "",
+                    "m.tmp",
+                    Some("borderline-80"),
+                    RiskBucket::NeedsReview,
+                    Some(82),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "between fresh and warm nothing fires at all",
+                signals: idle(3),
+                score: Some(80),
+                ..case(
+                    "",
+                    "n.tmp",
+                    Some("borderline-80"),
+                    RiskBucket::NeedsReview,
+                    Some(80),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "a fresh file can be pushed all the way to red",
+                signals: idle(0),
+                score: None,
+                ..case(
+                    "",
+                    "o.tmp",
+                    Some("edge-40"),
+                    RiskBucket::DoNotDelete,
+                    None,
+                    VerdictSource::Rule,
+                )
+            },
+            /* --- step 3: known cache directory --------------------------- */
+            Case {
+                what: "sitting in a cache directory adds five",
+                signals: Signals {
+                    in_known_cache_dir: true,
+                    ..Signals::unknown()
+                },
+                score: Some(85),
+                ..case(
+                    "",
+                    "Cache\\p.tmp",
+                    Some("borderline-80"),
+                    RiskBucket::Safe,
+                    Some(85),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "age and the cache directory stack",
+                signals: Signals {
+                    idle_days: Some(400),
+                    in_known_cache_dir: true,
+                    ..Signals::unknown()
+                },
+                score: Some(95),
+                ..case(
+                    "",
+                    "Cache\\q.tmp",
+                    Some("borderline-80"),
+                    RiskBucket::Safe,
+                    Some(95),
+                    VerdictSource::Rule,
+                )
+            },
+            /* --- step 3: size, review candidates only -------------------- */
+            Case {
+                what: "a large green candidate gets no size bonus",
+                signals: Signals {
+                    size_bytes: BIG,
+                    ..Signals::unknown()
+                },
+                score: Some(90),
+                ..case(
+                    "",
+                    "r.tmp",
+                    Some("green-90"),
+                    RiskBucket::Safe,
+                    Some(90),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "a large review candidate does",
+                signals: Signals {
+                    size_bytes: BIG,
+                    ..Signals::unknown()
+                },
+                score: Some(54),
+                ..case(
+                    "",
+                    "s.tmp",
+                    Some("yellow-50"),
+                    RiskBucket::NeedsReview,
+                    Some(54),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "a small review candidate does not",
+                signals: Signals {
+                    size_bytes: 1_024,
+                    ..Signals::unknown()
+                },
+                score: Some(50),
+                ..case(
+                    "",
+                    "t.tmp",
+                    Some("yellow-50"),
+                    RiskBucket::NeedsReview,
+                    Some(50),
+                    VerdictSource::Rule,
+                )
+            },
+            /* --- step 3: the owning process ------------------------------ */
+            case(
+                "a browser cache with the browser closed is green",
+                "Cache\\u.tmp",
+                Some("browser-92"),
+                RiskBucket::Safe,
+                Some(92),
+                VerdictSource::Rule,
+            ),
+            Case {
+                what: "the same rule with the browser open drops to review",
+                chrome: true,
+                score: Some(67),
+                ..case(
+                    "",
+                    "Cache\\v.tmp",
+                    Some("browser-92"),
+                    RiskBucket::NeedsReview,
+                    Some(67),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "the lowered ceiling, not the score, is what holds it at review",
+                chrome: true,
+                signals: Signals {
+                    idle_days: Some(400),
+                    in_known_cache_dir: true,
+                    ..Signals::unknown()
+                },
+                score: Some(90),
+                ..case(
+                    "",
+                    "Cache\\w.tmp",
+                    Some("browser-100"),
+                    RiskBucket::NeedsReview,
+                    Some(90),
+                    VerdictSource::Rule,
+                )
+            },
+            Case {
+                what: "a rule with no owner_process_absent ignores the process list",
+                chrome: true,
+                ..case(
+                    "",
+                    "x.tmp",
+                    Some("green-90"),
+                    RiskBucket::Safe,
+                    Some(90),
+                    VerdictSource::Rule,
+                )
+            },
+            /* --- step 3: old downloads are never green ------------------- */
+            Case {
+                what: "a 400-day-old download still cannot climb past needs_review",
+                signals: Signals {
+                    idle_days: Some(400),
+                    size_bytes: BIG,
+                    ..Signals::unknown()
+                },
+                score: Some(59),
+                ..case(
+                    "",
+                    "y.zip",
+                    Some("downloads-45"),
+                    RiskBucket::NeedsReview,
+                    Some(59),
+                    VerdictSource::Rule,
+                )
+            },
+            /* --- step 1: the hard gates beat every score ----------------- */
+            Case {
+                what: "a protected path with a Safe rule and every bonus is still red",
+                path: "C:\\Windows\\System32\\ntoskrnl.exe",
+                signals: Signals {
+                    idle_days: Some(400),
+                    in_known_cache_dir: true,
+                    ..Signals::unknown()
+                },
+                ..case(
+                    "",
+                    "",
+                    Some("green-90"),
+                    RiskBucket::DoNotDelete,
+                    None,
+                    VerdictSource::ProtectedPath,
+                )
+            },
+            Case {
+                what: "an installed-programs directory, same story",
+                path: "C:\\Program Files\\App\\app.exe",
+                ..case(
+                    "",
+                    "",
+                    Some("capped-100"),
+                    RiskBucket::DoNotDelete,
+                    None,
+                    VerdictSource::ProtectedPath,
+                )
+            },
+            Case {
+                what: "our own quarantine is never scored",
+                path: "C:\\app\\quarantine\\batch\\item",
+                ..case(
+                    "",
+                    "",
+                    Some("green-90"),
+                    RiskBucket::DoNotDelete,
+                    None,
+                    VerdictSource::ProtectedPath,
+                )
+            },
+            Case {
+                what: "an unjudgeable spelling is refused before scoring runs",
+                path: "\\\\localhost\\C$\\Windows\\System32\\x",
+                ..case(
+                    "",
+                    "",
+                    Some("green-90"),
+                    RiskBucket::DoNotDelete,
+                    None,
+                    VerdictSource::ProtectedPath,
+                )
+            },
+            Case {
+                what: "a locked file beats a base score of 100",
+                locked: true,
+                signals: idle(400),
+                ..case(
+                    "",
+                    "z.tmp",
+                    Some("capped-100"),
+                    RiskBucket::DoNotDelete,
+                    None,
+                    VerdictSource::Locked,
+                )
+            },
+            Case {
+                what: "a locked file beats a green rule too",
+                locked: true,
+                ..case(
+                    "",
+                    "z2.tmp",
+                    Some("green-90"),
+                    RiskBucket::DoNotDelete,
+                    None,
+                    VerdictSource::Locked,
+                )
+            },
+            case(
+                "no rule at all means no suggestion, whatever the path",
+                "unmatched.bin",
+                None,
+                RiskBucket::DoNotDelete,
+                None,
+                VerdictSource::Unknown,
+            ),
+        ];
+
+        assert!(
+            cases.len() >= 25,
+            "the brief asks for at least 25 cases; this table has {}",
+            cases.len()
+        );
+
+        println!(
+            "{:<62} | {:<7} | {:<12} | source",
+            "case", "score", "bucket"
+        );
+        for case in &cases {
+            let path = if case.path.starts_with("C:\\") || case.path.starts_with("\\\\") {
+                case.path.to_owned()
+            } else {
+                format!("{TEMP}\\{}", case.path)
+            };
+            let matched = case.rule.map(|id| {
+                pack.rules
+                    .iter()
+                    .find(|r| r.spec.id == id)
+                    .unwrap_or_else(|| panic!("fixture rule `{id}` exists"))
+            });
+
+            let brain = brain(case.locked, case.chrome);
+            let verdict = brain.classify_with(Path::new(&path), matched, &case.signals);
+
+            println!(
+                "{:<62} | {:<7} | {:<12} | {:?}",
+                case.what,
+                verdict
+                    .scored
+                    .as_ref()
+                    .map_or_else(|| "-".to_owned(), |s| s.score.to_string()),
+                format!("{:?}", verdict.bucket),
+                verdict.source,
+            );
+
+            assert_eq!(verdict.bucket, case.bucket, "bucket for `{}`", case.what);
+            assert_eq!(verdict.source, case.source, "source for `{}`", case.what);
+            if let Some(expected) = case.score {
+                let scored = verdict
+                    .scored
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("`{}` should have been scored", case.what));
+                assert_eq!(scored.score, expected, "score for `{}`", case.what);
+                assert_eq!(
+                    verdict.confidence, expected,
+                    "confidence must be the score for `{}`",
+                    case.what
+                );
+            }
+            assert!(
+                !verdict.reason.trim().is_empty(),
+                "`{}` produced a verdict with no reason",
+                case.what
+            );
+            // The invariant no case may violate.
+            if verdict.bucket == RiskBucket::DoNotDelete {
+                assert_eq!(verdict.action, Action::InfoOnly, "`{}`", case.what);
+                assert!(!verdict.is_actionable(), "`{}`", case.what);
+            }
+        }
+    }
+
+    /// The acceptance criterion, as its own test: **changing a rule's base score
+    /// changes the fixture buckets predictably.**
+    ///
+    /// One path, one set of signals, one field varied — and the bucket walks
+    /// down through the thresholds in exactly the order the architecture states.
+    #[test]
+    fn changing_a_rules_base_score_moves_its_bucket_predictably() {
+        let path = Path::new("C:\\Users\\dev\\AppData\\Local\\Temp\\subject.tmp");
+
+        let expectations: &[(u8, RiskBucket)] = &[
+            (100, RiskBucket::Safe),
+            (90, RiskBucket::Safe),
+            (86, RiskBucket::Safe),
+            (85, RiskBucket::Safe),
+            (84, RiskBucket::NeedsReview),
+            (60, RiskBucket::NeedsReview),
+            (41, RiskBucket::NeedsReview),
+            (40, RiskBucket::NeedsReview),
+            (39, RiskBucket::DoNotDelete),
+            (10, RiskBucket::DoNotDelete),
+            (0, RiskBucket::DoNotDelete),
+        ];
+
+        println!("base | bucket       | action");
+        let mut seen = Vec::new();
+        for (base, expected) in expectations {
+            // Only `score.base` differs between iterations.
+            let pack = scoring_pack(&scoring_rule("subject", *base, "safe", ""));
+            let brain = Brain::builder().packs(vec![pack.clone()]).build();
+            let verdict = brain.classify(path, Some(&pack.rules[0]));
+
+            println!("{base:>4} | {:<12?} | {:?}", verdict.bucket, verdict.action);
+            assert_eq!(
+                verdict.bucket, *expected,
+                "base {base} must produce {expected:?}"
+            );
+            seen.push(verdict.bucket);
+        }
+
+        // Monotonic: a lower base score can never produce a *better* bucket.
+        assert!(
+            seen.windows(2).all(|pair| pair[0] <= pair[1]),
+            "lowering the base score must never improve the bucket: {seen:?}"
+        );
+
+        // And the same one-field change is visible end to end, through the
+        // cleaner's own fixture path rather than only through `classify`.
+        for (base, expected) in [(90u8, RiskBucket::Safe), (50, RiskBucket::NeedsReview)] {
+            let pack = scoring_pack(&scoring_rule("subject", base, "safe", ""));
+            let brain = Brain::builder().packs(vec![pack.clone()]).build();
+            let mut finding = Finding::new("cleaner", path, FindingKind::File);
+            finding.size_bytes = 4_096;
+            let verdict = brain.classify_finding(&finding, Some(&pack.rules[0]));
+            assert_eq!(verdict.bucket, expected, "base {base} through a finding");
+        }
+    }
+
+    /// A downgraded verdict has to say *why*, or the user reads "safe to remove"
+    /// next to a yellow row.
+    #[test]
+    fn a_downgrade_explains_itself_and_an_untouched_rule_stays_verbatim() {
+        let pack = scoring_pack(&scoring_rule(
+            "browser",
+            92,
+            "safe",
+            r#", "match": { "owner_process_absent": "chrome.exe" }"#,
+        ));
+        let rule = &pack.rules[0];
+        let path = Path::new("C:\\Users\\dev\\AppData\\Local\\Temp\\Cache\\a.tmp");
+
+        let closed = Brain::builder().packs(vec![pack.clone()]).build();
+        assert_eq!(
+            closed.classify(path, Some(rule)).reason,
+            "Fixture rule browser.",
+            "an untouched rule ships its reason verbatim"
+        );
+
+        let open = Brain::builder()
+            .packs(vec![pack.clone()])
+            .process_probe(Arc::new(StubProcessProbe::running(["chrome.exe"])))
+            .build();
+        let verdict = open.classify_with(
+            path,
+            Some(rule),
+            &Signals {
+                owner_process_running: true,
+                ..Signals::unknown()
+            },
+        );
+        assert_eq!(verdict.bucket, RiskBucket::NeedsReview);
+        assert!(
+            verdict.reason.starts_with("Fixture rule browser."),
+            "the rule's own reason stays the start of the sentence: `{}`",
+            verdict.reason
+        );
+        assert!(
+            verdict.reason.contains("chrome.exe"),
+            "the downgrade must name the process: `{}`",
+            verdict.reason
+        );
+    }
+
+    /// `owner_process_absent` was parsed and validated in phase 1 and never
+    /// acted on. This is the wiring, asked of the brain rather than of `score`.
+    #[test]
+    fn the_brain_asks_the_process_list_only_when_a_rule_names_a_process() {
+        let with_owner = scoring_pack(&scoring_rule(
+            "browser",
+            92,
+            "safe",
+            r#", "match": { "owner_process_absent": "chrome.exe" }"#,
+        ));
+        let without = scoring_pack(&scoring_rule("plain", 92, "safe", ""));
+
+        let brain = Brain::builder()
+            .process_probe(Arc::new(StubProcessProbe::running(["chrome.exe"])))
+            .build();
+
+        assert!(brain.owner_process_running(&with_owner.rules[0]));
+        assert!(
+            !brain.owner_process_running(&without.rules[0]),
+            "a rule that names no process must never be downgraded by one"
+        );
+
+        let quiet = Brain::builder()
+            .process_probe(Arc::new(StubProcessProbe::none()))
+            .build();
+        assert!(!quiet.owner_process_running(&with_owner.rules[0]));
     }
 
     #[test]

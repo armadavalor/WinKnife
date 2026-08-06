@@ -54,6 +54,9 @@ tempfile = "3.27.0"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
+    # `owner_process_absent` needs the process list; `Toolhelp32Snapshot` is the
+    # cheapest read-only way to ask (core/platform/process.rs).
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Power",
     "Win32_UI_Shell",
 ] }

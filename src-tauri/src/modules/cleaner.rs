@@ -335,12 +335,18 @@ fn recycle_bin_finding(pack: &RulePack, ctx: &CleanerContext<'_>) -> Option<Find
 /// One recommendation per finding: the review screen selects item by item, and
 /// grouping is a UI concern driven by the finding's pack metadata.
 pub fn analyze(findings: &[Finding], brain: &Brain) -> Vec<Recommendation> {
+    analyze_at(findings, brain, Utc::now())
+}
+
+/// [`analyze`] with the reference instant injected, so an age-sensitive test is
+/// not at the mercy of when it runs.
+pub fn analyze_at(findings: &[Finding], brain: &Brain, now: DateTime<Utc>) -> Vec<Recommendation> {
     let rules_by_id = index_rules(brain);
     let mut recommendations = Vec::with_capacity(findings.len());
 
     for finding in findings {
         let matched = rule_key(finding).and_then(|key| rules_by_id.get(&key).copied());
-        let verdict = brain.classify_finding(finding, matched);
+        let verdict = brain.classify_finding_with(finding, matched, &signals_for(finding, now));
 
         // The red bucket carries no action, and `Recommendation::new` refuses
         // any other combination — that invariant is the last line of defence.
@@ -373,6 +379,26 @@ pub fn analyze(findings: &[Finding], brain: &Brain) -> Vec<Recommendation> {
     }
 
     recommendations
+}
+
+/// What the filesystem says about one finding, for the brain's step 3.
+///
+/// `owner_process_running` is deliberately left `false` here: the brain asks the
+/// process list itself, through its own cached probe, so a module cannot forget
+/// to (see `Brain::classify_by_rule`).
+fn signals_for(finding: &Finding, now: DateTime<Utc>) -> brain::Signals {
+    brain::Signals {
+        // Last *access*, falling back to last modification. Windows has
+        // last-access updates off by default on most installs, so a scan that
+        // insisted on `accessed` would treat every file as ageless.
+        idle_days: finding
+            .accessed
+            .or(finding.modified)
+            .map(|when| (now - when).num_days()),
+        size_bytes: finding.size_bytes,
+        in_known_cache_dir: brain::score::in_known_cache_dir(&finding.path),
+        owner_process_running: false,
+    }
 }
 
 fn index_rules(brain: &Brain) -> BTreeMap<(String, String), &CompiledRule> {
@@ -1042,6 +1068,37 @@ mod tests {
                 assert!(why.contains("resolves to"), "got `{why}`");
             }
             RootVerdict::Walk(_) => panic!("a root resolving into a protected tree must be refused"),
+        }
+    }
+
+    /// The same thing through a **junction** rather than a symlink, so it
+    /// asserts without Developer Mode. A junction is a reparse point too and
+    /// `canonicalize` resolves it identically, which is exactly the property the
+    /// walk-root gate depends on (`docs/DECISIONS-NEEDED.md`, architect
+    /// resolution before phase 2).
+    #[cfg(windows)]
+    #[test]
+    fn a_walk_root_that_is_a_junction_into_a_protected_location_is_refused() {
+        let fixture = Fixture::new();
+        let temp = fixture.root.join("AppData/Local/Temp");
+        let real_windows = fixture.root.join("Windows");
+        let door = temp.join("innocent-junction");
+
+        assert!(
+            crate::core::test_support::make_junction(&door, &real_windows),
+            "`mklink /J` needs no privilege, so a failure here is a real one"
+        );
+
+        let protected = fixture.protected();
+        assert!(
+            protected.reason_for(&door).is_none(),
+            "the premise: the junction's own path is not lexically protected"
+        );
+        match resolve_root(&door, &protected) {
+            RootVerdict::Refused(why) => assert!(why.contains("resolves to"), "got `{why}`"),
+            RootVerdict::Walk(_) => {
+                panic!("a root resolving into a protected tree must be refused")
+            }
         }
     }
 
