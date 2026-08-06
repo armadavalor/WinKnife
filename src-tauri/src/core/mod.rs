@@ -10,6 +10,7 @@ pub mod events;
 pub mod executor;
 pub mod logging;
 pub mod module;
+pub mod path_compare;
 pub mod platform;
 pub mod quarantine;
 pub mod scanner;
