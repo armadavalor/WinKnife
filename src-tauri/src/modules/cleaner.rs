@@ -1252,30 +1252,41 @@ mod tests {
 
         assert_eq!(rule.spec.score.max_bucket, brain::MaxBucket::NeedsReview);
 
-        // Every combination of bonuses, on a path nothing protects.
+        // Every combination of every signal `brain::score` reads, on a path
+        // nothing protects. The `owner_process_running` axis used to be pinned
+        // to `false` while the comment claimed "every combination" (review L11);
+        // it is folded in rather than the claim being narrowed, because the
+        // property does hold across it — the ceiling is what guarantees this,
+        // and a running process can only lower a ceiling further.
         let path = fixture.root.join("Downloads/forgotten.zip");
+        let mut cases = 0usize;
         for idle in [None, Some(0), Some(10), Some(400), Some(10_000)] {
             for size in [0, 4_096, 8 * 1024 * 1024 * 1024] {
                 for cache in [false, true] {
-                    let verdict = brain.classify_with(
-                        &path,
-                        Some(rule),
-                        &brain::Signals {
-                            idle_days: idle,
-                            written_days: idle,
-                            size_bytes: size,
-                            in_known_cache_dir: cache,
-                            owner_process_running: false,
-                        },
-                    );
-                    assert_ne!(
-                        verdict.bucket,
-                        RiskBucket::Safe,
-                        "idle={idle:?} size={size} cache={cache} made a download green"
-                    );
+                    for owner_running in [false, true] {
+                        let verdict = brain.classify_with(
+                            &path,
+                            Some(rule),
+                            &brain::Signals {
+                                idle_days: idle,
+                                written_days: idle,
+                                size_bytes: size,
+                                in_known_cache_dir: cache,
+                                owner_process_running: owner_running,
+                            },
+                        );
+                        cases += 1;
+                        assert_ne!(
+                            verdict.bucket,
+                            RiskBucket::Safe,
+                            "idle={idle:?} size={size} cache={cache} \
+                             owner_running={owner_running} made a download green"
+                        );
+                    }
                 }
             }
         }
+        assert_eq!(cases, 5 * 3 * 2 * 2, "the combination count is the claim");
     }
 
     #[test]
