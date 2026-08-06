@@ -226,8 +226,20 @@ impl Justification {
 /// A suggestion about one or more findings. Always carries a `reason` — no
 /// unexplained suggestions (CLAUDE.md hard rules) — and, when it proposes to
 /// change anything, a [`Justification`] the executor can re-derive.
+///
+/// # Every construction site validates
+///
+/// [`Recommendation::new`] validates, and so does the executor's first gate. But
+/// the fields are public and the type derived `Deserialize`, so a value arriving
+/// over IPC or out of the `actions` table reached existence without either — the
+/// invariant held only because the executor happened to re-check it
+/// (security review L15). It is enforced at construction now: deserialisation
+/// goes through [`RecommendationWire`] and [`Recommendation::validate`], so
+/// there is no path to an invalid value at all. The executor's re-check stays,
+/// because the point of gate 1 is to re-derive rather than to trust.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(try_from = "RecommendationWire")]
 pub struct Recommendation {
     /// Stable id, used as the approval token in `execute`.
     pub id: Uuid,
@@ -340,6 +352,43 @@ impl Recommendation {
             ));
         }
         Ok(())
+    }
+}
+
+/// The shape a [`Recommendation`] arrives in before it has been checked.
+///
+/// It exists only so `#[serde(try_from)]` has somewhere to land: the fields are
+/// identical, and the conversion is [`Recommendation::validate`]. Keeping it
+/// private means nothing outside this module can hold an unvalidated one.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecommendationWire {
+    id: Uuid,
+    finding_ids: Vec<Uuid>,
+    risk: RiskBucket,
+    confidence: u8,
+    action: Action,
+    reason: String,
+    savings_bytes: u64,
+    justification: Justification,
+}
+
+impl TryFrom<RecommendationWire> for Recommendation {
+    type Error = CoreError;
+
+    fn try_from(wire: RecommendationWire) -> Result<Self> {
+        let candidate = Self {
+            id: wire.id,
+            finding_ids: wire.finding_ids,
+            risk: wire.risk,
+            confidence: wire.confidence,
+            action: wire.action,
+            reason: wire.reason,
+            savings_bytes: wire.savings_bytes,
+            justification: wire.justification,
+        };
+        candidate.validate()?;
+        Ok(candidate)
     }
 }
 
@@ -689,5 +738,86 @@ mod tests {
         })
         .expect("serialize");
         assert_eq!(json, r#"{"status":"skipped","reason":"locked"}"#);
+    }
+
+    /* --- deserialisation validates too (security review L15) ------------ */
+
+    /// A recommendation arriving over IPC or out of the `actions` table used to
+    /// skip every check the constructor makes, because the fields are public and
+    /// the derive is unconditional. The executor re-checked and refused it, so
+    /// nothing broke — but the invariant held by luck rather than by type.
+    #[test]
+    fn a_forged_recommendation_cannot_be_deserialised() {
+        let forgeries = [
+            // Deleting a red-bucket item.
+            serde_json::json!({
+                "id": Uuid::new_v4(),
+                "findingIds": [Uuid::new_v4()],
+                "risk": "doNotDelete",
+                "confidence": 99,
+                "action": {"kind": "quarantine"},
+                "reason": "looks fine to me",
+                "savingsBytes": 1,
+                "justification": {"kind": "informational"}
+            }),
+            // A mutating action with a justification gate 4 cannot re-derive.
+            serde_json::json!({
+                "id": Uuid::new_v4(),
+                "findingIds": [Uuid::new_v4()],
+                "risk": "safe",
+                "confidence": 90,
+                "action": {"kind": "quarantine"},
+                "reason": "trust me",
+                "savingsBytes": 1,
+                "justification": {"kind": "informational"}
+            }),
+            // No reason at all, which CLAUDE.md forbids outright.
+            serde_json::json!({
+                "id": Uuid::new_v4(),
+                "findingIds": [Uuid::new_v4()],
+                "risk": "safe",
+                "confidence": 90,
+                "action": {"kind": "infoOnly"},
+                "reason": "   ",
+                "savingsBytes": 0,
+                "justification": {"kind": "informational"}
+            }),
+            // No findings to point at.
+            serde_json::json!({
+                "id": Uuid::new_v4(),
+                "findingIds": [],
+                "risk": "safe",
+                "confidence": 90,
+                "action": {"kind": "infoOnly"},
+                "reason": "about nothing",
+                "savingsBytes": 0,
+                "justification": {"kind": "informational"}
+            }),
+        ];
+
+        for forgery in forgeries {
+            let parsed = serde_json::from_value::<Recommendation>(forgery.clone());
+            assert!(
+                parsed.is_err(),
+                "a recommendation that cannot be constructed must not be deserialisable: {forgery}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_valid_recommendation_still_round_trips() {
+        let finding = Uuid::new_v4();
+        let original = Recommendation::informational(
+            vec![finding],
+            RiskBucket::DoNotDelete,
+            50,
+            "this one is only here to be explained",
+            0,
+        )
+        .expect("valid");
+
+        let json = serde_json::to_string(&original).expect("serialize");
+        let back: Recommendation = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, original);
     }
 }
