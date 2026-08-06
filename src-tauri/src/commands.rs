@@ -6,7 +6,7 @@
 //! quarantine, which brain, which recycle-bin wrapper a run uses. That is the
 //! seam that keeps the real Win32 calls out of every test.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -510,7 +510,8 @@ pub fn treemap_drives() -> Result<Vec<crate::core::platform::DriveInfo>, ApiErro
 /// off the UI thread.
 ///
 /// # Errors
-/// Returns an error if the cache cannot be written or the root cannot be served.
+/// Returns an error if `root` is not a mappable local path, if the cache cannot
+/// be written, or if the root cannot be served.
 #[tauri::command]
 pub async fn treemap_scan<R: Runtime>(
     app: AppHandle<R>,
@@ -518,6 +519,9 @@ pub async fn treemap_scan<R: Runtime>(
     db: State<'_, Database>,
     cancels: State<'_, CancelRegistry>,
 ) -> Result<TreemapScanResult, ApiError> {
+    // The root arrives from the WebView unchecked, exactly as `treemap_children`'s
+    // did (security review M17).
+    let root = mappable_root(&root)?;
     let scan_id = Uuid::new_v4();
     let started_at = Utc::now();
     let cancel = cancels.start(scan_id);
@@ -600,14 +604,69 @@ pub async fn treemap_scan<R: Runtime>(
 /// are always current, and takes subdirectory totals from the cache.
 ///
 /// # Errors
-/// Returns an error if the cache cannot be read.
+/// Returns an error if `root` is not a mappable local path, if `path` is not
+/// inside it, or if the cache cannot be read.
 #[tauri::command]
 pub fn treemap_children(
     root: PathBuf,
     path: PathBuf,
     db: State<'_, Database>,
 ) -> Result<treemap::TreeLevel, ApiError> {
+    let (root, path) = mappable_level(&root, &path)?;
     Ok(db.with(|conn| treemap::children(&path, &root, &treemap::CacheOracle::new(conn, &root)))?)
+}
+
+/// The gate every treemap root crosses.
+///
+/// The same chokepoint the cleaner's `resolve_root` uses: a UNC share, a device
+/// path, an NT-namespace spelling or an 8.3 alias aimed somewhere else is
+/// refused rather than mapped, and what comes back is the resolved form, so a
+/// containment check compares the place rather than the spelling
+/// (security review M17).
+///
+/// The treemap is read-only, so this is not about protecting a location — it is
+/// about not enumerating one the user did not name, and about the nine spellings
+/// of a path being refused here as they are everywhere else.
+fn mappable_root(root: &Path) -> Result<PathBuf, ApiError> {
+    match crate::core::brain::gate_path(root) {
+        crate::core::brain::GateVerdict::Local(canonical) => Ok(canonical),
+        crate::core::brain::GateVerdict::Missing => Err(CoreError::Quarantine(format!(
+            "`{}` is not on this machine, so there is nothing to map",
+            root.display()
+        ))
+        .into()),
+        crate::core::brain::GateVerdict::Refused(why) => Err(CoreError::Quarantine(format!(
+            "`{}` cannot be mapped because {why}",
+            root.display()
+        ))
+        .into()),
+    }
+}
+
+/// Both halves of a zoom request, gated and tied together.
+///
+/// `root` and `path` both arrive from the WebView, and nothing used to tie them
+/// together: `children(path = C:\Windows\System32\drivers\etc, root = <a
+/// tempdir>)` enumerated `hosts`, `services`, `lmhosts.sam`, and `breadcrumb`
+/// then walked up from `path` all the way to `C:\`, handing back the whole
+/// ancestor chain. Read-only, so no hard rule broke — but every other
+/// path-taking command in this file goes through `gate_path` or `path_compare`,
+/// and this was the exception (security review M17).
+///
+/// # Errors
+/// Returns an error when `root` is not a plain local path that exists, or when
+/// `path` is not inside it.
+fn mappable_level(root: &Path, path: &Path) -> Result<(PathBuf, PathBuf), ApiError> {
+    let root = mappable_root(root)?;
+    if !crate::core::path_compare::is_inside(&root, path) {
+        return Err(CoreError::Quarantine(format!(
+            "`{}` is not inside `{}`, so it is not part of that map",
+            path.display(),
+            root.display()
+        ))
+        .into());
+    }
+    Ok((root, path.to_path_buf()))
 }
 
 /// The cached header for a root, or `None` when it has never been scanned.
@@ -1202,7 +1261,95 @@ pub fn shutdown_status(timer: State<'_, Arc<ShutdownTimer>>) -> Result<TimerStat
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::modules;
+
+    /* --- the treemap zoom gate (security review M17) -------------------- */
+
+    #[test]
+    fn a_zoom_inside_the_mapped_root_is_allowed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let inside = dir.path().join("sub").join("deeper");
+        std::fs::create_dir_all(&inside).expect("dirs");
+
+        let (root, path) = mappable_level(dir.path(), &inside).expect("a zoom inside the root");
+        assert!(crate::core::path_compare::is_inside(&root, &path));
+    }
+
+    /// The reproduction: a `path` the caller never mapped, under a `root` it
+    /// did. It used to enumerate `hosts`, `services`, `lmhosts.sam` and hand
+    /// back a breadcrumb all the way up to `C:\`.
+    #[test]
+    fn a_zoom_outside_the_mapped_root_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let elsewhere = Path::new(r"C:\Windows\System32\drivers\etc");
+
+        let refusal = mappable_level(dir.path(), elsewhere)
+            .expect_err("a path outside the mapped root must be refused");
+        let message = format!("{refusal:?}");
+        println!(
+            "[M17] children(path={}, root={})",
+            elsewhere.display(),
+            dir.path().display()
+        );
+        println!("[M17] -> {message}");
+        assert!(
+            message.contains("is not inside"),
+            "the refusal has to say why: {message}"
+        );
+    }
+
+    /// A parent of the root is outside it just as much as a sibling is — that
+    /// is the direction the breadcrumb leaked in.
+    #[test]
+    fn a_zoom_to_an_ancestor_of_the_mapped_root_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("mapped");
+        std::fs::create_dir_all(&root).expect("dirs");
+
+        assert!(
+            mappable_level(&root, dir.path()).is_err(),
+            "zooming out past the root is leaving the map"
+        );
+    }
+
+    /// The nine spellings are refused here as everywhere else. A UNC path is
+    /// not a plain local drive-letter path, whatever it resolves to.
+    #[test]
+    fn a_root_that_is_not_a_plain_local_path_is_refused() {
+        for spelling in [
+            r"\\localhost\C$\Windows",
+            r"\\.\C:\Windows",
+            r"\??\C:\Windows",
+            r"\\server\share\folder",
+            r"C:Windows",
+            r"C:\Windows\..\Windows",
+        ] {
+            let verdict = mappable_root(Path::new(spelling));
+            assert!(
+                verdict.is_err(),
+                "`{spelling}` was accepted as `{:?}`",
+                verdict.ok()
+            );
+        }
+    }
+
+    /// The verbatim prefix is not one of the refused spellings — it names the
+    /// same local path, and the gate's job is to hand back the resolved form so
+    /// the containment check compares places rather than spellings. Pinned so a
+    /// future tightening does not quietly turn it into a refusal that a user's
+    /// long path would trip over.
+    #[test]
+    fn a_verbatim_root_is_normalised_rather_than_refused() {
+        let windows = Path::new(r"C:\Windows");
+        if !windows.is_dir() {
+            return;
+        }
+        assert_eq!(
+            mappable_root(Path::new(r"\\?\C:\Windows")).expect("verbatim resolves"),
+            mappable_root(windows).expect("plain resolves"),
+        );
+    }
 
     #[test]
     fn list_modules_returns_the_registry_contents() {
