@@ -222,6 +222,35 @@ impl Brain {
             .is_some_and(|name| self.process_probe.is_running(name))
     }
 
+    /// [`Brain::owner_process_running`], asked of the operating system rather
+    /// than of the scan's memo.
+    ///
+    /// The 2-second cache is right for a scan, which wants one consistent answer
+    /// across thousands of files in one burst, and wrong for the executor: the
+    /// user can sit on the review screen for an hour and open Chrome in the
+    /// meantime, and the cache would still be answering the question the scan
+    /// asked (review H10).
+    pub fn owner_process_running_uncached(&self, rule: &CompiledRule) -> bool {
+        rule.spec
+            .match_
+            .owner_process_absent
+            .as_deref()
+            .is_some_and(|name| self.process_probe.is_running_uncached(name))
+    }
+
+    /// The rule a pack and rule id name, or `None` if no loaded pack has it.
+    ///
+    /// The executor needs it to re-check the criteria a recommendation was built
+    /// on; the modules index rules themselves for their own scans.
+    pub fn rule(&self, pack_id: &str, rule_id: &str) -> Option<&CompiledRule> {
+        self.packs
+            .iter()
+            .find(|pack| pack.id() == pack_id)?
+            .rules
+            .iter()
+            .find(|rule| rule.spec.id == rule_id)
+    }
+
     /// Classify a path that a rule already matched, with no metadata.
     ///
     /// Equivalent to [`Brain::classify_with`] and [`Signals::unknown`]: the rule's

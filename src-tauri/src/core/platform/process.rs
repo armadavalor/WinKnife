@@ -21,7 +21,23 @@ use std::time::{Duration, Instant};
 pub trait ProcessProbe: Send + Sync {
     /// Whether any running process is called `exe_name` (`"chrome.exe"`).
     /// Compared case-insensitively, as Windows process names are.
+    ///
+    /// May be served from a cache — see [`CachedProcessProbe`]. Correct for a
+    /// scan, which wants one consistent answer for the whole run.
     fn is_running(&self, exe_name: &str) -> bool;
+
+    /// The same question, asked of the operating system right now.
+    ///
+    /// The executor uses this and [`ProcessProbe::is_running`] is wrong for it:
+    /// a scan and its analyze pass are one burst, but the user then reviews for
+    /// as long as they like, and "Chrome was closed when we looked" is not the
+    /// question being answered at the moment a cache is moved (review H10).
+    ///
+    /// Defaults to [`ProcessProbe::is_running`], which is already uncached for
+    /// every probe that does not memoise.
+    fn is_running_uncached(&self, exe_name: &str) -> bool {
+        self.is_running(exe_name)
+    }
 }
 
 /// The real probe: one `CreateToolhelp32Snapshot` walk per question.
@@ -168,6 +184,15 @@ impl ProcessProbe for CachedProcessProbe {
 
         let answer = self.inner.is_running(exe_name);
         self.answers().insert(key, (now, answer));
+        answer
+    }
+
+    /// Bypass the memo and refresh it, so a later scan does not inherit an
+    /// answer this call already knows is out of date.
+    fn is_running_uncached(&self, exe_name: &str) -> bool {
+        let answer = self.inner.is_running_uncached(exe_name);
+        self.answers()
+            .insert(exe_name.to_lowercase(), (Instant::now(), answer));
         answer
     }
 }

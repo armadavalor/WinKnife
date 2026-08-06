@@ -311,11 +311,14 @@ mod tests {
         drop(open_exclusive(&path, FILE_GENERIC_READ.0).expect("the unsuppressed open"));
         let after_unsuppressed = accessed(&path);
         let updates_are_live = after_unsuppressed != before;
-        println!("last-access updates on this volume: {}", if updates_are_live {
-            "ENABLED — an unsuppressed open moves the clock, so this test is load-bearing"
-        } else {
-            "disabled — nothing here could move the clock either way"
-        });
+        println!(
+            "last-access updates on this volume: {}",
+            if updates_are_live {
+                "ENABLED — an unsuppressed open moves the clock, so this test is load-bearing"
+            } else {
+                "disabled — nothing here could move the clock either way"
+            }
+        );
         println!("  backdated to        {before:?}");
         println!("  after plain open    {after_unsuppressed:?}  <- what the probe used to do");
 

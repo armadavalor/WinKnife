@@ -46,6 +46,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::brain::{self, Brain, GateVerdict, ProtectedPaths};
+// The same hash the executor recomputes to confirm a copy is still a copy
+// (review H10) — one implementation, so the two numbers are comparable.
+use crate::core::content_hash::full_hash;
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
 use crate::core::path_compare;
 use crate::core::platform::{file_identity, EnvResolver, FileId};
@@ -540,6 +543,13 @@ fn build_set(content_hash: String, members: Vec<Candidate>) -> (DuplicateSet, Ve
     let mut copies = Vec::with_capacity(total);
     let mut findings = Vec::with_capacity(total);
 
+    // The keeper is whichever copy sorted first, and every other finding records
+    // it by name. The executor needs it to answer a question the analyze phase
+    // cannot: is the copy this one was going to be measured against *still
+    // there* when the user finally clicks clean? Quarantining the last remaining
+    // copy under the reason "identical to <keeper>" is the failure H10 is about.
+    let keeper_path = scored.first().map(|(_, _, candidate)| candidate.path.clone());
+
     for (index, (score, reason, candidate)) in scored.into_iter().enumerate() {
         let keeper = index == 0;
         let mut finding = Finding::new("duplicates", candidate.path.clone(), FindingKind::File);
@@ -552,6 +562,7 @@ fn build_set(content_hash: String, members: Vec<Candidate>) -> (DuplicateSet, Ve
             "contentHash": content_hash,
             "keeper": keeper,
             "copiesInSet": total,
+            "keeperPath": keeper_path,
         });
 
         copies.push(DuplicateCopy {
@@ -671,22 +682,6 @@ fn partial_hash(path: &Path, size: u64) -> std::io::Result<String> {
         hasher.update(&tail);
     }
 
-    Ok(hasher.finalize().to_hex().to_string())
-}
-
-/// blake3 of the whole file, read in chunks so a large file does not land in
-/// memory all at once.
-fn full_hash(path: &Path) -> std::io::Result<String> {
-    let mut file = std::fs::File::open(path)?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = vec![0u8; 128 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
     Ok(hasher.finalize().to_hex().to_string())
 }
 

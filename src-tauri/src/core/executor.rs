@@ -5,19 +5,45 @@
 //! cannot delete anything even if it wanted to, because `execute` hands the
 //! executor a list and gets a report back.
 //!
-//! Three rules this file enforces, in order, for every single item:
+//! Four rules this file enforces, in order, for every single item:
 //!
 //! 1. The recommendation must still validate (no mutating action on a red item).
 //! 2. The path must not be protected (re-checked here, not trusted from the
 //!    analyze phase — the UI could have been sitting open for an hour).
 //! 3. The file must not be in use. Locked means *skipped and reported*, never
 //!    failed silently and never a half-finished batch.
+//! 4. **The reason must still be true.** Gates 2 and 3 re-check the two things
+//!    that can forbid an action; this one re-checks the thing that *justified*
+//!    it. See below.
+//!
+//! # Why the justification is re-checked too (review H10)
+//!
+//! The first three gates all ask "is this still allowed?". None of them asked
+//! "is this still *warranted*?", so between analyze and execute:
+//!
+//! - a duplicate could be edited into the newest unique copy on the machine and
+//!   still be moved under the reason "byte-for-byte identical to `<keeper>`";
+//! - the keeper it was compared against could be deleted, leaving the user with
+//!   no copy at all;
+//! - a browser could be opened, and its cache moved under a rule whose whole
+//!   premise (`owner_process_absent`) is that the browser is closed.
+//!
+//! CLAUDE.md makes the `reason` a hard rule: "Every Recommendation carries a
+//! human-readable `reason`." A reason that was true an hour ago and is false now
+//! is not a reason, and acting on one is the defect class that erodes the single
+//! promise this app makes. So the executor re-derives the preconditions it can
+//! and **skips-and-reports** when they no longer hold — never failing the batch,
+//! exactly like the lock check above it.
+//!
+//! What is re-checked is what the finding *recorded*, which is the only thing
+//! the executor can verify without becoming a second copy of every module.
 //!
 //! Every item gets a `tracing` line whatever happens, because this app deletes
 //! things and an audit trail is the difference between a bug and a mystery.
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use uuid::Uuid;
 
@@ -229,6 +255,18 @@ fn apply_one(
         return skipped(format!("skipped: {}", lock.reason()));
     }
 
+    // 4. And the reason itself. Gates 2 and 3 ask whether this is still
+    //    permitted; this asks whether it is still warranted (review H10).
+    if let Some(reason) = justification_refusal(unit, env) {
+        tracing::warn!(
+            path = %unit.finding.path.display(),
+            module = unit.finding.module.as_str(),
+            reason = reason.as_str(),
+            "refused to act on a recommendation whose justification no longer holds"
+        );
+        return skipped(reason);
+    }
+
     match env.quarantine.take(env.conn, batch, &unit.finding.path) {
         Ok(item) => {
             state.moved_anything = true;
@@ -236,6 +274,235 @@ fn apply_one(
         }
         Err(err) => failed(err.to_string()),
     }
+}
+
+/* -------------------------------------------------------------------------
+ * Gate 4: is the reason still true?
+ * ---------------------------------------------------------------------- */
+
+/// What a duplicate recommendation was justified by, as `modules::duplicates`
+/// wrote it into the finding's `meta`.
+///
+/// Mirrored by hand, like the TypeScript types are: the module owns the shape
+/// and this is the executor's reading of it. A finding that does not carry these
+/// fields is not a duplicate finding and is not checked here.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DuplicateJustification {
+    /// blake3 of the contents when the set was formed.
+    content_hash: String,
+    /// Whether this copy is the one the set nominated to keep.
+    keeper: bool,
+    /// The copy this one was declared identical to.
+    keeper_path: Option<std::path::PathBuf>,
+}
+
+/// What a cleaner recommendation was justified by, as `modules::cleaner` wrote
+/// it into the finding's `meta`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuleJustification {
+    /// The pack that matched.
+    pack_id: String,
+    /// The rule that matched.
+    rule_id: String,
+}
+
+/// Why the recommendation's own reasoning no longer holds, or `None`.
+///
+/// Dispatches on what the finding recorded rather than on who produced it, so a
+/// module that records a justification gets it re-checked and one that records
+/// none is left exactly where the first three gates put it. That last case is a
+/// deliberate limit and not an oversight: the executor cannot re-derive a
+/// justification that was never written down, and requiring every module to
+/// write one is a change to the module contract rather than to this file
+/// (`docs/DECISIONS-NEEDED.md`, phase 2 review).
+fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Option<String> {
+    let finding = unit.finding;
+
+    if let Ok(duplicate) = serde_json::from_value::<DuplicateJustification>(finding.meta.clone()) {
+        return duplicate_refusal(&duplicate, &finding.path);
+    }
+
+    if let Ok(rule) = serde_json::from_value::<RuleJustification>(finding.meta.clone()) {
+        return rule_refusal(&rule, finding, env.brain);
+    }
+
+    None
+}
+
+/// Re-verify a "this is a redundant copy" reason against the disk right now.
+///
+/// Ordered cheapest-and-most-catastrophic first: losing the last copy is worse
+/// than moving a file whose bytes changed, and both are cheaper to detect than
+/// a full re-hash.
+fn duplicate_refusal(duplicate: &DuplicateJustification, path: &std::path::Path) -> Option<String> {
+    // The keeper is offered as information only, never as an action. If one
+    // reaches here the set has been mangled somewhere upstream; refuse rather
+    // than reason about it.
+    if duplicate.keeper {
+        return Some(
+            "skipped: this is the copy the scan suggested keeping, so it is not \
+             ours to remove"
+                .to_owned(),
+        );
+    }
+
+    let Some(keeper_path) = &duplicate.keeper_path else {
+        return Some(
+            "skipped: the scan did not record which copy this one was compared \
+             against, so that it is still there cannot be confirmed"
+                .to_owned(),
+        );
+    };
+
+    // Through `path_compare`: the keeper and this copy could be two spellings of
+    // one file, and moving "the duplicate" would then move the only copy.
+    if crate::core::path_compare::same_path(keeper_path, path) {
+        return Some(format!(
+            "skipped: `{}` is another spelling of the copy this was going to be \
+             compared against, so removing it would leave none",
+            path.display()
+        ));
+    }
+
+    // The keeper vanishing between analyze and execute turns "one of several
+    // copies" into "the only copy". `symlink_metadata`, so a dangling link where
+    // the keeper used to be is not mistaken for the keeper.
+    if std::fs::symlink_metadata(keeper_path).is_err() {
+        return Some(format!(
+            "skipped: `{}`, the copy this one was identical to, is no longer \
+             there — removing this would leave you with none",
+            keeper_path.display()
+        ));
+    }
+
+    // Full re-hash, not a sample and not the partial hash the scan used to
+    // narrow candidates. Sampling would re-introduce exactly the false positive
+    // `a_crafted_collision_is_not_a_duplicate` exists to forbid, and this is
+    // per *approved* item rather than per candidate: the user has already picked
+    // these, and the quarantine move is about to read every byte anyway on a
+    // cross-volume copy. Reading the file twice is the price of the reason
+    // being true.
+    match crate::core::content_hash::full_hash(path) {
+        Ok(hash) if hash == duplicate.content_hash => None,
+        Ok(_) => Some(format!(
+            "skipped: `{}` has changed since the scan, so it is no longer a copy \
+             of anything — its current contents exist nowhere else",
+            path.display()
+        )),
+        Err(err) => Some(format!(
+            "skipped: `{}` could not be re-read to confirm it is still a duplicate: {err}",
+            path.display()
+        )),
+    }
+}
+
+/// Re-verify a rule-pack reason against the machine and the file right now.
+///
+/// The path globs are deliberately *not* re-tested. They match on the spelling
+/// the rule was written in, the walk may have re-anchored them
+/// (`modules::cleaner::GroupRule`), and where the file *is* has not changed —
+/// that question belongs to gate 2, which asks it properly. What can have
+/// changed is the machine's state and the file's own metadata, which is what
+/// `match` is about.
+fn rule_refusal(
+    justification: &RuleJustification,
+    finding: &Finding,
+    brain: &Brain,
+) -> Option<String> {
+    let Some(rule) = brain.rule(&justification.pack_id, &justification.rule_id) else {
+        return Some(format!(
+            "skipped: the rule `{}/{}` that suggested this is no longer loaded, so \
+             its reasoning cannot be confirmed",
+            justification.pack_id, justification.rule_id
+        ));
+    };
+
+    // Uncached: the scan's 2-second memo answered the question the scan asked,
+    // and the user has had as long as they liked since. Module spec 02 says a
+    // browser cache is Safe *only* while the browser is closed; until this
+    // check, that governed the rating and not the action.
+    if brain.owner_process_running_uncached(rule) {
+        let process = rule
+            .spec
+            .match_
+            .owner_process_absent
+            .as_deref()
+            .unwrap_or("the program that owns this data");
+        return Some(format!(
+            "skipped: {process} is running now, and this was only suggested \
+             because it was closed"
+        ));
+    }
+
+    let criteria = &rule.spec.match_;
+    if criteria.min_age_hours.is_none()
+        && criteria.min_size_bytes.is_none()
+        && criteria.extensions.is_none()
+    {
+        return None;
+    }
+
+    // Fresh metadata, not the figures the scan recorded — that is the whole
+    // point. `metadata` reads the directory entry and opens nothing, so this
+    // stays as read-only as the scan is meant to be.
+    let metadata = match std::fs::metadata(&finding.path) {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            return Some(format!(
+                "skipped: `{}` could not be re-checked against its rule: {err}",
+                finding.path.display()
+            ))
+        }
+    };
+
+    if let Some(min_age) = criteria.min_age_hours {
+        // Mirrors `WalkEntry::age_hours`: measured from the modification time,
+        // and a file whose clock cannot be read counts as new.
+        let age_hours = metadata
+            .modified()
+            .ok()
+            .map(|modified| (Utc::now() - DateTime::<Utc>::from(modified)).num_hours())
+            .unwrap_or(0);
+        if age_hours < i64::from(min_age) {
+            return Some(format!(
+                "skipped: `{}` was changed {age_hours}h ago, and this rule only \
+                 covers files untouched for {min_age}h",
+                finding.path.display()
+            ));
+        }
+    }
+
+    if let Some(min_size) = criteria.min_size_bytes {
+        if metadata.len() < min_size {
+            return Some(format!(
+                "skipped: `{}` is now {} bytes, below the {min_size} this rule covers",
+                finding.path.display(),
+                metadata.len()
+            ));
+        }
+    }
+
+    if let Some(extensions) = &criteria.extensions {
+        let actual = finding
+            .path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase());
+        let allowed = actual.as_deref().is_some_and(|actual| {
+            extensions
+                .iter()
+                .any(|wanted| wanted.eq_ignore_ascii_case(actual))
+        });
+        if !allowed {
+            return Some(format!(
+                "skipped: `{}` is not one of the file types this rule covers",
+                finding.path.display()
+            ));
+        }
+    }
+
+    None
 }
 
 /// Empty the recycle bin, at most once per batch and only when the user said so
@@ -331,7 +598,9 @@ mod tests {
     use crate::core::db;
     use crate::core::platform::{AlwaysUnlocked, LockProbe, LockState, StubRecycleBin};
     use crate::core::quarantine::RetentionPolicy;
+    use crate::core::scanner::CancellationToken;
     use crate::core::types::RiskBucket;
+    use crate::modules::duplicates::{self, DuplicateContext, DuplicateScan, DuplicatesSettings};
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
@@ -361,6 +630,22 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, bytes).expect("write");
         path
+    }
+
+    /// Backdate a file's modification time, so a rule's `min_age_hours` can be
+    /// satisfied without the test waiting a day.
+    fn backdate(path: &Path, hours: u64) {
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open")
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_modified(when)
+                    .set_accessed(when),
+            )
+            .expect("backdate");
     }
 
     fn finding_at(path: &Path, size: u64) -> Finding {
@@ -1072,6 +1357,579 @@ mod tests {
         .expect("execute");
 
         assert_eq!(ticks, vec![(0, 3), (1, 3), (2, 3), (3, 3)]);
+    }
+
+    /* ---------------------------------------------------------------------
+     * Gate 4: the reason has to still be true (review H10)
+     * ------------------------------------------------------------------ */
+
+    /// Run the real duplicate pipeline over `root` and hand back everything the
+    /// executor needs, so these tests exercise the same path the app does rather
+    /// than a hand-built recommendation that could disagree with it.
+    fn duplicate_scan(root: &Path, brain: &Brain) -> (DuplicateScan, Vec<Recommendation>) {
+        let protected = ProtectedPaths::empty();
+        let settings = DuplicatesSettings {
+            min_size_bytes: duplicates::MIN_ALLOWED_SIZE_BYTES,
+            roots: Vec::new(),
+        };
+        let cancel = CancellationToken::new();
+        let scan = duplicates::scan(
+            &DuplicateContext {
+                roots: std::slice::from_ref(&root.to_path_buf()),
+                protected: &protected,
+                settings: &settings,
+                cancel: &cancel,
+            },
+            None,
+        );
+        let recommendations = duplicates::analyze(&scan, brain);
+        (scan, recommendations)
+    }
+
+    /// The ids of every recommendation that actually proposes a move — i.e. what
+    /// a user clicking "clean everything offered" would approve.
+    fn approve_the_quarantines(recommendations: &[Recommendation]) -> Vec<Uuid> {
+        recommendations
+            .iter()
+            .filter(|rec| rec.action == Action::Quarantine)
+            .map(|rec| rec.id)
+            .collect()
+    }
+
+    fn outcome_for<'a>(report: &'a ExecReport, path: &Path) -> &'a ExecOutcome {
+        &report
+            .items
+            .iter()
+            .find(|item| item.path == path)
+            .unwrap_or_else(|| panic!("`{}` must be reported", path.display()))
+            .outcome
+    }
+
+    /// Print the two lines the review reported this defect with, so a run of
+    /// these tests is the evidence rather than a claim about it.
+    fn report_evidence(report: &ExecReport, path: &Path) {
+        println!(
+            "outcome for {}: {:?}",
+            path.display(),
+            outcome_for(report, path)
+        );
+        println!("file still on disk after execute? {}", path.exists());
+    }
+
+    /// **H10(a), reproduced.** Scan a duplicate set, rewrite the non-keeper with
+    /// different bytes, then execute. Before this gate the file was moved out
+    /// under the reason "Byte-for-byte identical to `<keeper>`" — false at the
+    /// moment of the move, and the bytes destroyed were the newest unique copy
+    /// on the machine.
+    #[test]
+    fn a_duplicate_edited_after_the_scan_is_skipped_and_says_why() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+
+        let shared = vec![b'd'; 64 * 1024];
+        let keeper = write(&h.work, "original.bin", &shared);
+        let copy = write(&h.work, "original - Copy.bin", &shared);
+
+        let (scan, recommendations) = duplicate_scan(&h.work, &brain);
+        assert_eq!(scan.sets.len(), 1, "the fixture must form one set");
+        let approved = approve_the_quarantines(&recommendations);
+        assert_eq!(approved.len(), 1, "one keeper, one copy to offer");
+
+        // The user edits the copy while the review screen is open. It is now the
+        // only file on the machine with these contents.
+        let unique = vec![b'z'; 64 * 1024];
+        std::fs::write(&copy, &unique).expect("rewrite the copy");
+
+        let units = plan(&approved, &recommendations, &scan.findings);
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        let moved = units[0].finding.path.clone();
+        report_evidence(&report, &moved);
+        match outcome_for(&report, &moved) {
+            ExecOutcome::Skipped { reason } => {
+                assert!(
+                    reason.contains("changed since the scan"),
+                    "the skip must name the precondition that failed: `{reason}`"
+                );
+            }
+            other => panic!("expected a skip, got {other:?}"),
+        }
+
+        assert!(moved.exists(), "the user's newest unique file must survive");
+        assert_eq!(
+            std::fs::read(&moved).expect("read"),
+            unique,
+            "and survive unmodified"
+        );
+        assert!(keeper.exists());
+        assert_eq!(report.succeeded(), 0);
+        assert_eq!(report.reclaimed_bytes, 0);
+        assert_eq!(report.batch_id, None, "nothing moved, so no batch");
+    }
+
+    /// The control for the test above: the identical pipeline with nothing
+    /// touched still moves the copy. Without this, "skipped" could just mean the
+    /// gate refuses everything.
+    #[test]
+    fn an_unchanged_duplicate_still_moves() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+
+        let shared = vec![b'd'; 64 * 1024];
+        write(&h.work, "original.bin", &shared);
+        write(&h.work, "original - Copy.bin", &shared);
+
+        let (scan, recommendations) = duplicate_scan(&h.work, &brain);
+        let approved = approve_the_quarantines(&recommendations);
+        let units = plan(&approved, &recommendations, &scan.findings);
+        let moved = units[0].finding.path.clone();
+
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        assert_eq!(
+            report.succeeded(),
+            1,
+            "an untouched duplicate is still a duplicate: {:?}",
+            report.items
+        );
+        assert!(!moved.exists());
+        assert_eq!(report.reclaimed_bytes, 64 * 1024);
+    }
+
+    /// **The keeper-vanished case.** If the copy this one was declared identical
+    /// to is gone by the time the user clicks clean, quarantining "the
+    /// duplicate" leaves them with nothing at all.
+    #[test]
+    fn a_duplicate_whose_keeper_vanished_is_skipped_and_says_why() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+
+        let shared = vec![b'k'; 64 * 1024];
+        write(&h.work, "original.bin", &shared);
+        write(&h.work, "original - Copy.bin", &shared);
+
+        let (scan, recommendations) = duplicate_scan(&h.work, &brain);
+        let approved = approve_the_quarantines(&recommendations);
+        let units = plan(&approved, &recommendations, &scan.findings);
+        let moved = units[0].finding.path.clone();
+
+        // Whichever copy the heuristic nominated, take it away — by asking the
+        // scan rather than by guessing which name won.
+        //
+        // Taken *through the quarantine*, which is both the only sanctioned way
+        // to move user data in this crate (`clippy.toml` disallows `remove_*`
+        // and `rename`, tests included) and the likeliest way this actually
+        // happens: the user cleans one batch, the keeper goes, and then they
+        // approve a second batch built from the same scan.
+        let keeper_path = scan.sets[0]
+            .copies
+            .iter()
+            .find(|copy| copy.keeper)
+            .map(|copy| copy.path.clone())
+            .expect("a set always nominates a keeper");
+        let earlier_batch = h.quarantine.start_batch();
+        h.quarantine
+            .take(&h.conn, earlier_batch, &keeper_path)
+            .expect("an earlier batch takes the keeper");
+        assert!(!keeper_path.exists(), "the keeper really is gone");
+
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        report_evidence(&report, &moved);
+        match outcome_for(&report, &moved) {
+            ExecOutcome::Skipped { reason } => {
+                assert!(
+                    reason.contains("is no longer there") && reason.contains("leave you with none"),
+                    "the skip must say the keeper is gone: `{reason}`"
+                );
+            }
+            other => panic!("expected a skip, got {other:?}"),
+        }
+
+        assert!(
+            moved.exists(),
+            "the last remaining copy must not be quarantined"
+        );
+        assert_eq!(report.succeeded(), 0);
+    }
+
+    /// A probe whose answer can be changed between the scan and the execute, so
+    /// "the user opened Chrome while the review screen was up" is expressible.
+    #[derive(Debug, Default)]
+    struct Switchable {
+        running: std::sync::atomic::AtomicBool,
+        uncached_calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Switchable {
+        fn start(&self) {
+            self.running
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    impl crate::core::platform::ProcessProbe for Switchable {
+        fn is_running(&self, _exe_name: &str) -> bool {
+            self.running.load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        fn is_running_uncached(&self, exe_name: &str) -> bool {
+            self.uncached_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.is_running(exe_name)
+        }
+    }
+
+    /// A pack whose one rule is a browser cache: green only while the browser is
+    /// closed, exactly as module spec 02 describes and the shipped
+    /// `browser-cache` pack is written.
+    fn browser_pack(cache_dir: &Path) -> crate::core::brain::RulePack {
+        // The location comes from `%CACHE%`, so the pack text itself is fixed.
+        const JSON: &str = r#"{
+            "id": "browser-cache",
+            "name": "Browser Caches",
+            "version": 1,
+            "module": "cleaner",
+            "enabled_by_default": true,
+            "description": "Cached page data.",
+            "rules": [
+                {
+                    "id": "chrome-cache",
+                    "paths": ["%CACHE%\\**"],
+                    "match": { "min_age_hours": 24, "owner_process_absent": "chrome.exe" },
+                    "score": { "base": 88, "max_bucket": "safe" },
+                    "action": "quarantine",
+                    "reason": "Cached page data Chrome will rebuild on demand."
+                }
+            ]
+        }"#;
+        crate::core::brain::rules::compile_pack(
+            "browser-cache",
+            JSON,
+            &crate::core::platform::MapEnv::new()
+                .with("USERPROFILE", cache_dir.to_string_lossy())
+                .with("CACHE", cache_dir.to_string_lossy()),
+        )
+        .expect("the browser fixture pack")
+    }
+
+    fn cleaner_finding(path: &Path, size: u64, pack: &str, rule: &str) -> Finding {
+        let mut finding = finding_at(path, size);
+        finding.meta = serde_json::json!({
+            "packId": pack,
+            "packName": "Browser Caches",
+            "ruleId": rule,
+        });
+        finding
+    }
+
+    /// **H10(b), reproduced.** `Brain::owner_process_running` was consulted in
+    /// `classify_by_rule` and nowhere else, so `owner_process_absent` governed
+    /// the *rating* and not the *action*. Scan with Chrome closed (green), open
+    /// Chrome, clean — and the cache was quarantined under a reason whose whole
+    /// premise is that Chrome is closed.
+    #[test]
+    fn a_cache_is_skipped_when_its_owning_program_opened_after_the_scan() {
+        let h = harness();
+        let bin = StubRecycleBin::default();
+        let cache = h.work.join("Cache");
+        std::fs::create_dir_all(&cache).expect("cache dir");
+        let entry = write(&cache, "f_000001", b"cached page data");
+
+        let probe = Arc::new(Switchable::default());
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::empty())
+            .packs(vec![browser_pack(&h.work)])
+            .lock_probe(Arc::new(AlwaysUnlocked))
+            .process_probe(probe.clone())
+            .build();
+
+        let finding = cleaner_finding(&entry, 16, "browser-cache", "chrome-cache");
+        let rec = Recommendation::new(
+            vec![finding.id],
+            RiskBucket::Safe,
+            88,
+            Action::Quarantine,
+            "Cached page data Chrome will rebuild on demand.",
+            16,
+        )
+        .expect("recommendation");
+
+        // The user opens Chrome while the review screen is up.
+        probe.start();
+
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        report_evidence(&report, &entry);
+        match outcome_for(&report, &entry) {
+            ExecOutcome::Skipped { reason } => {
+                assert!(
+                    reason.contains("chrome.exe") && reason.contains("running now"),
+                    "the skip must name the process: `{reason}`"
+                );
+            }
+            other => panic!("expected a skip, got {other:?}"),
+        }
+        assert!(
+            entry.exists(),
+            "a running browser's cache must be left alone"
+        );
+        assert!(
+            probe
+                .uncached_calls
+                .load(std::sync::atomic::Ordering::Relaxed)
+                > 0,
+            "the executor must ask the OS, not the scan's 2s memo"
+        );
+    }
+
+    /// The control: same rule, same pack, Chrome still closed. The gate must let
+    /// the ordinary case through.
+    #[test]
+    fn a_cache_still_moves_when_its_owning_program_is_closed() {
+        let h = harness();
+        let bin = StubRecycleBin::default();
+        let cache = h.work.join("Cache");
+        std::fs::create_dir_all(&cache).expect("cache dir");
+        let entry = write(&cache, "f_000001", b"cached page data");
+        // Old enough for the rule's `min_age_hours`.
+        backdate(&entry, 48);
+
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::empty())
+            .packs(vec![browser_pack(&h.work)])
+            .lock_probe(Arc::new(AlwaysUnlocked))
+            .process_probe(Arc::new(Switchable::default()))
+            .build();
+
+        let finding = cleaner_finding(&entry, 16, "browser-cache", "chrome-cache");
+        let rec = Recommendation::new(
+            vec![finding.id],
+            RiskBucket::Safe,
+            88,
+            Action::Quarantine,
+            "Cached page data Chrome will rebuild on demand.",
+            16,
+        )
+        .expect("recommendation");
+
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        assert_eq!(
+            report.succeeded(),
+            1,
+            "the ordinary case must still work: {:?}",
+            report.items
+        );
+        assert!(!entry.exists());
+    }
+
+    /// The rest of `match`: a file rewritten while the review screen was open no
+    /// longer satisfies the age its rule asked for, and the reason it was
+    /// offered under ("older than 24 hours") is now false.
+    #[test]
+    fn a_file_touched_after_the_scan_no_longer_meets_its_rules_minimum_age() {
+        let h = harness();
+        let bin = StubRecycleBin::default();
+        let cache = h.work.join("Cache");
+        std::fs::create_dir_all(&cache).expect("cache dir");
+        let entry = write(&cache, "f_000002", b"cached page data");
+        backdate(&entry, 48);
+
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::empty())
+            .packs(vec![browser_pack(&h.work)])
+            .lock_probe(Arc::new(AlwaysUnlocked))
+            .process_probe(Arc::new(Switchable::default()))
+            .build();
+
+        let finding = cleaner_finding(&entry, 16, "browser-cache", "chrome-cache");
+        let rec = Recommendation::new(
+            vec![finding.id],
+            RiskBucket::Safe,
+            88,
+            Action::Quarantine,
+            "Cached page data Chrome will rebuild on demand.",
+            16,
+        )
+        .expect("recommendation");
+
+        // Something writes to it after the scan.
+        std::fs::write(&entry, b"freshly written").expect("rewrite");
+
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        match outcome_for(&report, &entry) {
+            ExecOutcome::Skipped { reason } => {
+                assert!(
+                    reason.contains("untouched for 24h"),
+                    "the skip must name the criterion: `{reason}`"
+                );
+            }
+            other => panic!("expected a skip, got {other:?}"),
+        }
+        assert!(entry.exists());
+    }
+
+    /// A recommendation naming a rule no loaded pack has cannot be re-checked at
+    /// all, and "cannot confirm" must never mean "proceed".
+    #[test]
+    fn a_recommendation_whose_rule_is_gone_is_skipped() {
+        let h = harness();
+        let brain = brain(); // no packs loaded
+        let bin = StubRecycleBin::default();
+        let victim = write(&h.work, "orphan.tmp", b"data");
+
+        let finding = cleaner_finding(&victim, 4, "browser-cache", "chrome-cache");
+        let rec = quarantine_rec(&finding);
+
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        match outcome_for(&report, &victim) {
+            ExecOutcome::Skipped { reason } => {
+                assert!(reason.contains("no longer loaded"), "got `{reason}`")
+            }
+            other => panic!("expected a skip, got {other:?}"),
+        }
+        assert!(victim.exists());
+    }
+
+    /// A justification the executor cannot re-derive must not silently become a
+    /// justification it approves of, and it must not become a batch-wide stop
+    /// either: the first three gates still stand. This pins the documented
+    /// limit so it is a decision rather than a gap somebody finds later.
+    #[test]
+    fn a_finding_that_recorded_no_justification_is_left_to_the_first_three_gates() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+        let plain = write(&h.work, "no-meta.tmp", b"data");
+        let finding = finding_at(&plain, 4); // `meta` is Null
+        let rec = quarantine_rec(&finding);
+
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        assert_eq!(report.succeeded(), 1);
+        assert!(!plain.exists());
+    }
+
+    /// One stale item must not take the rest of the batch with it — the same
+    /// guarantee the lock check has carried since phase 1.
+    #[test]
+    fn a_stale_justification_skips_one_item_and_never_the_batch() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+
+        let shared = vec![b'm'; 64 * 1024];
+        write(&h.work, "original.bin", &shared);
+        write(&h.work, "original - Copy.bin", &shared);
+        let bystander = write(&h.work, "unrelated.tmp", b"an ordinary file");
+
+        let (scan, mut recommendations) = duplicate_scan(&h.work, &brain);
+        let mut approved = approve_the_quarantines(&recommendations);
+        let mut findings = scan.findings.clone();
+
+        let bystander_finding = finding_at(&bystander, 16);
+        let bystander_rec = quarantine_rec(&bystander_finding);
+        approved.push(bystander_rec.id);
+        recommendations.push(bystander_rec);
+        findings.push(bystander_finding);
+
+        // Break only the duplicate's justification.
+        let duplicate_path = plan(&approved, &recommendations, &findings)
+            .iter()
+            .map(|unit| unit.finding.path.clone())
+            .find(|path| path != &bystander)
+            .expect("the duplicate unit");
+        std::fs::write(&duplicate_path, vec![b'q'; 64 * 1024]).expect("rewrite");
+
+        let units = plan(&approved, &recommendations, &findings);
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        assert!(matches!(
+            outcome_for(&report, &duplicate_path),
+            ExecOutcome::Skipped { .. }
+        ));
+        assert_eq!(
+            outcome_for(&report, &bystander),
+            &ExecOutcome::Succeeded,
+            "the healthy item must still move"
+        );
+        assert!(duplicate_path.exists());
+        assert!(!bystander.exists());
     }
 
     #[test]

@@ -230,6 +230,12 @@ export function duplicateMeta(meta: unknown): DuplicateFindingMeta | null {
     setId: candidate.setId,
     contentHash: candidate.contentHash,
     keeper: candidate.keeper,
+    copiesInSet:
+      typeof candidate.copiesInSet === "number"
+        ? candidate.copiesInSet
+        : undefined,
+    keeperPath:
+      typeof candidate.keeperPath === "string" ? candidate.keeperPath : undefined,
   };
 }
 
@@ -316,6 +322,16 @@ export interface DuplicateFindingMeta {
   setId: string;
   contentHash: string;
   keeper: boolean;
+  /** How many copies the set holds, including the keeper. */
+  copiesInSet?: number;
+  /**
+   * The copy this one was declared identical to.
+   *
+   * The executor re-reads it at execute time: if the keeper is gone by then,
+   * quarantining this copy would leave the user with none, so it is skipped and
+   * reported instead.
+   */
+  keeperPath?: string;
 }
 
 /** Extension classes the duplicates route filters by. */

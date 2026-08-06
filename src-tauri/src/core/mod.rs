@@ -4,6 +4,7 @@
 //! in `modules/` (CONVENTIONS.md).
 
 pub mod brain;
+pub mod content_hash;
 pub mod db;
 pub mod error;
 pub mod events;
