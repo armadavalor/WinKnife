@@ -43,8 +43,13 @@ pub fn is_dry_run(args: impl IntoIterator<Item = String>) -> bool {
     args.into_iter().any(|arg| arg == DRY_RUN_FLAG)
 }
 
-/// Where the rule packs live: next to the executable when installed, and in
-/// the repository when running from a dev build.
+/// Where the rule packs live.
+///
+/// An installed build reads them from the bundled resource directory —
+/// `tauri.conf.json` maps `../rules/` to `rules/`, and without that mapping an
+/// installed app would start with no rules at all. A dev build falls back to
+/// the repository copy, so editing `rules/*.json` and re-running picks the
+/// change up with no copy step.
 fn rules_dir(app_dir: Option<&Path>) -> std::path::PathBuf {
     if let Some(dir) = app_dir {
         let bundled = dir.join("rules");

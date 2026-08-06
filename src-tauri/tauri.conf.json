@@ -28,6 +28,9 @@
     "active": true,
     "targets": "all",
     "shortDescription": "Modular Windows utility: analyze first, never delete without consent.",
+    "resources": {
+      "../rules/": "rules/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

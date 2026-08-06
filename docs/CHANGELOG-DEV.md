@@ -166,6 +166,11 @@ cleaner → drawer UI.
   a bug; missing is a fact about this machine.
 - **Registered modules must have a route.** A test asserts
   `src/routes/<id>/+page.svelte` exists for every module in the registry.
+- **Rule packs ship as a bundled resource.** `tauri.conf.json` maps `../rules/`
+  to `rules/` in the resource directory; without it an installed build would
+  find no packs, because the dev fallback path (`CARGO_MANIFEST_DIR`) does not
+  exist on a user's machine. The fallback stays for dev builds, so editing a
+  pack and re-running needs no copy step.
 
 **Verification.** `cargo clippy --all-targets -- -D warnings` clean,
 `cargo fmt --check` clean, `cargo test` 225/225 green (218 unit + 7 integration),
