@@ -42,6 +42,25 @@ static REAL_OS_EFFECTS: AtomicBool = AtomicBool::new(false);
 /// `cfg(not(test))` keeps this crate's own unit tests out, so a test module
 /// cannot arm the process and hand the rest of the binary a live
 /// `SystemPower`. A test that tries does not compile.
+///
+/// # How that is actually enforced
+///
+/// By the `cfg(not(test))` on the line below, and nothing else — so it is worth
+/// being precise about what does and does not check it:
+///
+/// - **This crate's own unit tests**: the item does not exist in their build at
+///   all, so a call is a name-resolution error. `tests::a_test_process_is_never_armed`
+///   asserts the observable consequence — the flag is never set in a test run.
+/// - **Every other crate**, including the integration tests in `tests/` and any
+///   doctest: `pub(crate)` puts the item outside their namespace.
+/// - **CI**: `cargo clippy --all-targets -- -D warnings` compiles the test
+///   targets, so a `#[cfg(test)]` caller would fail the build.
+///
+/// This used to carry a ```compile_fail``` doctest as the proof. It sat inside
+/// `#[cfg(test)] mod tests`, and rustdoc does not collect doctests from
+/// `cfg(test)` code — `Doc-tests winknife_lib` reported `running 0 tests`, so
+/// the proof never ran. The claim was true and the evidence was theatre
+/// (security review L9).
 #[cfg(not(test))]
 pub(crate) fn arm_real_os_effects() {
     if REAL_OS_EFFECTS.swap(true, Ordering::SeqCst) {
@@ -72,18 +91,25 @@ mod tests {
     }
 
     /// M12: the arming function is not merely private, it is *absent* from a
-    /// test build. This is the compile-time half of that claim — if the
-    /// `cfg(not(test))` gate were removed, the commented-out line below would
-    /// compile, and this test's reason for existing would be gone.
+    /// test build.
     ///
-    /// ```compile_fail
-    /// crate::core::platform::guard::arm_real_os_effects();
-    /// ```
+    /// This used to claim a ```compile_fail``` doctest as its proof. The doctest
+    /// lived inside this `#[cfg(test)]` module, and rustdoc does not collect
+    /// doctests from `cfg(test)` code, so it never ran — `Doc-tests
+    /// winknife_lib` said `running 0 tests` on every green build (security
+    /// review L9). The guarantee is real; the evidence was not, so here is what
+    /// really holds it up:
+    ///
+    /// - This module compiles under `cfg(test)`, and `arm_real_os_effects` is
+    ///   defined under `cfg(not(test))`. A call from here would be a
+    ///   name-resolution error, which is a build failure and not a warning —
+    ///   and CI builds the test targets (`clippy --all-targets -- -D warnings`).
+    /// - `a_test_process_is_never_armed` asserts the consequence that actually
+    ///   matters at runtime, in this same binary.
     #[test]
     fn the_arming_function_does_not_exist_in_a_test_build() {
-        // `module_path!` proves we are in the test cfg; the absence of the
-        // symbol is proved by the fact that this file compiles at all while
-        // `arm_real_os_effects` is defined under `cfg(not(test))`.
+        // `module_path!` proves we really are in the test cfg — which is the
+        // cfg under which the symbol does not exist.
         assert!(module_path!().ends_with("guard::tests"));
     }
 }
