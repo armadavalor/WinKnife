@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::core::brain::Brain;
+use crate::core::brain::{self, Brain, GateVerdict};
 use crate::core::error::Result;
 use crate::core::platform::RecycleBin;
 use crate::core::quarantine::Quarantine;
@@ -203,9 +203,11 @@ fn apply_one(
 
     // 2. Protected paths are re-checked here, not trusted from analyze time,
     //    and against the *canonical* path rather than the text we were handed.
-    //    `C:\PROGRA~1\...`, `\\?\C:\Windows\...` and a junction pointing at
-    //    System32 all name a protected file while spelling it as something the
-    //    list has never seen (security review C1a).
+    //    `C:\PROGRA~1\...` and a junction pointing at System32 both name a
+    //    protected file while spelling it as something the list has never seen
+    //    (security review C1a). Spellings that cannot be canonicalised into a
+    //    plain local path at all — `\\localhost\C$\Windows\...`, `\??\C:\...`,
+    //    `\\?\GLOBALROOT\...` — are refused by the gate, not guessed at (C2).
     if let Some(reason) = env.brain.protection_reason(&unit.finding.path) {
         tracing::warn!(
             path = %unit.finding.path.display(),
@@ -213,8 +215,8 @@ fn apply_one(
         );
         return skipped(reason);
     }
-    match canonical_gate_path(&unit.finding.path) {
-        GatePath::Resolved(canonical) => {
+    match brain::gate_path(&unit.finding.path) {
+        GateVerdict::Local(canonical) => {
             if let Some(reason) = env.brain.protection_reason(&canonical) {
                 tracing::warn!(
                     path = %unit.finding.path.display(),
@@ -225,17 +227,14 @@ fn apply_one(
             }
         }
         // Nothing is there to protect, and `take` reports the miss properly.
-        GatePath::Missing => {}
-        GatePath::Unresolvable(err) => {
+        GateVerdict::Missing => {}
+        GateVerdict::Refused(why) => {
             tracing::warn!(
                 path = %unit.finding.path.display(),
-                error = %err,
-                "refused to act on a path that could not be resolved"
+                reason = why.as_str(),
+                "refused to act on a path the gate cannot judge"
             );
-            return skipped(format!(
-                "skipped: `{}` could not be resolved to a real location, so it is treated as protected ({err})",
-                unit.finding.path.display()
-            ));
+            return skipped(format!("skipped: {why}"));
         }
     }
 
@@ -309,31 +308,6 @@ fn empty_recycle_bin(
             },
             0,
         ),
-    }
-}
-
-/// What canonicalising a path before the protected-path gate produced.
-enum GatePath {
-    /// The real location on disk, with 8.3 aliases, junctions and the verbatim
-    /// prefix resolved away.
-    Resolved(std::path::PathBuf),
-    /// Nothing is there. Safe to continue: the move itself reports the miss.
-    Missing,
-    /// The path exists in some form but could not be resolved, so we cannot
-    /// prove it is not protected. Treated as protected.
-    Unresolvable(std::io::Error),
-}
-
-/// Resolve `path` to what Windows would actually open.
-///
-/// `dunce::canonicalize` rather than `std::fs::canonicalize`: the latter always
-/// hands back a `\\?\` verbatim path, which every other layer of this app —
-/// and every protected-path entry — spells without.
-fn canonical_gate_path(path: &std::path::Path) -> GatePath {
-    match dunce::canonicalize(path) {
-        Ok(canonical) => GatePath::Resolved(canonical),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => GatePath::Missing,
-        Err(err) => GatePath::Unresolvable(err),
     }
 }
 
@@ -769,6 +743,74 @@ mod tests {
             ExecOutcome::Skipped { .. }
         ));
         assert!(victim.exists(), "the file behind the link must survive");
+    }
+
+    /// Security review C2: the execute-time gate accepts only a plain local
+    /// drive-letter path. Every other spelling is skipped with a reason, and
+    /// the file it names is left exactly where it is.
+    ///
+    /// This is also the privilege-free companion to the two link/alias tests
+    /// above — it needs no reparse point and no 8.3 volume setting, so it
+    /// asserts on every machine (security review M11).
+    #[test]
+    fn a_spelling_the_gate_cannot_judge_is_never_acted_on() {
+        let h = harness();
+        // An empty list, so nothing here is caught by name — only by shape.
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+
+        for victim in [
+            "\\\\localhost\\C$\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\127.0.0.1\\C$\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\?\\UNC\\localhost\\c$\\Windows\\System32\\ntoskrnl.exe",
+            "\\??\\C:\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\.\\C:\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\Windows\\System32\\x",
+            "C:Windows\\System32\\x",
+            "\\Windows\\System32\\x",
+            "\\\\server\\share\\x",
+        ] {
+            let finding = finding_at(Path::new(victim), 4_096);
+            let rec = quarantine_rec(&finding);
+            let report = execute(
+                &[ExecUnit {
+                    recommendation: &rec,
+                    finding: &finding,
+                }],
+                &env(&h, &brain, &bin),
+                &ExecOptions::default(),
+                None,
+            )
+            .expect("execute");
+
+            match &report.items[0].outcome {
+                ExecOutcome::Skipped { reason } => assert!(
+                    reason.contains("plain local drive-letter path"),
+                    "`{victim}` must say why it was refused, got `{reason}`"
+                ),
+                other => panic!("`{victim}` must be skipped, got {other:?}"),
+            }
+            assert_eq!(report.reclaimed_bytes, 0, "`{victim}`");
+            assert_eq!(report.batch_id, None, "`{victim}` must move nothing");
+        }
+
+        // The control: an ordinary local file in the same batch still moves,
+        // so the gate is refusing a shape and not simply refusing everything.
+        let ordinary = write(&h.work, "ordinary.tmp", b"movable");
+        let finding = finding_at(&ordinary, 7);
+        let rec = quarantine_rec(&finding);
+        let report = execute(
+            &[ExecUnit {
+                recommendation: &rec,
+                finding: &finding,
+            }],
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+        assert_eq!(report.succeeded(), 1);
+        assert!(!ordinary.exists());
     }
 
     /// The 8.3 alias of `path`, or `None` when the volume does not mint one.

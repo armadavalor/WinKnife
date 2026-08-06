@@ -535,16 +535,28 @@ fn is_inside(profile: &Path, path: &Path) -> bool {
 /// Why a pattern is refused whatever else it says, or `None` when its shape is
 /// fine.
 ///
-/// All three of these are ways to name a place while spelling it as somewhere
+/// Every one of these is a way to name a place while spelling it as somewhere
 /// else, which is exactly what the protected-path list cannot see through
 /// without touching the disk. A pack has no legitimate need for any of them:
-/// every location a rule wants is reachable by its ordinary long name.
+/// every location a rule wants is reachable by its ordinary long name on a
+/// local drive.
 fn unsafe_pattern_shape(pattern: &str) -> Option<String> {
     let normalised = pattern.replace('/', "\\");
 
-    if normalised.starts_with("\\\\?\\") || normalised.starts_with("\\\\.\\") {
+    // Anything starting with `\\` at all: the verbatim and device prefixes, and
+    // UNC. `\\localhost\C$\Windows\**` is `C:\Windows\**` spelled as a network
+    // share, it resolves from a non-elevated process, and both the lexical list
+    // and its canonical form `\\?\UNC\localhost\c$\...` used to miss it
+    // (security review C2c). Phase 1 rules are local-drive only.
+    if normalised.starts_with("\\\\") {
         return Some(format!(
-            "`{pattern}` uses a `\\\\?\\` or `\\\\.\\` prefix; write the plain path instead"
+            "`{pattern}` starts with `\\\\` (a UNC share, or a `\\\\?\\` or `\\\\.\\` prefix); \
+             write the plain local path instead"
+        ));
+    }
+    if normalised.starts_with("\\??\\") {
+        return Some(format!(
+            "`{pattern}` uses the `\\??\\` NT object namespace; write the plain local path instead"
         ));
     }
 
@@ -748,9 +760,12 @@ mod tests {
                 "rules[0].requires_admin",
             ),
             (
-                "UNC path without requires_admin",
+                // Since C2 a UNC pattern never gets as far as the
+                // `requires_admin` question: the shape check refuses it first,
+                // and `requires_admin: true` would not have saved it.
+                "UNC path, refused by shape before requires_admin is asked",
                 VALID.replace(r#"%TEMP%\\**"#, r#"\\\\server\\share\\**"#),
-                "rules[0].requires_admin",
+                "rules[0].paths[0]",
             ),
         ];
 
@@ -784,6 +799,24 @@ mod tests {
             ("bare parent traversal", r#"%TEMP%\\..\\**"#),
             ("verbatim prefix", r#"\\\\?\\C:\\Windows\\**"#),
             ("device prefix", r#"\\\\.\\C:\\Windows\\**"#),
+            // Security review C2c. `\\localhost\C$\Windows` *is* `C:\Windows`,
+            // it resolves from a non-elevated process, and neither the lexical
+            // list nor its canonical form `\\?\UNC\localhost\c$\...` saw it.
+            (
+                "administrative share by host name",
+                r#"\\\\localhost\\C$\\Windows\\**"#,
+            ),
+            (
+                "administrative share by loopback address",
+                r#"\\\\127.0.0.1\\C$\\Windows\\**"#,
+            ),
+            ("verbatim UNC", r#"\\\\?\\UNC\\localhost\\c$\\Windows\\**"#),
+            (
+                "device namespace by volume",
+                r#"\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\Windows\\**"#,
+            ),
+            ("an ordinary remote share", r#"\\\\server\\share\\**"#),
+            ("NT object namespace", r#"\\??\\C:\\Windows\\**"#),
             ("8.3 short name", r#"%TEMP%\\PROGRA~1\\**"#),
             (
                 "8.3 short name with an extension",

@@ -21,7 +21,9 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::core::brain::{Brain, CompiledRule, ProtectedPaths, RuleAction, RulePack};
+use crate::core::brain::{
+    self, Brain, CompiledRule, GateVerdict, ProtectedPaths, RuleAction, RulePack,
+};
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
 use crate::core::platform::RecycleBin;
 use crate::core::scanner::{self, CancellationToken, WalkEntry};
@@ -212,8 +214,11 @@ fn resolve_root(root: &Path, protected: &ProtectedPaths) -> RootVerdict {
         ));
     }
 
-    match dunce::canonicalize(root) {
-        Ok(canonical) => {
+    // The one chokepoint. Every shape that is not a plain local drive-letter
+    // path is refused here rather than walked on the strength of a lexical list
+    // that cannot compare it with anything (security review C2b).
+    match brain::gate_path(root) {
+        GateVerdict::Local(canonical) => {
             // A junction, a reparse point or an 8.3 alias can aim a harmless-
             // looking root straight at `C:\Windows`. Only the resolved form
             // answers that question.
@@ -228,13 +233,10 @@ fn resolve_root(root: &Path, protected: &ProtectedPaths) -> RootVerdict {
         }
         // A rule pointing at a folder this machine does not have is not an
         // error; the walk simply finds nothing.
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            RootVerdict::Walk(root.to_string_lossy().to_lowercase())
+        GateVerdict::Missing => RootVerdict::Walk(root.to_string_lossy().to_lowercase()),
+        GateVerdict::Refused(why) => {
+            RootVerdict::Refused(format!("it was not walked because {why}"))
         }
-        Err(err) => RootVerdict::Refused(format!(
-            "`{}` was not walked because it could not be resolved ({err})",
-            root.display()
-        )),
     }
 }
 
@@ -658,6 +660,21 @@ mod tests {
         for pack in rules::load_dir(&repo_rules_dir(), &env).expect("load") {
             for rule in &pack.rules {
                 for root in rule.roots() {
+                    // The recycle bin is a shell namespace object, not a
+                    // directory: `scan` handles that pack through the shell API
+                    // and never reaches `plan_walks`, so it has no walk root to
+                    // clear. Since C2 the gate reports it as unjudgeable, which
+                    // is the correct answer for something that is not a
+                    // filesystem path — and it must still never be walked.
+                    if root.to_string_lossy().to_lowercase().starts_with("shell:") {
+                        assert!(
+                            matches!(brain::gate_path(root), GateVerdict::Refused(_)),
+                            "{}/{}: a shell-namespace root must be refused, not walked",
+                            pack.id(),
+                            rule.spec.id
+                        );
+                        continue;
+                    }
                     assert!(
                         !protected.is_protected(root),
                         "{}/{} walks the protected path {}",
@@ -1012,6 +1029,140 @@ mod tests {
             }
             RootVerdict::Walk(_) => panic!("a root resolving into a protected tree must be refused"),
         }
+    }
+
+    /// Security review C2, end to end: a hostile pack that points at
+    /// `C:\Windows` through the administrative share must not get anywhere
+    /// near a Safe/Quarantine verdict for a file under it.
+    ///
+    /// Every layer is asserted separately, because the last round fixed one
+    /// layer and shipped with the others still open: the pack must not parse,
+    /// the root must not be walked, and the verdict must be red even if a
+    /// finding is planted by hand as though it had been.
+    #[test]
+    fn a_hostile_unc_pack_cannot_reach_a_file_under_windows() {
+        const HOSTILE: &str = r#"{
+            "id": "hostile",
+            "name": "Hostile",
+            "version": 1,
+            "module": "cleaner",
+            "enabled_by_default": true,
+            "description": "Points at C:\\Windows through the administrative share.",
+            "rules": [
+                {
+                    "id": "unc-windows",
+                    "paths": ["\\\\localhost\\C$\\Windows\\**"],
+                    "match": { "min_age_hours": 1 },
+                    "score": { "base": 95, "max_bucket": "safe" },
+                    "action": "quarantine",
+                    "reason": "Hostile rule that claims C:\\Windows is safe.",
+                    "requires_admin": true
+                }
+            ]
+        }"#;
+
+        // Layer 1: the parser refuses the pattern outright.
+        let err = rules::parse_pack("hostile", HOSTILE)
+            .expect_err("a `\\\\`-prefixed pattern must not parse");
+        assert!(
+            err.to_string().contains("UNC"),
+            "the refusal must say why, got `{err}`"
+        );
+
+        // Layer 2: even if it had parsed, the walk-root gate refuses the root.
+        let env = MapEnv::new().with("USERPROFILE", "C:\\Users\\dev");
+        let protected = ProtectedPaths::from_env(
+            &env,
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\Cleanify"),
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\Cleanify\\quarantine"),
+        );
+        for root in [
+            "\\\\localhost\\C$\\Windows",
+            "\\\\127.0.0.1\\C$\\Windows",
+            "\\\\?\\UNC\\localhost\\c$\\Windows",
+            "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\Windows",
+            "\\??\\C:\\Windows",
+            "C:Windows",
+            "\\Windows",
+            "\\\\server\\share",
+        ] {
+            match resolve_root(Path::new(root), &protected) {
+                RootVerdict::Refused(why) => assert!(
+                    why.len() > 20,
+                    "`{root}` must be refused with an explanation, got `{why}`"
+                ),
+                RootVerdict::Walk(identity) => {
+                    panic!("`{root}` must never be walked (identity `{identity}`)")
+                }
+            }
+        }
+
+        // Layer 3: a finding planted at the UNC spelling, with the hostile
+        // rule's own metadata, still lands red with no action and no savings.
+        let spec = serde_json::from_str::<rules::RulePackSpec>(HOSTILE).expect("shape");
+        let pack = rules::compile_spec(spec, &MapEnv::new()).expect("compile");
+        let brain = Brain::builder()
+            .protected_paths(protected)
+            .packs(vec![pack])
+            .lock_probe(Arc::new(AlwaysUnlocked))
+            .build();
+
+        for victim in [
+            "\\\\localhost\\C$\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\127.0.0.1\\C$\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\?\\UNC\\localhost\\c$\\Windows\\System32\\ntoskrnl.exe",
+            "\\??\\C:\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\.\\C:\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\Windows\\System32\\x",
+            "C:Windows\\System32\\x",
+            "\\Windows\\System32\\x",
+            "C:\\Windows\\System32\\ntoskrnl.exe",
+        ] {
+            let mut finding = Finding::new("cleaner", victim, FindingKind::File);
+            finding.size_bytes = 4_096;
+            finding.meta = serde_json::to_value(FindingMeta {
+                pack_id: "hostile".to_owned(),
+                pack_name: "Hostile".to_owned(),
+                rule_id: "unc-windows".to_owned(),
+            })
+            .expect("meta");
+
+            let recommendations = analyze(&[finding], &brain);
+            assert_eq!(recommendations.len(), 1, "`{victim}`");
+            let rec = &recommendations[0];
+            assert_eq!(rec.risk, RiskBucket::DoNotDelete, "`{victim}` must be red");
+            assert_eq!(rec.action, Action::InfoOnly, "`{victim}` must offer nothing");
+            assert_eq!(rec.savings_bytes, 0, "`{victim}` must promise nothing");
+        }
+    }
+
+    /// The privilege-free companion to the symlink test below: the walk-root
+    /// gate refuses a root it cannot judge, on every machine, with no reparse
+    /// point required (security review M11).
+    #[test]
+    fn a_walk_root_the_gate_cannot_judge_is_refused_without_needing_a_link() {
+        let protected = ProtectedPaths::empty();
+        for root in [
+            "\\\\localhost\\C$\\Windows\\Temp",
+            "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\Temp",
+            "\\??\\C:\\Temp",
+            "C:Temp",
+            "\\Temp",
+        ] {
+            assert!(
+                matches!(
+                    resolve_root(Path::new(root), &protected),
+                    RootVerdict::Refused(_)
+                ),
+                "`{root}` must be refused even with an empty protected list"
+            );
+        }
+        // And the shape the gate exists for still walks.
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(matches!(
+            resolve_root(dir.path(), &protected),
+            RootVerdict::Walk(_)
+        ));
     }
 
     /// Security review L5: `%TEMP%` and `%LOCALAPPDATA%\Temp` are the same

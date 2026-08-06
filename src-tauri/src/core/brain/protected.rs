@@ -16,24 +16,37 @@
 //!
 //! # Spelling a protected path differently is not a way past it
 //!
-//! Matching used to be a plain component comparison against the text it was
-//! handed, and Win32 accepts several spellings of the same file that such a
-//! comparison reads as different places (security review C1):
+//! Win32 accepts many spellings of the same file, and a component comparison
+//! against the text it was handed reads them as different places (security
+//! review C1, C2):
 //!
 //! - `\\?\C:\Windows` and `\\.\C:\Windows` — the verbatim and device prefixes,
 //!   which the object manager strips before it opens anything.
+//! - `\??\C:\Windows` — the NT object namespace, same file again.
+//! - `\\localhost\C$\Windows`, `\\127.0.0.1\C$\Windows` — the administrative
+//!   share, which resolves from an ordinary non-elevated process and lands on
+//!   the local disk. Canonicalising it produces `\\?\UNC\localhost\c$\...`,
+//!   which is a *third* spelling.
+//! - `\\?\GLOBALROOT\Device\HarddiskVolume3\Windows` — the volume by device
+//!   name rather than by drive letter.
+//! - `C:Windows\System32` — drive-relative, resolved against a per-drive
+//!   current directory this process does not control.
 //! - `C:\Windows.` and `C:\Windows ` — Win32 discards trailing dots and spaces
 //!   in a path component, so both open `C:\Windows`.
 //! - `%TEMP%\..\..\..\Windows` — `..` climbing back out of the folder a rule
 //!   was pointed at.
 //! - `C:\PROGRA~1` — the 8.3 alias of `C:\Program Files`.
 //!
-//! The first three are handled here, in [`components`]. The 8.3 alias cannot be
-//! expanded without asking the filesystem, so it is caught one layer up: the
-//! executor canonicalises through `dunce` before it consults this list, and the
-//! scanner canonicalises every walk root before it walks it. A path this list
-//! cannot judge — anything still carrying a `..` — is reported as protected
-//! rather than guessed at.
+//! **Two rounds of rejecting bad spellings by name both shipped a bypass, so
+//! that approach is closed.** The gate is now an allow-list: [`gate_path`] is
+//! the single chokepoint every caller goes through, and it accepts exactly one
+//! shape — a plain local drive-letter path, `X:\...`, canonicalised. Every
+//! other shape is *refused as unjudgeable*, which is not the same as allowed:
+//! the caller skips the item and reports why.
+//!
+//! This list stays, as defence in depth for the cases [`gate_path`] hands back
+//! (`Local` and `Missing`) and for callers that only have text — but it is no
+//! longer the only thing between a rule pack and `C:\Windows`.
 
 use std::path::{Path, PathBuf};
 
@@ -42,6 +55,14 @@ use crate::core::platform::EnvResolver;
 /// Why a path that climbs with `..` is refused outright.
 const TRAVERSAL_REASON: &str =
     "this path climbs out of its own folder with `..`, which can land anywhere, so it is never treated as cleanable";
+
+/// Why a path that is not a plain local drive-letter path is refused outright.
+///
+/// One constant rather than a per-shape sentence because [`ProtectedPaths::reason_for`]
+/// hands back a borrowed `&str`; [`gate_path`], which owns its message, says
+/// exactly which shape was seen.
+const UNJUDGEABLE_REASON: &str =
+    "not a plain local drive-letter path — a UNC share, a device or NT-namespace path, or a relative one — so it cannot be compared with the protected list and is never treated as cleanable";
 
 /// How far a protected entry reaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +247,12 @@ impl ProtectedPaths {
         if has_traversal(path) {
             return Some(TRAVERSAL_REASON);
         }
+        // Anything that is not anchored on a drive letter cannot be compared
+        // with entries that all are, and "no entry matched" used to be reported
+        // as "not protected" (security review C2e). Unjudgeable is refused.
+        if plain_local_shape(path).is_err() {
+            return Some(UNJUDGEABLE_REASON);
+        }
 
         let candidate_components: Vec<_> = split(path);
 
@@ -263,6 +290,140 @@ impl ProtectedPaths {
     pub fn is_protected(&self, path: &Path) -> bool {
         self.reason_for(path).is_some()
     }
+}
+
+/// What [`gate_path`] concluded about a path.
+///
+/// There is no "allowed" variant that skips the protected-path list: `Local`
+/// hands back the canonical form precisely so the caller matches *that* against
+/// the list rather than the text it was given.
+#[derive(Debug)]
+pub enum GateVerdict {
+    /// A plain local drive-letter path that exists, canonicalised — 8.3
+    /// aliases, junctions, symlinks and the verbatim prefix already resolved
+    /// away. The caller must still check it against [`ProtectedPaths`].
+    Local(PathBuf),
+    /// The shape is judgeable, but nothing is there. Safe to carry on: a walk
+    /// finds nothing and a move reports the miss.
+    Missing,
+    /// Not judgeable, and therefore not usable. The caller skips the item and
+    /// reports this clause, which is phrased to follow the word "because".
+    Refused(String),
+}
+
+/// The one gate every path crosses before anything is walked or moved.
+///
+/// It answers a single question — "is this a plain local drive-letter path, and
+/// where does it really point?" — and refuses everything else. Both the walk
+/// root check (`modules::cleaner::resolve_root`) and the execute-time check
+/// (`core::executor`) go through here; neither may fall back to the raw string.
+///
+/// Why an allow-list: `\\localhost\C$\Windows\System32\ntoskrnl.exe` is
+/// `C:\Windows\System32\ntoskrnl.exe`, resolves from a non-elevated process,
+/// and canonicalises to `\\?\UNC\localhost\c$\...` — a spelling neither the
+/// lexical list nor its canonicalising callers recognised. Rejecting that
+/// spelling by name would only invite the next one (security review C2).
+pub fn gate_path(path: &Path) -> GateVerdict {
+    if let Err(why) = plain_local_shape(path) {
+        return GateVerdict::Refused(format!(
+            "`{}` is not a plain local drive-letter path ({why}), so it cannot be checked \
+             against the protected list and is treated as protected",
+            path.display()
+        ));
+    }
+
+    match dunce::canonicalize(path) {
+        Ok(canonical) => {
+            // Canonicalising is what turns a junction, a symlink or an 8.3
+            // alias into the place it really opens — and a local path can
+            // resolve *onto* a UNC share, so the shape has to be asked of the
+            // answer as well as of the question.
+            if let Err(why) = plain_local_shape(&canonical) {
+                return GateVerdict::Refused(format!(
+                    "`{}` resolves to `{}`, which is not a plain local drive-letter path \
+                     ({why}), so it is treated as protected",
+                    path.display(),
+                    canonical.display()
+                ));
+            }
+            GateVerdict::Local(canonical)
+        }
+        // Nothing is there to protect. The shape was already checked above, so
+        // this is a real "not found", not an unjudgeable spelling.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => GateVerdict::Missing,
+        Err(err) => GateVerdict::Refused(format!(
+            "`{}` could not be resolved to a real location ({err}), so it is treated as protected",
+            path.display()
+        )),
+    }
+}
+
+/// Whether `path` is a plain local drive-letter path, and which shape it is
+/// when it is not.
+///
+/// The entire allow-list lives here. Nothing is matched by name: a path is
+/// judgeable only if, after an optional `\\?\` verbatim prefix, its first
+/// component is `X:` and a separator follows. UNC (`\\server\share`,
+/// `\\?\UNC\...`), the device namespace (`\\.\`, `\\?\GLOBALROOT\...`), the NT
+/// object namespace (`\??\`), drive-relative (`C:System32`), rooted without a
+/// drive (`\Windows`), relative, empty and non-Unicode paths all fail, because
+/// none of them can be compared with a list of `X:\...` entries.
+///
+/// The returned clause is phrased to follow "because".
+fn plain_local_shape(path: &Path) -> std::result::Result<(), String> {
+    let Some(text) = path.to_str() else {
+        return Err("it is not valid Unicode, so it has no comparable spelling".to_owned());
+    };
+    if text.trim().is_empty() {
+        return Err("it is empty".to_owned());
+    }
+    let text = text.replace('/', "\\");
+
+    if text.split('\\').any(|part| part == "..") {
+        return Err("it climbs with `..`, which can land anywhere".to_owned());
+    }
+    if text.starts_with("\\??\\") {
+        return Err("it uses the `\\??\\` NT object namespace".to_owned());
+    }
+    if text.starts_with("\\\\.\\") {
+        return Err("it uses the `\\\\.\\` device namespace".to_owned());
+    }
+
+    let rest = match text.strip_prefix("\\\\?\\") {
+        // `\\?\UNC\...` and `\\?\GLOBALROOT\...` come back with a first
+        // component that is not a drive, and fall out of the check below.
+        Some(rest) => rest,
+        None if text.starts_with("\\\\") => {
+            return Err(
+                "it is a UNC network path, and `\\\\host\\C$` reaches the local disk under a \
+                 name the protected list cannot see"
+                    .to_owned(),
+            )
+        }
+        None => text.as_str(),
+    };
+
+    if rest.starts_with('\\') {
+        return Err(
+            "it is rooted but names no drive, so which volume it means is ambiguous".to_owned(),
+        );
+    }
+
+    let bytes = rest.as_bytes();
+    let first = rest.split('\\').next().unwrap_or_default();
+    if bytes.len() < 2 || !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' {
+        return Err(format!(
+            "its first component `{first}` is not a drive letter such as `C:`"
+        ));
+    }
+    if bytes.len() == 2 || bytes[2] != b'\\' {
+        return Err(
+            "it is drive-relative (`C:name`), which resolves against a per-drive current \
+             directory this process does not control"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 /// The canonical text of a path for comparison purposes: lower-cased,
@@ -321,8 +482,12 @@ fn split(path: &Path) -> Vec<String> {
                 }
             }
             _ => {
-                // Win32 discards trailing dots and spaces when it resolves a
-                // name, so `Windows.` and `Windows ` both open `Windows`.
+                // Win32 discards a trailing dot when it resolves a name, so
+                // `C:\Windows.\System32\ntoskrnl.exe` opens the real file.
+                // A trailing space is *not* discarded — `C:\Windows \System32`
+                // is NotFound on a real machine — but trimming it too is a
+                // harmless over-refusal, and it costs nothing to be wrong in
+                // the direction that protects more (security review L6).
                 let trimmed = part.trim_end_matches(['.', ' ']).to_lowercase();
                 if trimmed.is_empty() {
                     continue;
@@ -337,10 +502,15 @@ fn split(path: &Path) -> Vec<String> {
     parts
 }
 
-/// Remove the `\\?\` verbatim or `\\.\` device prefix, putting a UNC path back
-/// into its ordinary `\\server\share` spelling.
+/// Remove the `\\?\` verbatim, `\\.\` device or `\??\` NT-object prefix,
+/// putting a UNC path back into its ordinary `\\server\share` spelling.
+///
+/// All three name the same file the plain spelling does. `gate_path` refuses
+/// the device and NT-namespace forms outright; stripping them here keeps the
+/// lexical list useful as the second layer for a caller that only has text
+/// (security review C2e).
 fn strip_windows_prefix(raw: &str) -> String {
-    for prefix in ["\\\\?\\", "\\\\.\\"] {
+    for prefix in ["\\\\?\\", "\\\\.\\", "\\??\\"] {
         if let Some(rest) = raw.strip_prefix(prefix) {
             let unc_marker = "unc\\";
             if rest.len() >= unc_marker.len()
@@ -587,11 +757,142 @@ mod tests {
         );
     }
 
+    /// Security review C2: the gate is an allow-list. Every spelling that is
+    /// not a plain local drive-letter path is refused as unjudgeable, whatever
+    /// it points at — and refused is not allowed.
+    #[test]
+    fn the_gate_accepts_only_plain_local_drive_letter_paths() {
+        let cases: &[(&str, bool, &str)] = &[
+            (
+                "\\\\localhost\\C$\\Windows\\System32\\ntoskrnl.exe",
+                false,
+                "the administrative share reaches the local disk from a non-elevated process",
+            ),
+            (
+                "\\\\127.0.0.1\\C$\\Windows\\System32\\ntoskrnl.exe",
+                false,
+                "the same thing by loopback address",
+            ),
+            (
+                "\\\\?\\UNC\\localhost\\c$\\Windows\\System32\\ntoskrnl.exe",
+                false,
+                "and the canonical form the other two resolve to",
+            ),
+            (
+                "\\??\\C:\\Windows\\System32\\x",
+                false,
+                "the NT object namespace",
+            ),
+            (
+                "\\\\.\\C:\\Windows\\System32\\x",
+                false,
+                "the device namespace",
+            ),
+            (
+                "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\Windows\\System32\\x",
+                false,
+                "the volume by device name rather than drive letter",
+            ),
+            (
+                "C:Windows\\System32\\x",
+                false,
+                "drive-relative: resolved against a current directory we do not control",
+            ),
+            (
+                "\\Windows\\System32\\x",
+                false,
+                "rooted, but on which volume?",
+            ),
+            (
+                "\\\\server\\share\\x",
+                false,
+                "a genuinely remote share is refused too, not crashed on",
+            ),
+            (
+                "relative\\path\\x",
+                false,
+                "relative to nothing in particular",
+            ),
+            ("", false, "empty"),
+            ("C:", false, "a bare drive is the drive's current directory"),
+            ("C:\\Temp\\..\\Windows", false, "`..` can land anywhere"),
+            (
+                "C:\\Windows\\System32\\x",
+                true,
+                "the shape the gate exists for",
+            ),
+            ("c:\\temp\\a.tmp", true, "lower case is the same shape"),
+            ("C:/Temp/a.tmp", true, "forward slashes are the same shape"),
+            ("C:\\", true, "a drive root is a plain local path"),
+            (
+                "\\\\?\\C:\\Windows\\System32\\x",
+                true,
+                "the verbatim prefix of a plain local path is still a plain local path",
+            ),
+        ];
+
+        for (path, accepted, why) in cases {
+            let shape = plain_local_shape(Path::new(path));
+            assert_eq!(shape.is_ok(), *accepted, "`{path}` — {why} (got {shape:?})");
+
+            // And the verdict the callers actually see. Nothing here exists on
+            // disk except `C:\` and the two real system paths, so an accepted
+            // shape lands on `Local` or `Missing`; a refused one never does.
+            match gate_path(Path::new(path)) {
+                GateVerdict::Refused(reason) => {
+                    assert!(!*accepted, "`{path}` — {why} — was refused: {reason}");
+                    assert!(
+                        reason.len() > 20 && reason.contains(&path.to_string()) || path.is_empty(),
+                        "a refusal must name the path and explain itself, got `{reason}`"
+                    );
+                }
+                other => assert!(*accepted, "`{path}` — {why} — got {other:?}"),
+            }
+        }
+    }
+
+    /// The other half of C2: a refused spelling must also be *protected* as far
+    /// as the list is concerned, so a caller that only consults the list still
+    /// gets the safe answer (defence in depth, C2d).
+    #[test]
+    fn an_unjudgeable_spelling_is_reported_as_protected_by_the_list_too() {
+        let protected = windows_like();
+        for path in [
+            "\\\\localhost\\C$\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\127.0.0.1\\C$\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\?\\UNC\\localhost\\c$\\Windows\\System32\\ntoskrnl.exe",
+            "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\Windows\\System32\\x",
+            "C:Windows\\System32\\x",
+            "\\Windows\\System32\\x",
+            "\\\\server\\share\\x",
+        ] {
+            let reason = protected
+                .reason_for(Path::new(path))
+                .unwrap_or_else(|| panic!("`{path}` must not be reported as unprotected"));
+            assert!(reason.len() > 10, "`{path}` must explain itself");
+        }
+
+        // `\??\C:\Windows` and `\\.\C:\Windows` are stripped by the lexical
+        // normaliser, so the list catches them by name as well as by shape.
+        for path in [
+            "\\??\\C:\\Windows\\System32\\x",
+            "\\\\.\\C:\\Windows\\System32\\x",
+        ] {
+            assert_eq!(
+                split(Path::new(path))[0],
+                "c:",
+                "`{path}` must normalise onto the drive it really opens"
+            );
+            assert!(protected.is_protected(Path::new(path)));
+        }
+    }
+
     #[test]
     fn a_unc_path_never_looks_like_a_local_one() {
         let protected = windows_like();
-        // `\\server\Windows\System32` is somebody else's machine, not ours.
-        assert!(!protected.is_protected(Path::new("\\\\server\\Windows\\System32")));
+        // Somebody else's machine — and, since C2, still refused rather than
+        // waved through: this list cannot judge a share at all.
+        assert!(protected.is_protected(Path::new("\\\\server\\Windows\\System32")));
         assert_eq!(
             split(Path::new("\\\\?\\UNC\\server\\share\\x")),
             vec!["\\\\server\\share", "x"],

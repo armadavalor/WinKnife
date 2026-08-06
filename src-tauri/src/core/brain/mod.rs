@@ -26,7 +26,7 @@ use std::sync::Arc;
 use crate::core::platform::{AlwaysUnlocked, LockProbe, LockState};
 use crate::core::types::{Action, Finding, FindingKind, RiskBucket};
 
-pub use protected::{ProtectedEntry, ProtectedPaths, Scope};
+pub use protected::{gate_path, GateVerdict, ProtectedEntry, ProtectedPaths, Scope};
 pub use rules::{CompiledRule, MaxBucket, RuleAction, RulePack, RuleSpec};
 
 /// Confidence reported for a hard-gate decision: no rule, no heuristic, no
