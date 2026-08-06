@@ -173,3 +173,153 @@ export interface QuarantineChanged {
   itemCount: number;
   totalBytes: number;
 }
+
+/** Payload of `shutdown:tick`. */
+export interface ShutdownTick {
+  remainingSecs: number;
+}
+
+/* -------------------------------------------------------------------------
+ * core/state.rs
+ * ---------------------------------------------------------------------- */
+
+/** Everything one scan produced. */
+export interface ScanResult {
+  scanId: string;
+  module: string;
+  findings: Finding[];
+  recommendations: Recommendation[];
+  /** Rules that could not run, as `pack/rule: %VARIABLE%`. */
+  skippedRules: string[];
+}
+
+/* -------------------------------------------------------------------------
+ * modules/cleaner.rs
+ * ---------------------------------------------------------------------- */
+
+/** Metadata every cleaner finding carries, so the UI can group by pack. */
+export interface FindingMeta {
+  packId: string;
+  packName: string;
+  ruleId: string;
+  /** Recycle-bin findings only. */
+  itemCount?: number;
+}
+
+/** Totals for the header line after a scan. */
+export interface CleanerSummary {
+  safeBytes: number;
+  reviewBytes: number;
+  blockedItems: number;
+}
+
+/** Narrow a finding's `meta` to {@link FindingMeta}. */
+export function findingMeta(meta: unknown): FindingMeta | null {
+  if (typeof meta !== "object" || meta === null) {
+    return null;
+  }
+  const candidate = meta as Record<string, unknown>;
+  if (
+    typeof candidate.packId !== "string" ||
+    typeof candidate.packName !== "string" ||
+    typeof candidate.ruleId !== "string"
+  ) {
+    return null;
+  }
+  return {
+    packId: candidate.packId,
+    packName: candidate.packName,
+    ruleId: candidate.ruleId,
+    itemCount:
+      typeof candidate.itemCount === "number" ? candidate.itemCount : undefined,
+  };
+}
+
+/* -------------------------------------------------------------------------
+ * core/quarantine.rs
+ * ---------------------------------------------------------------------- */
+
+/** One row of the quarantine ledger. */
+export interface QuarantineItem {
+  id: string;
+  batchId: string;
+  originalPath: string;
+  quarantinePath: string;
+  sizeBytes: number;
+  /** RFC 3339 UTC. */
+  quarantinedAt: string;
+  purgeAfter: string;
+  restoredAt: string | null;
+}
+
+/** A batch as the drawer shows it. */
+export interface QuarantineBatch {
+  batchId: string;
+  itemCount: number;
+  sizeBytes: number;
+  quarantinedAt: string;
+  purgeAfter: string;
+}
+
+/** Totals across everything still held. */
+export interface QuarantineStats {
+  itemCount: number;
+  totalBytes: number;
+}
+
+/** What restoring one item did. */
+export interface RestoreOutcome {
+  itemId: string;
+  restoredTo: string;
+  /** True when the original path was occupied and a suffix was added. */
+  renamed: boolean;
+}
+
+/** One item that could not be restored. */
+export interface RestoreFailure {
+  itemId: string;
+  error: string;
+}
+
+/** What restoring a batch did. */
+export interface RestoreReport {
+  restored: RestoreOutcome[];
+  failed: RestoreFailure[];
+}
+
+/** What a purge removed. */
+export interface PurgeReport {
+  purgedItems: number;
+  freedBytes: number;
+  /** Ids whose files could not be removed; the next purge retries them. */
+  failedItems: string[];
+}
+
+/* -------------------------------------------------------------------------
+ * modules/shutdown_timer.rs
+ * ---------------------------------------------------------------------- */
+
+/** What happens when a timer reaches zero. */
+export type PowerAction = "shutdown" | "restart" | "sleep";
+
+/** How the user expressed the target. */
+export type ScheduleMode =
+  | { mode: "in"; minutes: number }
+  | { mode: "at"; hour: number; minute: number };
+
+/** The armed timer. */
+export interface ActiveTimerView {
+  id: string;
+  action: PowerAction;
+  /** RFC 3339 UTC. */
+  target: string;
+  scheduledAt: string;
+  remainingSecs: number;
+}
+
+/** Current timer state. */
+export interface TimerStatus {
+  active: ActiveTimerView | null;
+  /** True when this build logs power actions instead of performing them. */
+  dryRun: boolean;
+}

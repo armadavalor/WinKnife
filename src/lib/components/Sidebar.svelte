@@ -15,9 +15,18 @@
     modules: ModuleManifest[];
     /** Whether the registry is still being fetched. */
     loading?: boolean;
+    /** Items currently held in quarantine, shown as a badge. */
+    quarantineCount?: number;
+    /** Called when the quarantine entry is clicked. */
+    onopenquarantine?: () => void;
   }
 
-  let { modules, loading = false }: Props = $props();
+  let {
+    modules,
+    loading = false,
+    quarantineCount = 0,
+    onopenquarantine,
+  }: Props = $props();
 
   function isActive(href: string): boolean {
     return page.url.pathname === href;
@@ -85,7 +94,25 @@
     {/if}
   </div>
 
-  <p class="mt-auto px-3 text-[0.7rem] text-ink-faint">
-    {t("status.phase")}
-  </p>
+  <div class="mt-auto flex flex-col gap-3">
+    <button
+      type="button"
+      class="{linkClass} w-full text-ink-muted hover:bg-surface-2 hover:text-ink"
+      onclick={() => onopenquarantine?.()}
+    >
+      <ModuleIcon name="shield" />
+      <span class="flex-1 text-left">{t("quarantine.open")}</span>
+      {#if quarantineCount > 0}
+        <span
+          class="rounded-md bg-surface-3 px-1.5 py-0.5 text-[0.7rem] tabular-nums text-ink-muted"
+        >
+          {quarantineCount}
+        </span>
+      {/if}
+    </button>
+
+    <p class="px-3 text-[0.7rem] text-ink-faint">
+      {t("status.phase")}
+    </p>
+  </div>
 </nav>

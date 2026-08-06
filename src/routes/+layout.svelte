@@ -1,20 +1,32 @@
 <!--
-  App shell: navigation rail on the left, routed content on the right.
+  App shell: navigation rail on the left, routed content on the right, and the
+  quarantine drawer overlaid on top of both.
 
   The registry is fetched once here so the sidebar and every route share one
-  copy of it.
+  copy of it. The drawer subscribes to `quarantine:changed` from the shell, so
+  its badge stays honest whichever route is open when a clean finishes.
 -->
 <script lang="ts">
   import "../app.css";
 
+  import QuarantineDrawer from "$lib/components/QuarantineDrawer.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import { t } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
+  import { quarantineStore } from "$lib/stores/quarantine.svelte";
 
   let { children } = $props();
 
   $effect(() => {
     void moduleStore.load();
+    void quarantineStore.reload();
+  });
+
+  $effect(() => {
+    const listening = quarantineStore.listen();
+    return () => {
+      void listening.then((unlisten) => unlisten());
+    };
   });
 </script>
 
@@ -29,9 +41,13 @@
   <Sidebar
     modules={moduleStore.modules}
     loading={moduleStore.status === "loading"}
+    quarantineCount={quarantineStore.stats.itemCount}
+    onopenquarantine={() => quarantineStore.show()}
   />
 
   <main id="main" class="flex-1 overflow-y-auto">
     {@render children()}
   </main>
 </div>
+
+<QuarantineDrawer />
