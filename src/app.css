@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/*
+ * Design language (ARCHITECTURE §7): calm, minimal, dark by default.
+ * No scare-ware — the red risk bucket is informational, never alarming.
+ * Tokens live here only; routes must not invent their own palette.
+ */
+@theme {
+  /* Surfaces, darkest to lightest. */
+  --color-surface-0: oklch(16% 0.006 265);
+  --color-surface-1: oklch(20% 0.007 265);
+  --color-surface-2: oklch(25% 0.008 265);
+  --color-surface-3: oklch(31% 0.009 265);
+
+  /* Text. */
+  --color-ink: oklch(95% 0.005 265);
+  --color-ink-muted: oklch(72% 0.012 265);
+  --color-ink-faint: oklch(58% 0.012 265);
+
+  --color-accent: oklch(72% 0.13 205);
+  --color-accent-soft: oklch(38% 0.07 205);
+
+  /* Risk buckets — muted on purpose, see RiskBucket in src/lib/types.ts. */
+  --color-risk-safe: oklch(72% 0.14 150);
+  --color-risk-review: oklch(80% 0.13 85);
+  --color-risk-danger: oklch(68% 0.14 25);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-surface-0);
+  color: var(--color-ink);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Keyboard focus stays visible everywhere; pointer focus does not. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
