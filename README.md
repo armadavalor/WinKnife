@@ -1,3 +1,7 @@
+<img width="512" height="512" alt="WinKnife Logo" src="https://github.com/user-attachments/assets/3730f3f8-2d69-4223-b9d3-371b1f77a682" />
+
+
+
 # WinKnife
 
 [![CI](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml/badge.svg)](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml)
