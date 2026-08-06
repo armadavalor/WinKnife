@@ -105,6 +105,67 @@ impl ScanStore {
     }
 }
 
+/// The cancellation tokens of the scans that are still running.
+///
+/// ARCHITECTURE section 3 lists `cancel_scan(scan_id)`, and phase 1 shipped the
+/// token without a way to reach it: the cleaner's walk checked a token nothing
+/// could trip. The duplicate finder makes that visible — a full-hash pass over a
+/// Pictures folder is minutes of work, and a user who started it by accident
+/// needs a stop button that does something.
+///
+/// A token is registered when a scan starts and removed when it finishes, so
+/// cancelling a scan that already ended is a no-op rather than an error.
+#[derive(Debug, Default)]
+pub struct CancelRegistry {
+    tokens: Mutex<std::collections::HashMap<Uuid, crate::core::scanner::CancellationToken>>,
+}
+
+impl CancelRegistry {
+    /// An empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a fresh token for `scan_id` and hand back a clone.
+    pub fn start(&self, scan_id: Uuid) -> crate::core::scanner::CancellationToken {
+        let token = crate::core::scanner::CancellationToken::new();
+        self.lock().insert(scan_id, token.clone());
+        token
+    }
+
+    /// Forget a scan that has finished.
+    pub fn finish(&self, scan_id: Uuid) {
+        self.lock().remove(&scan_id);
+    }
+
+    /// Ask a running scan to stop. `false` when it is already over.
+    pub fn cancel(&self, scan_id: Uuid) -> bool {
+        match self.lock().get(&scan_id) {
+            Some(token) => {
+                token.cancel();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// How many scans are running.
+    pub fn running(&self) -> usize {
+        self.lock().len()
+    }
+
+    fn lock(
+        &self,
+    ) -> std::sync::MutexGuard<
+        '_,
+        std::collections::HashMap<Uuid, crate::core::scanner::CancellationToken>,
+    > {
+        self.tokens
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +261,44 @@ mod tests {
 
         assert_eq!(scan.safe_bytes(), 150);
         assert_eq!(scan.review_bytes(), 700);
+    }
+
+    #[test]
+    fn a_running_scan_can_be_cancelled_and_a_finished_one_cannot() {
+        let registry = CancelRegistry::new();
+        let scan_id = Uuid::new_v4();
+
+        assert!(
+            !registry.cancel(scan_id),
+            "cancelling a scan that never started is a no-op, not an error"
+        );
+
+        let token = registry.start(scan_id);
+        assert_eq!(registry.running(), 1);
+        assert!(!token.is_cancelled());
+
+        assert!(registry.cancel(scan_id));
+        assert!(
+            token.is_cancelled(),
+            "the token the scan is holding must be the one that gets tripped"
+        );
+
+        registry.finish(scan_id);
+        assert_eq!(registry.running(), 0);
+        assert!(!registry.cancel(scan_id));
+    }
+
+    #[test]
+    fn two_scans_have_two_independent_tokens() {
+        let registry = CancelRegistry::new();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let a = registry.start(first);
+        let b = registry.start(second);
+
+        registry.cancel(first);
+        assert!(a.is_cancelled());
+        assert!(!b.is_cancelled(), "one cancel must not stop the other scan");
     }
 
     #[test]

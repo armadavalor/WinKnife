@@ -35,6 +35,10 @@ rusqlite = { version = "0.40.1", features = ["bundled"] }
 jwalk = "0.9"
 # Rule-pack path patterns; case-insensitive matching for Windows paths.
 globset = "0.4"
+# Duplicate detection: blake3 for the staged partial/full hashes, rayon for the
+# full-hash pass (module spec 03).
+blake3 = "1.5"
+rayon = "1.10"
 # `std::fs::canonicalize` hands back `\\?\` verbatim paths, which compare
 # differently from every path the rest of the app has ever seen. `dunce` returns
 # the plain form whenever Win32 accepts one, so the protected-path gate can

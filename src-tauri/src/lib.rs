@@ -22,11 +22,12 @@ use crate::core::brain::{Brain, ProtectedPaths};
 use crate::core::db::{self, Database};
 use crate::core::error::{CoreError, Result};
 use crate::core::platform::{
-    DryRunPower, EnvResolver, PowerController, SystemEnv, SystemLockProbe,
+    CachedProcessProbe, DryRunPower, EnvResolver, PowerController, SystemEnv, SystemLockProbe,
+    SystemProcessProbe,
 };
 use crate::core::quarantine::{Quarantine, RetentionPolicy};
 use crate::core::settings;
-use crate::core::state::ScanStore;
+use crate::core::state::{CancelRegistry, ScanStore};
 use crate::modules::shutdown_timer::{self, ShutdownTimer, Tick};
 
 /// Command-line flag that makes power actions log instead of happening.
@@ -84,6 +85,11 @@ fn build_brain(
         .protected_paths(ProtectedPaths::from_env(env, app_data_dir, quarantine_root))
         .packs(packs)
         .lock_probe(Arc::new(SystemLockProbe))
+        // Cached: a browser-cache scan asks "is Chrome running?" once per
+        // finding, and a `%LOCALAPPDATA%` cache is tens of thousands of files.
+        .process_probe(Arc::new(CachedProcessProbe::new(Arc::new(
+            SystemProcessProbe,
+        ))))
         .build())
 }
 
@@ -129,6 +135,7 @@ pub fn run() {
         .setup(move |app| {
             app.manage(modules::registry()?);
             app.manage(ScanStore::new());
+            app.manage(CancelRegistry::new());
 
             let app_data_dir = app
                 .path()
@@ -200,9 +207,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_modules,
             commands::start_scan,
+            commands::cancel_scan,
+            commands::start_duplicate_scan,
             commands::get_recommendations,
             commands::scan_summary,
             commands::execute,
+            commands::get_settings,
+            commands::set_settings,
             commands::quarantine_list,
             commands::quarantine_batch_items,
             commands::quarantine_stats,

@@ -33,6 +33,7 @@ macro_rules! register_modules {
 
 register_modules! {
     cleaner => cleaner::CleanerModule,
+    duplicates => duplicates::DuplicatesModule,
     shutdown_timer => shutdown_timer::ShutdownTimerModule,
 }
 
@@ -101,9 +102,9 @@ mod tests {
     }
 
     #[test]
-    fn the_phase_one_modules_are_registered() {
+    fn every_shipped_module_is_registered() {
         let registry = registry().expect("registry");
-        for id in ["cleaner", "shutdown-timer"] {
+        for id in ["cleaner", "duplicates", "shutdown-timer"] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }
     }

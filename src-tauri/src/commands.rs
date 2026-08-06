@@ -24,12 +24,75 @@ use crate::core::module::{ModuleManifest, ModuleRegistry};
 use crate::core::platform::{PowerAction, RecycleBin};
 use crate::core::quarantine::{
     PurgeReport, Quarantine, QuarantineBatch, QuarantineItem, QuarantineStats, RestoreOutcome,
+    RetentionPolicy,
 };
-use crate::core::scanner::CancellationToken;
-use crate::core::state::{ScanResult, ScanStore};
+use crate::core::settings;
+use crate::core::state::{CancelRegistry, ScanResult, ScanStore};
 use crate::core::types::ExecReport;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
+use crate::modules::duplicates::{self, DuplicateProgress, DuplicateScan};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
+
+/// Everything the settings page reads and writes, in one round trip.
+///
+/// One command rather than one per field: the page saves as a unit, and a
+/// half-applied settings change is a state nobody has a story for.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    /// Which cleaner packs run, and what each pack is.
+    pub cleaner: CleanerSettingsView,
+    /// Duplicate-finder settings.
+    pub duplicates: duplicates::DuplicatesSettings,
+    /// Quarantine retention, already validated.
+    pub quarantine: QuarantineSettings,
+}
+
+/// The cleaner's settings plus enough about the shipped packs for the page to
+/// render a list without a second command.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanerSettingsView {
+    /// Every pack that loaded, in load order.
+    pub packs: Vec<PackView>,
+}
+
+/// One rule pack as the settings page sees it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackView {
+    /// Pack id, the key the toggle writes.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// One-line description.
+    pub description: String,
+    /// Whether it runs right now.
+    pub enabled: bool,
+    /// What it would do if the user had never touched it.
+    pub enabled_by_default: bool,
+    /// How many of its rules compiled on this machine.
+    pub rule_count: usize,
+}
+
+/// Quarantine retention as the settings page sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuarantineSettings {
+    /// Days an item is kept before the purge takes it.
+    pub retention_days: i64,
+    /// Size cap in bytes; the oldest items are evicted past it.
+    pub max_bytes: u64,
+}
+
+impl From<RetentionPolicy> for QuarantineSettings {
+    fn from(policy: RetentionPolicy) -> Self {
+        Self {
+            retention_days: policy.retention_days,
+            max_bytes: policy.max_bytes,
+        }
+    }
+}
 
 /// Long-lived services the commands compose, registered as Tauri state.
 ///
@@ -73,6 +136,7 @@ pub async fn start_scan<R: Runtime>(
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
     db: State<'_, Database>,
+    cancels: State<'_, CancelRegistry>,
 ) -> Result<ScanResult, ApiError> {
     if module_id != "cleaner" {
         return Err(CoreError::UnknownModule(module_id).into());
@@ -82,11 +146,11 @@ pub async fn start_scan<R: Runtime>(
     // the settings page takes effect on the next scan rather than the next
     // restart.
     let settings: cleaner::CleanerSettings = db
-        .with(|conn| crate::core::settings::get_module(conn, "cleaner"))?
+        .with(|conn| settings::get_module(conn, "cleaner"))?
         .unwrap_or_default();
 
     let scan_id = Uuid::new_v4();
-    let cancel = CancellationToken::new();
+    let cancel = cancels.start(scan_id);
     let mut throttle = ProgressThrottle::new();
 
     let output = {
@@ -118,6 +182,8 @@ pub async fn start_scan<R: Runtime>(
             Some(&mut emit),
         )
     };
+
+    cancels.finish(scan_id);
 
     let recommendations = cleaner::analyze(&output.findings, &services.brain);
     let result = ScanResult {
@@ -233,6 +299,264 @@ pub async fn execute<R: Runtime>(
 
     notify_quarantine_changed(&app, &services, &db, report.batch_id);
     Ok(report)
+}
+
+/// Ask a running scan to stop (ARCHITECTURE section 3).
+///
+/// Returns `false` when the scan already finished, which is not an error — the
+/// user pressed stop as the last file went through.
+///
+/// # Errors
+/// Infallible today; keeps the shared `Result` shape.
+#[tauri::command]
+pub fn cancel_scan(scan_id: Uuid, cancels: State<'_, CancelRegistry>) -> Result<bool, ApiError> {
+    let stopped = cancels.cancel(scan_id);
+    tracing::info!(scan = %scan_id, stopped, "cancel requested");
+    Ok(stopped)
+}
+
+/* -------------------------------------------------------------------------
+ * Duplicates: scan -> review -> execute
+ * ---------------------------------------------------------------------- */
+
+/// What a duplicate scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanResult {
+    /// Id for `execute` and `cancel_scan`.
+    pub scan_id: Uuid,
+    /// The sets, their copies and the excluded second names.
+    pub scan: DuplicateScan,
+    /// One recommendation per copy. Never `safe`.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+    /// Bytes the redundant copies occupy.
+    pub wasted_bytes: u64,
+}
+
+/// Run a duplicate scan over the configured roots.
+///
+/// Blocking work; the caller runs it off the UI thread. Read-only.
+///
+/// # Errors
+/// Returns an error only if the settings could not be read.
+#[tauri::command]
+pub async fn start_duplicate_scan<R: Runtime>(
+    app: AppHandle<R>,
+    roots: Option<Vec<PathBuf>>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Database>,
+    cancels: State<'_, CancelRegistry>,
+) -> Result<DuplicateScanResult, ApiError> {
+    let stored: duplicates::DuplicatesSettings = db
+        .with(|conn| settings::get_module(conn, "duplicates"))?
+        .unwrap_or_default();
+    let stored = stored.validated();
+
+    // An explicit selection from the folder picker wins; then the saved roots;
+    // then the profile folders module spec 03 names.
+    let roots = roots
+        .filter(|roots| !roots.is_empty())
+        .or_else(|| Some(stored.roots.clone()).filter(|roots| !roots.is_empty()))
+        .unwrap_or_else(|| duplicates::default_roots(&crate::core::platform::SystemEnv));
+
+    let scan_id = Uuid::new_v4();
+    let cancel = cancels.start(scan_id);
+    let throttle = std::sync::Mutex::new(ProgressThrottle::new());
+
+    let emit = |progress: &DuplicateProgress| {
+        // The sink is called from several rayon threads at once, so the throttle
+        // is shared rather than owned by one of them.
+        let allowed = throttle
+            .lock()
+            .map(|mut throttle| throttle.should_emit())
+            .unwrap_or(false);
+        if !allowed {
+            return;
+        }
+        let payload = ScanProgress {
+            scan_id,
+            module: "duplicates".to_owned(),
+            items_scanned: progress.done,
+            current_path: Some(progress.current_path.display().to_string()),
+            pct: percent(progress.done, progress.total),
+        };
+        if let Err(err) = events::emit_scan_progress(&app, &payload) {
+            tracing::debug!(error = %err, "duplicate progress event was not delivered");
+        }
+    };
+
+    let scan = {
+        let protected = services.brain.protected_paths();
+        duplicates::scan(
+            &duplicates::DuplicateContext {
+                roots: &roots,
+                protected,
+                settings: &stored,
+                cancel: &cancel,
+            },
+            Some(&emit),
+        )
+    };
+    cancels.finish(scan_id);
+
+    let recommendations = duplicates::analyze(&scan, &services.brain);
+    tracing::info!(
+        scan = %scan_id,
+        sets = scan.sets.len(),
+        hashed = scan.files_hashed,
+        cancelled = scan.cancelled,
+        "duplicate scan finished"
+    );
+
+    // Kept in the same store the cleaner uses, so `execute` needs no second
+    // code path: a duplicate recommendation is a recommendation.
+    store.insert(ScanResult {
+        scan_id,
+        module: "duplicates".to_owned(),
+        findings: scan.findings.clone(),
+        recommendations: recommendations.clone(),
+        skipped_rules: scan.skipped_roots.clone(),
+    });
+
+    let _ = events::emit_scan_done(
+        &app,
+        &ScanDone {
+            scan_id,
+            module: "duplicates".to_owned(),
+            finding_count: scan.findings.len() as u64,
+        },
+    );
+
+    Ok(DuplicateScanResult {
+        wasted_bytes: scan.wasted_bytes(),
+        scan_id,
+        scan,
+        recommendations,
+    })
+}
+
+fn percent(done: u64, total: u64) -> Option<u8> {
+    if total == 0 {
+        return None;
+    }
+    u8::try_from(done.saturating_mul(100) / total).ok()
+}
+
+/* -------------------------------------------------------------------------
+ * Settings
+ * ---------------------------------------------------------------------- */
+
+/// Everything the settings page shows.
+///
+/// # Errors
+/// Returns an error if the settings table cannot be read.
+#[tauri::command]
+pub fn get_settings(
+    services: State<'_, Services>,
+    db: State<'_, Database>,
+) -> Result<AppSettings, ApiError> {
+    Ok(db.with(|conn| read_settings(&services, conn))?)
+}
+
+/// Save the settings page.
+///
+/// Everything is re-validated on the way in, whatever the page sent. The
+/// retention window goes through [`RetentionPolicy::validated`] and the
+/// duplicate size floor through `DuplicatesSettings::validated`, because a
+/// stored `0` used to mean "purge everything on the next start" (security review
+/// H7) and a settings UI must not be able to write one.
+///
+/// Returns the settings as they were actually stored, so the page shows the
+/// clamped values rather than the ones it asked for.
+///
+/// # Errors
+/// Returns an error if the settings could not be written.
+#[tauri::command]
+pub fn set_settings(
+    settings_in: AppSettings,
+    services: State<'_, Services>,
+    db: State<'_, Database>,
+) -> Result<AppSettings, ApiError> {
+    let policy = RetentionPolicy::validated(
+        settings_in.quarantine.retention_days,
+        settings_in.quarantine.max_bytes,
+    );
+    let duplicates = settings_in.duplicates.validated();
+
+    let mut cleaner_settings = cleaner::CleanerSettings::default();
+    for pack in &settings_in.cleaner.packs {
+        cleaner_settings.set_enabled(pack.id.clone(), pack.enabled);
+    }
+
+    let stored = db.with(|conn| {
+        settings::set_module(conn, "cleaner", &cleaner_settings)?;
+        settings::set_module(conn, "duplicates", &duplicates)?;
+        settings::set_raw(
+            conn,
+            settings::KEY_RETENTION_DAYS,
+            &policy.retention_days.to_string(),
+        )?;
+        settings::set_raw(conn, settings::KEY_MAX_BYTES, &policy.max_bytes.to_string())?;
+        read_settings(&services, conn)
+    })?;
+
+    tracing::info!(
+        retention_days = policy.retention_days,
+        max_bytes = policy.max_bytes,
+        min_size_bytes = duplicates.min_size_bytes,
+        "settings saved"
+    );
+    Ok(stored)
+}
+
+/// Read the current settings, joining the stored overrides onto the packs that
+/// actually loaded.
+fn read_settings(
+    services: &Services,
+    conn: &rusqlite::Connection,
+) -> crate::core::error::Result<AppSettings> {
+    let cleaner_settings: cleaner::CleanerSettings =
+        settings::get_module(conn, "cleaner")?.unwrap_or_default();
+    let duplicates = settings::get_module::<duplicates::DuplicatesSettings>(conn, "duplicates")?
+        .unwrap_or_default()
+        .validated();
+
+    let packs = services
+        .brain
+        .packs()
+        .iter()
+        .map(|pack| PackView {
+            id: pack.id().to_owned(),
+            name: pack.spec.name.clone(),
+            description: pack.spec.description.clone(),
+            enabled: cleaner_settings.is_enabled(pack),
+            enabled_by_default: pack.spec.enabled_by_default,
+            rule_count: pack.rules.len(),
+        })
+        .collect();
+
+    // Read back through `validated` as well, so a row somebody edited by hand in
+    // the database shows up already clamped rather than as the value that would
+    // have been dangerous.
+    let policy = RetentionPolicy::validated(
+        settings::get_i64(
+            conn,
+            settings::KEY_RETENTION_DAYS,
+            crate::core::quarantine::DEFAULT_RETENTION_DAYS,
+        )?,
+        settings::get_u64(
+            conn,
+            settings::KEY_MAX_BYTES,
+            crate::core::quarantine::DEFAULT_MAX_BYTES,
+        )?,
+    );
+
+    Ok(AppSettings {
+        cleaner: CleanerSettingsView { packs },
+        duplicates,
+        quarantine: policy.into(),
+    })
 }
 
 /* -------------------------------------------------------------------------
