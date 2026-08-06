@@ -140,18 +140,21 @@ pub fn run() {
             let log_guard = core::logging::init(&app_data_dir);
             let connection = db::open(&app_data_dir)?;
 
-            let policy = RetentionPolicy {
-                retention_days: settings::get_i64(
+            // Validated, not trusted: the settings table is a key/value store
+            // of strings, and a stored `0` used to mean "purge everything on
+            // the next start" (security review H7).
+            let policy = RetentionPolicy::validated(
+                settings::get_i64(
                     &connection,
                     settings::KEY_RETENTION_DAYS,
                     core::quarantine::DEFAULT_RETENTION_DAYS,
                 )?,
-                max_bytes: settings::get_u64(
+                settings::get_u64(
                     &connection,
                     settings::KEY_MAX_BYTES,
                     core::quarantine::DEFAULT_MAX_BYTES,
                 )?,
-            };
+            );
             let quarantine = Quarantine::new(&app_data_dir, policy);
 
             // Retention runs at start, before anything can add to the pile.

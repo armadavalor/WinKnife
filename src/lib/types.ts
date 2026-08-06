@@ -265,6 +265,8 @@ export interface QuarantineBatch {
 export interface QuarantineStats {
   itemCount: number;
   totalBytes: number;
+  /** Ledger rows that no longer parse and are therefore not counted above. */
+  unreadableRows: number;
 }
 
 /** What restoring one item did. */
@@ -293,6 +295,11 @@ export interface PurgeReport {
   freedBytes: number;
   /** Ids whose files could not be removed; the next purge retries them. */
   failedItems: string[];
+  /**
+   * Batches this purge took items out of. The size cap evicts oldest-first
+   * across batch boundaries, so a batch can lose part of itself.
+   */
+  affectedBatches: string[];
 }
 
 /* -------------------------------------------------------------------------

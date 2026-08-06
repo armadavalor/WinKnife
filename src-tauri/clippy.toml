@@ -1,0 +1,18 @@
+# Only `core/quarantine.rs` may permanently remove user data (CLAUDE.md hard
+# rules, ARCHITECTURE section 6).
+#
+# This used to be enforced by a test that grepped the crate's own source for
+# `fs::remove_*`, which a rename of the import, a fully-qualified call or a
+# `File::create` truncation walks straight past (security review M1). The lint
+# resolves the *path*, so none of those help: the only way to call one of these
+# is an explicit `#[allow(clippy::disallowed_methods)]`, which is a line a
+# reviewer can see and ask about. The grep test survives as a smoke check.
+#
+# `cargo clippy --all-targets -- -D warnings` is a required gate, so this is a
+# build failure, not a warning.
+disallowed-methods = [
+    { path = "std::fs::remove_file", reason = "user data is only ever removed by core::quarantine; take() moves, purge() deletes" },
+    { path = "std::fs::remove_dir", reason = "user data is only ever removed by core::quarantine; take() moves, purge() deletes" },
+    { path = "std::fs::remove_dir_all", reason = "user data is only ever removed by core::quarantine; take() moves, purge() deletes" },
+    { path = "std::fs::rename", reason = "rename replaces an existing destination; go through core::quarantine's move_path, which refuses to" },
+]
