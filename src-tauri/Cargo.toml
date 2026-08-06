@@ -49,6 +49,14 @@ tracing-appender = "0.2"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# `tauri::test` — the mock runtime and `get_ipc_response`, which is the only way
+# to prove a command's managed state actually resolves. Tauri looks state up by
+# `TypeId` at *runtime*, so a `State<'_, Database>` parameter against a managed
+# `Arc<Database>` type-checks and then fails on every invocation; nothing short
+# of dispatching through the real IPC path can see it
+# (`tests/command_wiring.rs`). Dev-only: resolver 2 keeps this feature out of
+# `cargo build --release`.
+tauri = { version = "2", features = ["test"] }
 
 # Win32 calls (recycle bin shell API, SetSuspendState) live behind the wrappers
 # in `core/platform`, never called directly from module code.
