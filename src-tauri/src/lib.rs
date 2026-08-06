@@ -3,6 +3,7 @@
 //! Analyze first, never delete without consent, everything reversible.
 
 pub mod core;
+pub mod modules;
 
 /// Build and run the desktop application.
 ///
