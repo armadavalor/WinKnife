@@ -32,7 +32,8 @@ macro_rules! register_modules {
 }
 
 register_modules! {
-    dummy => dummy::DummyModule,
+    cleaner => cleaner::CleanerModule,
+    shutdown_timer => shutdown_timer::ShutdownTimerModule,
 }
 
 /// Build the application's module registry.
@@ -51,10 +52,7 @@ mod tests {
     #[test]
     fn registry_builds_without_duplicate_ids() {
         let registry = registry().expect("registry must build");
-        assert!(
-            !registry.is_empty(),
-            "at least the dummy module is expected"
-        );
+        assert!(!registry.is_empty(), "the phase-1 modules are expected");
     }
 
     #[test]
@@ -103,8 +101,32 @@ mod tests {
     }
 
     #[test]
-    fn the_dummy_module_is_registered() {
+    fn the_phase_one_modules_are_registered() {
         let registry = registry().expect("registry");
-        assert_eq!(registry.get("dummy").expect("dummy module").id(), "dummy");
+        for id in ["cleaner", "shutdown-timer"] {
+            assert_eq!(registry.get(id).expect("registered module").id(), id);
+        }
+    }
+
+    #[test]
+    fn every_module_has_a_matching_ui_route() {
+        // A module the sidebar links to but that has no route would 404 on
+        // click. The route folder is named after the module id
+        // (ARCHITECTURE section 1).
+        let routes = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .join("src")
+            .join("routes");
+
+        for module in registry().expect("registry").iter() {
+            let route = routes.join(module.id()).join("+page.svelte");
+            assert!(
+                route.is_file(),
+                "module `{}` has no UI route at {}",
+                module.id(),
+                route.display()
+            );
+        }
     }
 }

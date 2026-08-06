@@ -1,0 +1,29 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "windows-temp",
+  "name": "Windows Temp Files",
+  "version": 1,
+  "module": "cleaner",
+  "enabled_by_default": true,
+  "description": "Temporary files created by Windows and by applications. Programs recreate these on demand.",
+  "rules": [
+    {
+      "id": "user-temp-files",
+      "paths": ["%TEMP%\\**"],
+      "exclude": ["%TEMP%\\**\\*.lock", "%TEMP%\\**\\*.lck"],
+      "match": { "min_age_hours": 24 },
+      "score": { "base": 90, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "Temporary file older than 24 hours in your temp folder; applications recreate these as needed."
+    },
+    {
+      "id": "local-app-data-temp",
+      "paths": ["%LOCALAPPDATA%\\Temp\\**"],
+      "exclude": ["%LOCALAPPDATA%\\Temp\\**\\*.lock"],
+      "match": { "min_age_hours": 24 },
+      "score": { "base": 90, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "Temporary file older than 24 hours in the per-user temp folder; safe to remove between sessions."
+    }
+  ]
+}

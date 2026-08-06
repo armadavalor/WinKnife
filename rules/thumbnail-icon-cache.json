@@ -1,0 +1,19 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "thumbnail-icon-cache",
+  "name": "Thumbnail and Icon Cache",
+  "version": 1,
+  "module": "cleaner",
+  "enabled_by_default": true,
+  "description": "Explorer's thumbnail and icon cache databases. Windows rebuilds them automatically the next time it needs a preview.",
+  "rules": [
+    {
+      "id": "explorer-cache-databases",
+      "paths": ["%LOCALAPPDATA%\\Microsoft\\Windows\\Explorer\\*.db"],
+      "match": { "min_age_hours": 24 },
+      "score": { "base": 88, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "Explorer thumbnail or icon cache; Windows rebuilds it automatically, at the cost of previews loading once more slowly."
+    }
+  ]
+}

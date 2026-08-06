@@ -1,0 +1,18 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "recycle-bin",
+  "name": "Recycle Bin",
+  "version": 1,
+  "module": "cleaner",
+  "enabled_by_default": true,
+  "description": "Files you already sent to the recycle bin. Read through the Windows shell API, never by walking $Recycle.Bin directly.",
+  "rules": [
+    {
+      "id": "recycle-bin-contents",
+      "paths": ["shell:RecycleBinFolder"],
+      "score": { "base": 95, "max_bucket": "safe" },
+      "action": "empty_recycle_bin",
+      "reason": "Already in your recycle bin, so you have deleted these once. Emptying is final and does not go to quarantine."
+    }
+  ]
+}

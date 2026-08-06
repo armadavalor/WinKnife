@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OWNER/cleanify/rules/rule-pack.schema.json",
+  "title": "Cleanify rule pack",
+  "description": "Community-editable data that drives the brain's rule engine. See docs/RULES-FORMAT.md. The Rust parser in core/brain/rules.rs is the authority; this schema exists for editor completion and CI validation, and the two are kept in step by the validate-all-packs test.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "version",
+    "module",
+    "enabled_by_default",
+    "description",
+    "rules"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": {
+      "description": "kebab-case pack id; must equal the file name without .json.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "type": "integer", "minimum": 1 },
+    "module": { "type": "string", "minLength": 1 },
+    "enabled_by_default": { "type": "boolean" },
+    "description": { "type": "string", "minLength": 1 },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "paths", "score", "action", "reason"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "paths": {
+          "description": "Glob patterns. %VARS% are expanded case-insensitively at load time. An absolute pattern outside the user profile requires requires_admin.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "exclude": {
+          "description": "Patterns that veto a match.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "match": {
+          "description": "Extra conditions, all AND-ed.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "min_age_hours": { "type": "integer", "minimum": 0 },
+            "min_size_bytes": { "type": "integer", "minimum": 0 },
+            "extensions": {
+              "description": "Without the leading dot, compared case-insensitively.",
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[^.].*$" }
+            },
+            "owner_process_absent": {
+              "description": "Skip or downgrade while this process is running.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "score": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["base", "max_bucket"],
+          "properties": {
+            "base": {
+              "description": "0-100 starting confidence before heuristics.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "max_bucket": {
+              "description": "Ceiling. Heuristics may lower a bucket, never raise it above this.",
+              "enum": ["safe", "needs_review", "do_not_delete"]
+            }
+          }
+        },
+        "action": {
+          "description": "empty_recycle_bin is only legal in the recycle-bin pack. There is no raw delete.",
+          "enum": ["quarantine", "info_only", "empty_recycle_bin"]
+        },
+        "reason": {
+          "description": "User-facing, required, plain language. Ships to the UI verbatim.",
+          "type": "string",
+          "minLength": 1
+        },
+        "requires_admin": { "type": "boolean" }
+      }
+    }
+  }
+}
