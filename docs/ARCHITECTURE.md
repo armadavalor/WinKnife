@@ -23,7 +23,8 @@ Tauri v2 desktop app. Rust does all filesystem/registry/system work; the WebView
 │       └── shutdown/
 └── src-tauri/
     ├── src/
-    │   ├── main.rs           # tauri builder, command registration only
+    │   ├── main.rs           # one-line shim calling the lib crate's run()
+    │   ├── lib.rs            # tauri builder, command registration only (v2 layout)
     │   ├── commands.rs       # #[tauri::command] fns — thin, delegate to core
     │   ├── core/
     │   │   ├── module.rs     # ToolModule trait + registry
