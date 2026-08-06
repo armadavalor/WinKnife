@@ -1,14 +1,19 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
+//! Cleanify — modular Windows utility.
+//!
+//! Analyze first, never delete without consent, everything reversible.
 
+pub mod core;
+
+/// Build and run the desktop application.
+///
+/// # Panics
+/// Panics if Tauri itself cannot start (no WebView2 runtime, broken bundle
+/// context). There is no UI to report the failure in at that point, so failing
+/// loudly is the only honest option.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
