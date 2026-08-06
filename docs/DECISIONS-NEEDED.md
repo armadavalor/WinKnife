@@ -137,3 +137,18 @@ Open items awaiting the producer (not blocking implementation):
       development machine has no Developer Mode, so the local verification run
       used it; CI must not, and `ci.yml` fails if it is set. Whoever first runs
       CI should confirm all six actually execute there.
+- [ ] 2026-08-06 (first CI run): the five link-dependent safety tests need a
+      *symlink*, which requires Developer Mode or elevation. A directory
+      **junction** (`mklink /J`) is a reparse point too, `canonicalize` resolves
+      it identically, and any standard user can create one — a junction-based
+      companion would let the two protected-path link tests assert on every
+      machine instead of skipping. Not done here: creating a junction from Rust
+      means either shelling out to `cmd.exe` from a unit test or hand-rolling
+      `FSCTL_SET_REPARSE_POINT`, and neither is in this brief. Junctions were
+      used as a throwaway probe to verify this fix and are not committed.
+- [ ] 2026-08-06 (first CI run): `Quarantine::destroy` and `take` guard with
+      `quarantine_path.starts_with(&self.root)` on raw text. If the quarantine
+      root's spelling ever changes between runs (a short-form `%LOCALAPPDATA%`
+      on one run, long-form on another), that guard fails closed — it refuses to
+      purge rather than purging the wrong thing — so it is safe as it stands.
+      Worth revisiting when retention is exercised in anger.

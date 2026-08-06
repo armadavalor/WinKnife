@@ -512,3 +512,94 @@ integration — the same count as before the rename), `npm run check` 0 errors /
   `src-tauri/target/debug/winknife.exe`.
 - CI itself is still unverified — the workflow has not run against the new
   remote yet.
+
+## 2026-08-06 — First CI run: the protected list's own spelling
+
+**Built.** The first CI run on `windows-latest` was red: 270 passed, 2 failed —
+and the two failures were precisely the symlink-dependent safety tests that had
+never actually executed on the development machine (no Developer Mode). The M11
+change that turned a silent skip into a failure did its job on the first try:
+the failures were a real product bug, not a test artefact.
+
+**The bug.** `ProtectedPaths` stored entries in whatever spelling it was handed,
+while `gate_path` canonicalises the path it is asked about. On the GitHub runner
+`%TEMP%` is `C:\Users\RUNNER~1\AppData\Local\Temp` — the 8.3 short form — so the
+fixtures built their protected entries from a short-name path and the gate came
+back with the long one (`C:\Users\runneradmin\...`). Two spellings of one
+directory, compared component by component, do not match, so the list answered
+"not protected" and the walk root was walked / the file was quarantined.
+
+This is not a CI quirk. `%TEMP%` genuinely is `C:\Users\USERNA~1\AppData\Local\
+Temp` on a great many real accounts (the development machine's is), and
+`%WINDIR%`, `%USERPROFILE%` and `%ProgramFiles%` can reach us in 8.3 form too.
+The real app builds its protected list from exactly those variables, so on those
+machines a protected location silently stopped being protected. Same class as
+the two CRITICALs fixed in the last round: comparing two different spellings of
+one path.
+
+- **Fix** (`core/brain/protected.rs`, new `widen`, called by
+  `ProtectedPaths::new` and `::push`, so `from_env` and `from_trees` both get
+  it). Every entry is registered in both spellings: the normalised text it was
+  written in, plus its canonical form when the filesystem spells that same
+  directory differently.
+  - Both, not just the canonical one: the gate asks in the canonical spelling,
+    but `reason_for` is also the defence-in-depth layer for callers that only
+    have text — and that text may well be the short form the variable was in.
+    Adding a spelling only ever protects more.
+  - Nothing is ever dropped. A directory this machine does not have cannot be
+    canonicalised, and losing the entry would turn a missing folder into an
+    unprotected one; the hardcoded floor (`C:\Windows`, `C:\Program Files`,
+    `C:\Program Files (x86)`, `C:\ProgramData`) therefore survives on machines
+    that have those directories and on machines that do not.
+  - Only a plain local drive-letter path is canonicalised, reusing
+    `plain_local_shape` as the guard. A drive-root entry is `C:`, whose
+    canonical form is that drive's *current directory* — a real path and the
+    wrong one to protect exactly — and the volume-metadata entry is a bare name
+    belonging to no drive at all.
+  - `reason_for`, `gate_path` and `plain_local_shape` are untouched: the
+    allow-list gate keeps its shape and every attack spelling still returns
+    REFUSED.
+- **Regression tests** (`core/brain/protected.rs`). Three, all privilege-free:
+  an entry registered as an 8.3 alias must match the canonical probe;
+  `from_env` fed 8.3-form `%WINDIR%`/`%USERPROFILE%` must still protect the real
+  directories (and must not widen the profile root's *exact* scope into a tree);
+  and widening must not invent an entry out of a drive root or the
+  volume-metadata name. `short_path_name` (`GetShortPathNameW`) moved from the
+  executor's test module to `core/test_support.rs` so all three files share it.
+- **CI** (`.github/workflows/ci.yml`). `actions/checkout` and
+  `actions/setup-node` bumped `@v4` → `@v5`; both v4 majors run on the
+  deprecated Node 20 and the first run warned about it.
+
+**Verification.** The diagnosis was proven by execution, not by reading. Before
+the fix, a list built from a real 8.3 path missed the canonical probe:
+registered `C:\Users\ARMADA~1\...\PROTEC~1`, probed
+`C:\Users\ARMADA-L5-PRO\...\Protected Program Files\kernel.sys` → not protected.
+Because the two CI failures need a reparse point and this machine cannot create
+symlinks, both were then reproduced locally with a *junction* (`mklink /J`,
+which needs no privilege and which `canonicalize` resolves the same way): with
+the widening disabled the executor reported `Succeeded` — it quarantined the
+protected file — and `resolve_root` returned `Walk`, byte-for-byte the two CI
+failures; with it enabled both refuse, the executor with "protected location,
+not cleanable" and the walk root with "resolves to". The junction probes were
+temporary and are not committed.
+
+`cargo fmt --all -- --check` clean, `cargo clippy --all-targets -- -D warnings`
+clean, `cargo test` 286/286 green (275 unit + 8 + 3 integration), `npm run
+check` 0 errors / 0 warnings, `npm run build` OK.
+
+**Deferred / not verified.**
+
+- The five link-dependent safety tests again ran under
+  `WINKNIFE_ALLOW_SKIP_LINK_TESTS=1` (no Developer Mode here):
+  `a_link_pointing_into_a_protected_directory_is_refused`,
+  `a_walk_root_that_resolves_into_a_protected_location_is_refused`,
+  `symlinks_are_never_followed`, `symlinks_are_never_quarantined`,
+  `a_directory_containing_a_link_is_never_moved_across_volumes`. The first two
+  are the ones CI failed, and the junction probes above stand in for them
+  locally. The 8.3-alias test (`an_8_3_alias_of_a_protected_directory_is_refused`)
+  did *not* skip — this volume mints aliases — so the new regression tests
+  really ran.
+- `actions/upload-artifact@v4` is on Node 20 as well and will warn on the first
+  run that reaches it; left alone because those steps never ran in the failing
+  build and the brief named only the two.
+- `npm run tauri build` was not run.
