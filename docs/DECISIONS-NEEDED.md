@@ -217,3 +217,56 @@ record of why. Nothing above is left for the implementer to re-decide.
 path-against-path comparison goes through `core::path_compare`. Three separate
 bugs in this phase were the same defect — two spellings of one path compared as
 raw text. If a comparison must stay lexical, say why in a comment at the site.
+
+---
+
+## Open items raised during phase 2
+
+- [ ] 2026-08-06 (phase 2): **destructive-action escalation.** Module spec 02
+      lists `windows-update-leftovers` targeting
+      `%WINDIR%\SoftwareDistribution\Download` at NeedsReview, but `%WINDIR%` is
+      a tree-scoped protected path, CLAUDE.md says a protected path can never
+      receive a Safe rating *or* a delete action, and RULES-FORMAT.md says "a
+      rule matching a protected path is a test failure, not a runtime decision".
+      All three cannot hold at once. Safest interpretation taken: the pack ships
+      with `action: info_only` + `max_bucket: do_not_delete` and
+      `enabled_by_default: false`, so it can report the location and never
+      propose anything about it, and an inert pack does not put a permanent
+      "not walked, it is protected" line in front of every user.
+      `no_shipped_rule_targets_a_protected_path` was tightened rather than
+      relaxed: a rule that names a protected path must be structurally unable to
+      propose an action, and the test asks the real brain to prove it refuses a
+      file under that root. **This is the destructive-action ambiguity CLAUDE.md
+      says to always escalate — the architect should decide whether the pack
+      stays informational, is dropped, or whether `%WINDIR%` gains a documented
+      carve-out.**
+- [ ] 2026-08-06 (phase 2): module spec 02 also names `%WINDIR%\*.log` (in
+      `crash-dumps-logs`) and `%WINDIR%\Downloaded Program Files` (in
+      `installer-leftovers`). Both are inside the same protected tree. Rather
+      than ship two more inert rules, those two locations are simply not
+      targeted; the packs cover their profile-scoped locations instead. Revisit
+      with the decision above.
+- [ ] 2026-08-06 (phase 2): the age heuristic reads two clocks rather than the
+      one ARCHITECTURE section 4 names ("last-access age"). `SystemLockProbe`
+      opens every candidate, so on a volume with last-access updates enabled the
+      first scan bumps the access time of everything it examined and the second
+      scan of the day would find nothing safe. Age *bonuses* therefore need both
+      the access and modification clocks to be old, and the freshness *penalty*
+      is keyed on the modification clock alone. Nothing in the spec forbids it,
+      but it is a deliberate reading of one sentence as two signals.
+- [ ] 2026-08-06 (phase 2): a duplicate's confidence is a flat 75 rather than a
+      `brain::score` result. Module spec 03 gives duplicates no `score.base`,
+      because a blake3 match is a fact about bytes and not a heuristic — the
+      uncertainty is entirely about which copy a person wants. The bucket is
+      still NeedsReview minimum and the gates still apply on top.
+- [ ] 2026-08-06 (phase 2): `cancel_scan` was added to reach the cancellation
+      token phase 1 shipped without a caller (ARCHITECTURE section 3 lists the
+      command). It is registered per scan id in `core::state::CancelRegistry`.
+      The duplicates route can therefore stop a scan; the cleaner route does not
+      yet show a stop button, because a pack walk is seconds rather than minutes
+      and the brief did not ask for one.
+- [ ] 2026-08-06 (phase 2): a duplicate scan holds its whole candidate list in
+      memory (path, timestamps and file id per file). At 10k files that is
+      trivial; at a multi-million-file root it would not be. The size floor keeps
+      it bounded in practice, and streaming the staged pipeline would be a
+      rewrite rather than a tweak. Revisit if anyone points it at a whole drive.

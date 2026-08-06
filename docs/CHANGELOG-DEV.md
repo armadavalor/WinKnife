@@ -729,3 +729,93 @@ integration; 16 new), `npm run check` 0 errors / 0 warnings, `npm run build` OK.
   lexical comparison only when nothing on the way up resolves — reachable in
   practice only for a drive this machine does not have. Left as is: it errs
   toward over-refusal, which is the direction to be wrong in.
+
+---
+
+## 2026-08-06 — Phase 2: brain + duplicates
+
+**Built.** The scoring pipeline `score.base` was waiting for, the full rule-pack
+set, the duplicate finder, and the settings page that turns pack toggles from a
+JSON field into a user decision.
+
+- **Brain v1 scoring** (`core/brain/score.rs`, `core/brain/mod.rs`).
+  ARCHITECTURE section 4 end to end: hard gates, the rule's base score, heuristic
+  modifiers, thresholds >=85 / >=40, and `max_bucket` as a ceiling a rule can
+  never earn its way through. `score.rs` is pure, so the whole table of outcomes
+  is a unit test. Modifiers: idle age (both directions), size for review
+  candidates only, a known cache directory, and the owning process being open —
+  which is the one modifier that lowers a *ceiling* rather than a score.
+  `the_scoring_table` has 32 cases and prints what it asserts;
+  `changing_a_rules_base_score_moves_its_bucket_predictably` varies one field and
+  pins the walk down through the thresholds.
+- **The age signal is read from two clocks.** `SystemLockProbe` opens every
+  candidate, so on a volume with last-access updates enabled the first scan bumps
+  the access time of everything it examined and a second scan would find nothing
+  safe — every file would look freshly used, by us. Age *bonuses* need both
+  clocks old; the freshness *penalty* is keyed on writes, which only the owning
+  program makes.
+- **`owner_process_absent` works** (`core/platform/process.rs`). Parsed and
+  validated since phase 1 and acted on by nobody. The brain asks the process list
+  itself rather than trusting a module to remember, and `CachedProcessProbe`
+  keeps that to one snapshot per program name instead of one per finding — a
+  `%LOCALAPPDATA%` browser cache is tens of thousands of files.
+- **Six new rule packs.** `browser-cache` (Chrome, Edge, Brave, Firefox; green
+  closed, yellow open), `crash-dumps-logs`, `installer-leftovers`,
+  `old-downloads` (capped at needs_review by its ceiling, proven exhaustively),
+  `dev-caches` (off by default per module spec 02) and
+  `windows-update-leftovers` (informational only — see the decision below). One
+  fixture entry per pack in the cleaner's `Fixture`, and the manifest test now
+  asserts the pack that claimed each file as well as its bucket.
+- **Pack toggles** (`CleanerSettings`, `core/settings.rs`). Only *decisions* are
+  stored, under `module.cleaner`, so a newly shipped pack keeps its own
+  `enabled_by_default` instead of inheriting somebody's stale database. A pack
+  that is off is not walked at all, and does not appear in `skipped_rules` —
+  "you asked for this not to run" is not a partial scan.
+- **Duplicates** (`modules/duplicates.rs`). Staged size -> partial hash
+  (first+last 4 KB, blake3) -> full blake3 with rayon, progress and cancellation.
+  Hard links and junctions collapse by volume-serial + file-index identity
+  (`core/platform/file_id.rs`) and are *reported*, because a user who made that
+  link deliberately deserves to be told why their obvious duplicate is missing.
+  The keeper heuristic scores the four signals module spec 03 names and the UI
+  lets a person override it per set or in bulk. Every removal is NeedsReview and
+  no higher.
+- **Cancellation is reachable** (`core::state::CancelRegistry`, `cancel_scan`).
+  ARCHITECTURE section 3 listed the command; phase 1 shipped a token nothing
+  could trip. A full-hash pass over a Pictures folder is minutes of work, so the
+  duplicates route has a stop button that does something.
+- **UI.** Collapsible per-pack groups in the cleaner's review (collapsed is the
+  opt-in state, so a scan opens showing everything), the duplicates route with
+  sets sorted by wasted bytes, keeper badges, per-set and bulk keeper switches,
+  and extension/size filters, and a settings page rendered from the packs that
+  actually loaded — a community pack dropped into `rules/` appears with no UI
+  change.
+- **Junction companions for the five symlink safety tests**
+  (`core/test_support.rs::make_junction`, architect-approved). `mklink /J` needs
+  no privilege and `canonicalize` resolves a junction identically, so "the walker
+  never follows a link", "a link into a protected directory is refused", "a walk
+  root that resolves into one is refused", "a link is never quarantined" and "a
+  directory containing a link is never moved across volumes" now assert on every
+  developer machine instead of only in CI.
+
+**Decisions.**
+
+- `windows-update-leftovers` cannot do what module spec 02 asks. Its only
+  location is `%WINDIR%\SoftwareDistribution\Download`, `%WINDIR%` is protected
+  in code, and CLAUDE.md says a protected path never receives a Safe rating *or*
+  a delete action. Shipped as `info_only` + `do_not_delete` and off by default,
+  so it can report and never act and does not put a permanent refusal line in
+  front of every user. `no_shipped_rule_targets_a_protected_path` was
+  **tightened** rather than relaxed: a rule naming a protected path must be
+  structurally unable to propose anything, and the brain is asked to prove it
+  refuses a file under it. Escalated in `docs/DECISIONS-NEEDED.md`.
+- Duplicate confidence is a flat 75 rather than a `brain::score` number. A blake3
+  match is a fact about bytes, not a heuristic; the uncertainty is entirely about
+  which copy a person wants, which is why the bucket is NeedsReview.
+- The i18n string for `skipped_rules` no longer claims the cause is an unset
+  folder. It carries protected-root refusals too, and it did before this phase.
+
+**Deferred.** `QuarantineStats.unreadableRows` and `PurgeReport.affectedBatches`
+stay unsurfaced (architect deferred both to phase 3). No LLM layer, no treemap,
+no startup manager. `%WINDIR%\*.log` and `%WINDIR%\Downloaded Program Files` from
+module spec 02 are not shipped as rules at all, for the same protected-tree
+reason as the pack above.
