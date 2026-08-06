@@ -1113,30 +1113,24 @@ fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
         CoreError::Quarantine(format!("cannot inspect `{}`: {err}", from.display()))
     })?;
 
-    // Whether the destination was already there decides what the cleanup below
-    // may touch. Deleting something this call did not create is how an
-    // unguarded `remove_dir_all` ends up pointed at a user directory on the
-    // restore path (security review H1).
-    let destination_existed = match fs::symlink_metadata(to) {
-        Ok(_) => true,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
-        Err(err) => {
-            return Err(CoreError::Quarantine(format!(
-                "cannot inspect the destination `{}`: {err}",
-                to.display()
-            )))
-        }
-    };
+    // What the cleanup below may touch is decided by whether *this call* made
+    // the destination, and only the copy itself knows that. Probing `to` first
+    // answers a different question: a file that appears between the probe and
+    // `create_new` makes the copy fail with `AlreadyExists` while the probe
+    // still says "did not exist", and on the restore path `to` is a user path —
+    // so the cleanup deleted a file this call never created (security review
+    // H1, then M10).
+    let mut created_destination = false;
 
     let copied = if metadata.is_dir() {
-        copy_dir_recursive(from, to)
+        copy_dir_recursive(from, to, &mut created_destination)
     } else {
-        copy_file(from, to).map(|()| Vec::new())
+        copy_file(from, to, &mut created_destination).map(|()| Vec::new())
     };
     let skipped_links = match copied {
         Ok(skipped) => skipped,
         Err(err) => {
-            cleanup_partial(to, destination_existed);
+            cleanup_partial(to, created_destination);
             return Err(CoreError::Quarantine(format!(
                 "cannot copy `{}` to `{}`: {err}",
                 from.display(),
@@ -1150,7 +1144,7 @@ fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
     // restore could never put it back. Refuse the whole move and leave the
     // original exactly where it is (security review M7).
     if !skipped_links.is_empty() {
-        cleanup_partial(to, destination_existed);
+        cleanup_partial(to, created_destination);
         return Err(CoreError::Quarantine(format!(
             "`{}` contains links that cannot be copied to another volume ({}); \
              it was left where it is",
@@ -1169,7 +1163,7 @@ fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
         copies_match(from, to)
     };
     if !verified.unwrap_or(false) {
-        cleanup_partial(to, destination_existed);
+        cleanup_partial(to, created_destination);
         return Err(CoreError::VerifyFailed(from.display().to_string()));
     }
 
@@ -1190,13 +1184,16 @@ fn copy_verify_remove(from: &Path, to: &Path) -> Result<()> {
 ///
 /// It used to be an unguarded `remove_dir_all(to)`, and on the restore path
 /// `to` is a user path: a copy that failed onto an existing folder deleted the
-/// folder (security review H1).
+/// folder (security review H1). `created_by_this_call` comes from the copy
+/// itself — from the `create_new` that succeeded, or the `create_dir` that did
+/// — never from a probe taken beforehand, because the answer can change in
+/// between (security review M10).
 #[allow(clippy::disallowed_methods)]
-fn cleanup_partial(path: &Path, existed_before: bool) {
-    if existed_before {
+fn cleanup_partial(path: &Path, created_by_this_call: bool) {
+    if !created_by_this_call {
         tracing::warn!(
             path = %path.display(),
-            "leaving the pre-existing destination alone after a failed copy"
+            "leaving the destination alone after a failed copy: this call did not create it"
         );
         return;
     }
@@ -1223,7 +1220,12 @@ fn cleanup_partial(path: &Path, existed_before: bool) {
 /// exclusive claim on `to` that makes a restore safe (security review H2).
 /// A cross-volume copy that lost the timestamps would also make a restored file
 /// look brand new to every backup and every age-based rule (M6).
-fn copy_file(from: &Path, to: &Path) -> std::io::Result<()> {
+///
+/// `created_destination` is set the instant `to` comes into existence, and is
+/// what decides whether a failed copy may be cleaned up. It is an out-parameter
+/// rather than part of the return value because the caller needs the answer on
+/// the error path too (security review M10).
+fn copy_file(from: &Path, to: &Path, created_destination: &mut bool) -> std::io::Result<()> {
     let metadata = fs::metadata(from)?;
 
     {
@@ -1232,6 +1234,10 @@ fn copy_file(from: &Path, to: &Path) -> std::io::Result<()> {
             .write(true)
             .create_new(true)
             .open(to)?;
+        // `create_new` succeeded, so nothing was at `to` and this call is what
+        // put something there. Anything that fails from here on may be cleaned
+        // up; anything that failed before this line may not.
+        *created_destination = true;
         std::io::copy(&mut source, &mut destination)?;
         destination.sync_all()?;
     }
@@ -1258,9 +1264,19 @@ fn copy_file(from: &Path, to: &Path) -> std::io::Result<()> {
 /// destroy the link on the way back, and recreating it needs a privilege this
 /// app does not ask for. The caller turns a non-empty list into a refusal
 /// (security review M7).
-fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<Vec<PathBuf>> {
+///
+/// `created_destination` follows the same contract as [`copy_file`]'s: set the
+/// instant `to` exists, and only for the destination handed to *this* call.
+fn copy_dir_recursive(
+    from: &Path,
+    to: &Path,
+    created_destination: &mut bool,
+) -> std::io::Result<Vec<PathBuf>> {
     let mut skipped = Vec::new();
+    // `create_dir` fails rather than succeeding on an existing directory, so
+    // reaching the next line means this call made it.
     fs::create_dir(to)?;
+    *created_destination = true;
 
     for entry in fs::read_dir(from)? {
         let entry = entry?;
@@ -1268,12 +1284,16 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<Vec<PathBuf>> {
         let target = to.join(entry.file_name());
         let kind = entry.file_type()?;
 
+        // Only the top-level destination decides what the cleanup may touch;
+        // everything below it is already inside a directory this call owns, so
+        // the children's flags are discarded.
+        let mut child_created = false;
         if kind.is_symlink() {
             skipped.push(source);
         } else if kind.is_dir() {
-            skipped.extend(copy_dir_recursive(&source, &target)?);
+            skipped.extend(copy_dir_recursive(&source, &target, &mut child_created)?);
         } else {
-            copy_file(&source, &target)?;
+            copy_file(&source, &target, &mut child_created)?;
         }
     }
     Ok(skipped)
@@ -2135,6 +2155,76 @@ mod tests {
         assert!(source.exists(), "the original must survive too");
     }
 
+    /// M10: H1's fix sampled the destination with a probe *before* the copy,
+    /// which answers a different question. A file that appears at `to` between
+    /// the probe and `create_new` makes the copy fail with `AlreadyExists`
+    /// while the probe still says "did not exist" — and on the restore path
+    /// `to` is a user path, so the cleanup deleted the file that appeared.
+    ///
+    /// The fix is that the copy itself reports whether it created `to`, so
+    /// these are the two cases that matter, asserted on the copy primitives
+    /// directly rather than on a race that cannot be scheduled.
+    #[test]
+    fn a_copy_reports_whether_it_created_its_destination() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = write(dir.path(), "src.bin", b"payload");
+
+        // Nothing there: the copy creates it and says so.
+        let fresh = dir.path().join("fresh.bin");
+        let mut created = false;
+        copy_file(&source, &fresh, &mut created).expect("copy");
+        assert!(created, "a copy that created `to` must say so");
+
+        // Something appeared there first: `create_new` fails and the copy must
+        // *not* claim it, whatever a probe taken earlier would have said.
+        let squatter = write(dir.path(), "squatter.bin", b"the user's file");
+        let mut created = false;
+        let err = copy_file(&source, &squatter, &mut created)
+            .expect_err("an occupied destination must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(
+            !created,
+            "a copy that did not create `to` must never claim it"
+        );
+
+        // And that is what the cleanup keys on: it leaves what it did not make.
+        cleanup_partial(&squatter, created);
+        assert_eq!(
+            fs::read(&squatter).expect("read"),
+            b"the user's file",
+            "cleanup must not delete a file this call never created"
+        );
+        // The one it did make, it removes.
+        cleanup_partial(&fresh, true);
+        assert!(!fresh.exists());
+    }
+
+    /// The directory half of M10: `create_dir` fails on an occupied name, so
+    /// the tree copy must not claim a directory it did not create either.
+    #[test]
+    fn a_directory_copy_reports_whether_it_created_its_destination() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("src");
+        fs::create_dir(&source).expect("dir");
+        write(&source, "a.bin", b"payload");
+
+        let fresh = dir.path().join("fresh");
+        let mut created = false;
+        copy_dir_recursive(&source, &fresh, &mut created).expect("copy");
+        assert!(created);
+
+        let occupied = dir.path().join("occupied");
+        fs::create_dir(&occupied).expect("dir");
+        let precious = write(&occupied, "precious.txt", b"do not touch");
+        let mut created = false;
+        copy_dir_recursive(&source, &occupied, &mut created)
+            .expect_err("an occupied destination must fail");
+        assert!(!created);
+
+        cleanup_partial(&occupied, created);
+        assert_eq!(fs::read(&precious).expect("read"), b"do not touch");
+    }
+
     /// H2: `Path::exists` answers "no" for a path we merely cannot see, and
     /// `fs::rename` replaces. Together that overwrites a file on restore.
     #[test]
@@ -2461,7 +2551,7 @@ mod tests {
         write(&tree, "sub/b.txt", b"b");
 
         let target = dir.path().join("copy");
-        let skipped = copy_dir_recursive(&tree, &target).expect("copy");
+        let skipped = copy_dir_recursive(&tree, &target, &mut false).expect("copy");
 
         assert!(skipped.is_empty(), "a plain tree skips nothing");
         assert!(dirs_are_identical(&tree, &target).expect("compare"));
