@@ -75,6 +75,13 @@ jobs:
       - name: TypeScript / Svelte check
         run: npm run check
 
+      # The squarified treemap layout is arithmetic, and arithmetic that is out
+      # by a few percent produces a picture that looks completely convincing.
+      # These assert the properties a picture cannot show you: the rectangles
+      # tile the box, their areas are proportional, nothing overlaps.
+      - name: UI unit tests
+        run: npm run test:ui
+
       - name: Build UI
         run: npm run build
 

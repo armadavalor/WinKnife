@@ -51,6 +51,40 @@
       </button>
     </div>
 
+    <!--
+      Architect addition B: two things the ledger has always known and never
+      said. A row that no longer parses is not counted in the totals above, so
+      the drawer has to admit it exists or the numbers quietly under-report; and
+      the size cap evicts oldest-first across batch boundaries, so a batch can
+      lose part of itself. Factual tone, no alarm — these are notes, not errors.
+    -->
+    {#if store.stats.unreadableRows > 0}
+      <p
+        class="border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-ink-muted"
+      >
+        {t("quarantine.unreadableRows", { count: store.stats.unreadableRows })}
+      </p>
+    {/if}
+
+    {#if store.lastPurge && store.lastPurge.affectedBatches.length > 0}
+      <p
+        class="border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-ink-muted"
+      >
+        {t("quarantine.purged", {
+          count: store.lastPurge.purgedItems,
+          size: formatBytes(store.lastPurge.freedBytes),
+        })}
+        {t("quarantine.affectedBatches", {
+          count: store.lastPurge.affectedBatches.length,
+        })}
+        {#if store.lastPurge.failedItems.length > 0}
+          {t("quarantine.purgeFailed", {
+            count: store.lastPurge.failedItems.length,
+          })}
+        {/if}
+      </p>
+    {/if}
+
     <div class="flex-1 overflow-y-auto px-5 py-4">
       {#if store.status === "loading"}
         <p class="text-sm text-ink-faint">{t("quarantine.loading")}</p>

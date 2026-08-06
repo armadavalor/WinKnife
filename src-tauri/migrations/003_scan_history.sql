@@ -1,0 +1,11 @@
+-- Phase 3, task 3: the dashboard shows real numbers.
+--
+-- `scans` has existed since migration 001 (ARCHITECTURE section 5) and nothing
+-- has ever written to it — the review screen works from the in-memory store,
+-- which is right, because findings are facts about a filesystem that changes.
+-- What the dashboard needs is different and much smaller: "when did this last
+-- run, what did it find, and roughly how much could it reclaim". That survives
+-- a restart, so it belongs in the database.
+--
+-- One column short of being able to answer it, hence this migration.
+ALTER TABLE scans ADD COLUMN reclaimable_bytes INTEGER NOT NULL DEFAULT 0;

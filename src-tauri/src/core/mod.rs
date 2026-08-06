@@ -9,6 +9,7 @@ pub mod db;
 pub mod error;
 pub mod events;
 pub mod executor;
+pub mod history;
 pub mod logging;
 pub mod module;
 pub mod path_compare;
@@ -20,5 +21,6 @@ pub mod state;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod types;
+pub mod window_state;
 
 pub use error::{ApiError, CoreError, Result};

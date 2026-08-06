@@ -567,6 +567,38 @@ export interface AppSettings {
 }
 
 /* -------------------------------------------------------------------------
+ * core/history.rs and the dashboard
+ * ---------------------------------------------------------------------- */
+
+/** One line of a module's history. Facts about a past run, nothing actionable. */
+export interface ScanRecord {
+  module: string;
+  /** RFC 3339 UTC. */
+  startedAt: string;
+  finishedAt: string | null;
+  findingCount: number;
+  /** An estimate from that run, and shown as one. */
+  reclaimableBytes: number;
+  /** `done` or `cancelled`. */
+  status: string;
+}
+
+/** One module's dashboard card. */
+export interface ModuleCard {
+  module: string;
+  /** Null when it has never been run on this machine. */
+  lastScan: ScanRecord | null;
+}
+
+/** Everything the dashboard shows, in one round trip. */
+export interface DashboardSummary {
+  modules: ModuleCard[];
+  quarantine: QuarantineStats;
+  timer: TimerStatus;
+  drives: DriveInfo[];
+}
+
+/* -------------------------------------------------------------------------
  * core/quarantine.rs
  * ---------------------------------------------------------------------- */
 

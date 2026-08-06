@@ -13,6 +13,7 @@ import type {
   AppSettings,
   CachedScan,
   CleanerSummary,
+  DashboardSummary,
   DriveInfo,
   DuplicateScanResult,
   ExecProgress,
@@ -58,6 +59,11 @@ export const EVENTS = {
  */
 export function listModules(): Promise<ModuleManifest[]> {
   return invoke<ModuleManifest[]>("list_modules");
+}
+
+/** Everything the dashboard shows, in one round trip. */
+export function dashboardSummary(): Promise<DashboardSummary> {
+  return invoke<DashboardSummary>("dashboard_summary");
 }
 
 /* -------------------------------------------------------------------------

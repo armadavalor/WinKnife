@@ -20,6 +20,7 @@ use crate::core::events::{
     self, ExecProgress, ProgressThrottle, QuarantineChanged, ScanDone, ScanProgress,
 };
 use crate::core::executor::{self, ExecEnvironment};
+use crate::core::history;
 use crate::core::module::{ModuleManifest, ModuleRegistry};
 use crate::core::platform::{PowerAction, RecycleBin};
 use crate::core::quarantine::{
@@ -155,6 +156,7 @@ pub async fn start_scan<R: Runtime>(
         .unwrap_or_default();
 
     let scan_id = Uuid::new_v4();
+    let started_at = Utc::now();
     let cancel = cancels.start(scan_id);
     let mut throttle = ProgressThrottle::new();
 
@@ -204,6 +206,16 @@ pub async fn start_scan<R: Runtime>(
         findings = result.findings.len(),
         unreadable = output.unreadable.len(),
         "scan finished"
+    );
+
+    remember(
+        &db,
+        scan_id,
+        "cleaner",
+        started_at,
+        result.findings.len() as u64,
+        result.safe_bytes() + result.review_bytes(),
+        false,
     );
 
     let done = ScanDone {
@@ -367,6 +379,7 @@ pub async fn start_duplicate_scan<R: Runtime>(
         .unwrap_or_else(|| duplicates::default_roots(&crate::core::platform::SystemEnv));
 
     let scan_id = Uuid::new_v4();
+    let started_at = Utc::now();
     let cancel = cancels.start(scan_id);
     let throttle = std::sync::Mutex::new(ProgressThrottle::new());
 
@@ -424,6 +437,16 @@ pub async fn start_duplicate_scan<R: Runtime>(
         recommendations: recommendations.clone(),
         skipped_rules: scan.skipped_roots.clone(),
     });
+
+    remember(
+        &db,
+        scan_id,
+        "duplicates",
+        started_at,
+        scan.sets.len() as u64,
+        scan.wasted_bytes(),
+        scan.cancelled,
+    );
 
     let _ = events::emit_scan_done(
         &app,
@@ -496,6 +519,7 @@ pub async fn treemap_scan<R: Runtime>(
     cancels: State<'_, CancelRegistry>,
 ) -> Result<TreemapScanResult, ApiError> {
     let scan_id = Uuid::new_v4();
+    let started_at = Utc::now();
     let cancel = cancels.start(scan_id);
     let mut throttle = ProgressThrottle::new();
 
@@ -537,6 +561,16 @@ pub async fn treemap_scan<R: Runtime>(
     let summary = summary.ok_or_else(|| {
         CoreError::Quarantine("the treemap cache was written but could not be read back".to_owned())
     })?;
+
+    remember(
+        &db,
+        scan_id,
+        "treemap",
+        started_at,
+        summary.file_count,
+        0,
+        scan.cancelled,
+    );
 
     let oracle = treemap::MemoryOracle::new(&scan);
     let level = treemap::children(&root, &root, &oracle)?;
@@ -629,6 +663,7 @@ pub async fn startup_scan<R: Runtime>(
     store: State<'_, ScanStore>,
     db: State<'_, Database>,
 ) -> Result<StartupScanResult, ApiError> {
+    let started_at = Utc::now();
     let scan = db.with(|conn| Ok(services.startup_service.scan(conn)))?;
     let scan_id = Uuid::new_v4();
 
@@ -649,6 +684,16 @@ pub async fn startup_scan<R: Runtime>(
         recommendations: recommendations.clone(),
         skipped_rules: scan.unreadable.clone(),
     });
+
+    remember(
+        &db,
+        scan_id,
+        "startup",
+        started_at,
+        scan.entries.len() as u64,
+        0,
+        false,
+    );
 
     tracing::info!(
         scan = %scan_id,
@@ -758,6 +803,94 @@ pub fn startup_enable(
             .startup_service
             .set_enabled(conn, source, &key, true, Utc::now())
     })?)
+}
+
+/// Write one line of scan history, logging rather than failing.
+///
+/// A dashboard card that cannot be written must never fail the scan that
+/// produced it — the user asked for a scan, not for a card.
+fn remember(
+    db: &Database,
+    scan_id: Uuid,
+    module: &str,
+    started_at: chrono::DateTime<Utc>,
+    finding_count: u64,
+    reclaimable_bytes: u64,
+    cancelled: bool,
+) {
+    if let Err(err) = db.with(|conn| {
+        history::record(
+            conn,
+            scan_id,
+            module,
+            started_at,
+            finding_count,
+            reclaimable_bytes,
+            cancelled,
+        )
+    }) {
+        tracing::warn!(module, error = %err, "scan history was not written");
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * Dashboard
+ * ---------------------------------------------------------------------- */
+
+/// One module's card.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleCard {
+    /// Module id, so the UI can join it to the manifest it already has.
+    pub module: String,
+    /// The last run, or `None` when it has never been run on this machine.
+    pub last_scan: Option<history::ScanRecord>,
+}
+
+/// Everything the dashboard shows, in one round trip.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardSummary {
+    /// One per registered module, in sidebar order.
+    pub modules: Vec<ModuleCard>,
+    /// What is currently held, and how many ledger rows no longer parse.
+    pub quarantine: QuarantineStats,
+    /// The armed timer, if any.
+    pub timer: TimerStatus,
+    /// Drives, so the dashboard can show how full the machine is.
+    pub drives: Vec<crate::core::platform::DriveInfo>,
+}
+
+/// Everything the dashboard shows.
+///
+/// # Errors
+/// Returns an error if the history or the quarantine ledger cannot be read.
+#[tauri::command]
+pub fn dashboard_summary(
+    registry: State<'_, ModuleRegistry>,
+    services: State<'_, Services>,
+    timer: State<'_, Arc<ShutdownTimer>>,
+    db: State<'_, Database>,
+) -> Result<DashboardSummary, ApiError> {
+    use crate::core::platform::Volumes;
+
+    let (modules, quarantine) = db.with(|conn| {
+        let mut cards = Vec::with_capacity(registry.len());
+        for manifest in registry.manifests() {
+            cards.push(ModuleCard {
+                last_scan: history::latest(conn, &manifest.id)?,
+                module: manifest.id,
+            });
+        }
+        Ok((cards, services.quarantine.stats(conn)?))
+    })?;
+
+    Ok(DashboardSummary {
+        modules,
+        quarantine,
+        timer: timer.status(Utc::now()),
+        drives: crate::core::platform::SystemVolumes.drives(),
+    })
 }
 
 /* -------------------------------------------------------------------------

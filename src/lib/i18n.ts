@@ -27,8 +27,21 @@ const en = {
     "Every tool starts read-only. Nothing is removed without your say-so, and anything removed goes to quarantine first.",
   "dashboard.loading": "Loading tools…",
   "dashboard.empty": "No tools are registered yet.",
-  "dashboard.error": "Could not load the tool registry.",
+  "dashboard.error": "Could not load what this machine looks like right now.",
   "dashboard.retry": "Try again",
+  "dashboard.reclaimable": "Could be reclaimed",
+  "dashboard.reclaimableNote":
+    "Estimated from the last time each tool ran. Nothing has been removed.",
+  "dashboard.quarantineNote": "{count} items held · open the drawer",
+  "dashboard.timer": "Shutdown timer",
+  "dashboard.timerActive": "Runs at {when}",
+  "dashboard.free": "free",
+  "dashboard.lastScan": "Last run {when} · {count} found",
+  "dashboard.couldFree": "about {size} reclaimable",
+  "dashboard.wasCancelled": "stopped early",
+  "dashboard.neverRun": "Never run on this machine.",
+  "dashboard.noScan": "Nothing to scan — this one works on its own.",
+  "dashboard.review": "Review startup items",
 
   "module.open": "Open",
   "module.capability.scan": "Scans",
@@ -71,7 +84,7 @@ const en = {
   "cleaner.confirmBody":
     "This frees about {size}. Nothing is deleted — the files move to quarantine first.",
   "cleaner.confirmNote":
-    "Everything goes to quarantine and can be restored for 7 days. After that it is purged automatically.",
+    "Everything goes to quarantine first. You can put any of it back from the quarantine drawer for the next {days} days; after that it is purged automatically. Nothing is deleted right now.",
   "cleaner.confirmRecycleBin":
     "Your selection includes emptying the recycle bin. That one is final and cannot be restored — the rest still can.",
   "cleaner.doneTitle": "Done",
@@ -239,6 +252,13 @@ const en = {
   "quarantine.showItems": "Show items",
   "quarantine.hideItems": "Hide items",
   "quarantine.purgeNow": "Purge now",
+  "quarantine.unreadableRows":
+    "{count} rows of the ledger can no longer be read, so they are not included in the totals above. The files they refer to are still in the quarantine folder and have not been touched.",
+  "quarantine.purged": "Purged {count} items and freed {size}.",
+  "quarantine.affectedBatches":
+    "That came out of {count} batches — the size cap removes the oldest items first, so a batch can lose part of itself and still be listed.",
+  "quarantine.purgeFailed":
+    "{count} items could not be removed and will be retried on the next purge.",
   "quarantine.restored": "Restored {count} items.",
   "quarantine.restoredAlongside":
     "Something already occupied the original path, so this was restored as {path}.",
@@ -268,7 +288,7 @@ const en = {
   "shutdown.dryRunBanner":
     "This build was started with --dry-run: the timer counts down and warns you, but nothing is actually shut down. The action is written to the log instead.",
 
-  "status.phase": "Phase 2 — brain + duplicates",
+  "status.phase": "Phase 3 — disk map + startup",
 } as const;
 
 /** Every key the dictionary knows. */

@@ -38,6 +38,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "treemap_cache",
         sql: include_str!("../../migrations/002_treemap_cache.sql"),
     },
+    Migration {
+        version: 3,
+        name: "scan_history",
+        sql: include_str!("../../migrations/003_scan_history.sql"),
+    },
 ];
 
 /// The schema version the current build expects.

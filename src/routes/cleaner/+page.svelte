@@ -17,6 +17,7 @@
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
+  import { settingsStore } from "$lib/stores/settings.svelte";
   import { scanStore } from "$lib/stores/scan.svelte";
 
   const MODULE_ID = "cleaner";
@@ -25,6 +26,17 @@
   const store = scanStore;
 
   let confirming = $state(false);
+
+  // The dialog states how long a restore stays possible, and that window is a
+  // setting. Reading the stored value rather than writing "7 days" into the
+  // sentence keeps the promise true for somebody who changed it.
+  const retentionDays = $derived(
+    settingsStore.settings?.quarantine.retentionDays ?? 7,
+  );
+
+  $effect(() => {
+    void settingsStore.load();
+  });
 
   // The treemap's "Scan with Cleaner" cross-link arrives with `?from=`. The
   // cleaner does not scan a folder you pick — it scans the locations its rule
@@ -239,7 +251,7 @@
     count: store.selected.size,
     size: formatBytes(store.selectedBytes),
   })}
-  note={t("cleaner.confirmNote")}
+  note={t("cleaner.confirmNote", { days: retentionDays })}
   warning={emptiesRecycleBin ? t("cleaner.confirmRecycleBin") : undefined}
   confirmLabel={t("cleaner.clean")}
   onconfirm={confirmExecute}

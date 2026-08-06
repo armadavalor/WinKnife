@@ -16,6 +16,7 @@
   import { duplicatesStore } from "$lib/stores/duplicates.svelte";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
+  import { settingsStore } from "$lib/stores/settings.svelte";
   import type { ExtensionClass } from "$lib/types";
 
   const MODULE_ID = "duplicates";
@@ -24,6 +25,17 @@
   const store = duplicatesStore;
 
   let confirming = $state(false);
+
+  // The dialog states how long a restore stays possible, and that window is a
+  // setting. Reading the stored value rather than writing "7 days" into the
+  // sentence keeps the promise true for somebody who changed it.
+  const retentionDays = $derived(
+    settingsStore.settings?.quarantine.retentionDays ?? 7,
+  );
+
+  $effect(() => {
+    void settingsStore.load();
+  });
   let expanded = $state<Set<string>>(new Set());
 
   // `?root=` is the treemap's "Find duplicates here" cross-link arriving with a
@@ -435,7 +447,7 @@
   message={t("duplicates.confirmBody", {
     size: formatBytes(store.selectedBytes),
   })}
-  note={t("cleaner.confirmNote")}
+  note={t("cleaner.confirmNote", { days: retentionDays })}
   confirmLabel={t("duplicates.remove")}
   onconfirm={confirmExecute}
   oncancel={() => (confirming = false)}

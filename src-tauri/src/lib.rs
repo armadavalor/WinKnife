@@ -220,11 +220,13 @@ pub fn run() {
 
             tray::install(app.handle())?;
             spawn_ticker(app.handle().clone(), timer);
+            window::restore_and_track(app.handle());
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_modules,
+            commands::dashboard_summary,
             commands::start_scan,
             commands::cancel_scan,
             commands::start_duplicate_scan,
@@ -311,6 +313,74 @@ fn notify_warning(app: &tauri::AppHandle, minutes: i64, remaining_secs: i64) {
         .show()
     {
         tracing::debug!(error = %err, "warning notification was not shown");
+    }
+}
+
+/// Window geometry: put it back where the user left it, and remember it when
+/// they move it.
+mod window {
+    use tauri::{Listener, Manager, PhysicalPosition, PhysicalSize};
+
+    use crate::core::db::Database;
+    use crate::core::window_state::{self, WindowState};
+
+    /// Restore the saved geometry and start recording changes.
+    ///
+    /// Every step is best-effort: a utility that refused to open because it
+    /// could not remember where it was last time would be a poor trade.
+    pub fn restore_and_track(app: &tauri::AppHandle) {
+        let Some(window) = app.get_webview_window("main") else {
+            return;
+        };
+
+        if let Some(db) = app.try_state::<std::sync::Arc<Database>>() {
+            match db.with(window_state::load) {
+                Ok(Some(state)) => {
+                    let _ = window.set_size(PhysicalSize::new(state.width, state.height));
+                    let _ = window.set_position(PhysicalPosition::new(state.x, state.y));
+                    if state.maximized {
+                        let _ = window.maximize();
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => tracing::debug!(error = %err, "window geometry was not restored"),
+            }
+        }
+
+        // Saved when the window closes rather than on every move: a drag emits
+        // hundreds of events and a settings write per pixel is absurd.
+        let handle = app.clone();
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                save(&handle);
+            }
+        });
+        // Also on the app-wide exit path, because a tray "Quit" never asks the
+        // window to close.
+        let handle = app.clone();
+        app.listen("tauri://close-requested", move |_| save(&handle));
+    }
+
+    fn save(app: &tauri::AppHandle) {
+        let Some(window) = app.get_webview_window("main") else {
+            return;
+        };
+        let Some(db) = app.try_state::<std::sync::Arc<Database>>() else {
+            return;
+        };
+        let (Ok(size), Ok(position)) = (window.outer_size(), window.outer_position()) else {
+            return;
+        };
+        let state = WindowState {
+            width: size.width,
+            height: size.height,
+            x: position.x,
+            y: position.y,
+            maximized: window.is_maximized().unwrap_or(false),
+        };
+        if let Err(err) = db.with(|conn| window_state::save(conn, &state)) {
+            tracing::debug!(error = %err, "window geometry was not saved");
+        }
     }
 }
 

@@ -17,6 +17,7 @@ import {
   isApiError,
   type QuarantineBatch,
   type QuarantineItem,
+  type PurgeReport,
   type QuarantineStats,
   type RestoreReport,
 } from "$lib/types";
@@ -43,6 +44,15 @@ class QuarantineStore {
   items = $state<Record<string, QuarantineItem[]>>({});
   /** Result of the last restore, shown inline. */
   lastRestore = $state<RestoreReport | null>(null);
+  /**
+   * Result of the last purge, shown inline.
+   *
+   * The size cap evicts oldest-first across batch boundaries, so a batch can
+   * lose part of itself and still appear in the list at its old size. Saying so
+   * is the point (architect addition B, phase 3): a partially evicted batch is
+   * exactly the thing an honest tool admits to rather than quietly rounding off.
+   */
+  lastPurge = $state<PurgeReport | null>(null);
 
   /** Fetch batches and totals. */
   async reload(): Promise<void> {
@@ -73,6 +83,7 @@ class QuarantineStore {
   hide(): void {
     this.open = false;
     this.lastRestore = null;
+    this.lastPurge = null;
   }
 
   /** Load (or drop) the item list of one batch. */
@@ -104,7 +115,7 @@ class QuarantineStore {
   async purge(): Promise<void> {
     this.error = null;
     try {
-      await quarantinePurge();
+      this.lastPurge = await quarantinePurge();
       await this.reload();
     } catch (error: unknown) {
       this.error = message(error);

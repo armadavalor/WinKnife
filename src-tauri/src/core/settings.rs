@@ -23,6 +23,9 @@ pub const KEY_RETENTION_DAYS: &str = "quarantine.retention_days";
 /// Quarantine size cap, in bytes.
 pub const KEY_MAX_BYTES: &str = "quarantine.max_bytes";
 
+/// Where and how big the window was when it was last closed.
+pub const KEY_WINDOW_STATE: &str = "app.window_state";
+
 /// Prefix under which each module stores its own settings blob.
 ///
 /// One row per module rather than one row per field: a module owns the shape of
