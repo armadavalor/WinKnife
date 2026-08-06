@@ -567,22 +567,24 @@ impl Quarantine {
         drop(stmt);
 
         let mut doomed = Vec::new();
+        // `candidates` is a finite snapshot and every arm of the loop consumes
+        // one element, so this terminates whatever the sizes are.
         for item in candidates {
             if over_by == 0 {
                 break;
             }
-            // An item that frees nothing cannot bring us under the cap, and
-            // carrying on regardless meant `over_by` never reached zero and
-            // every remaining item was doomed — the whole quarantine, to
-            // reclaim nothing (security review M4). Stopping under-purges,
-            // which is the harmless direction.
+            // A zero-byte item cannot reduce `over_by`, so it is *skipped*, not
+            // evicted and not a reason to stop. Evicting it would purge the
+            // quarantine to reclaim nothing (security review M4); stopping at
+            // it disabled the cap outright, because candidates are ordered
+            // oldest-first and one empty `.tmp` at the head left a quarantine
+            // over its cap for the whole retention window (security review H8).
             if item.size_bytes == 0 {
-                tracing::warn!(
+                tracing::debug!(
                     item = %item.id,
-                    "stopping the size-cap purge at a zero-byte item: continuing would \
-                     purge the whole quarantine without freeing anything"
+                    "skipping a zero-byte item during the size-cap purge: it frees nothing"
                 );
-                break;
+                continue;
             }
             over_by = over_by.saturating_sub(item.size_bytes);
             doomed.push(item);
@@ -2190,10 +2192,14 @@ mod tests {
         assert_eq!(h.quarantine.stats(&h.conn).expect("stats").item_count, 1);
     }
 
-    /// M4: zero-byte rows never advanced `over_by`, so every candidate was
-    /// doomed — the whole quarantine, to reclaim nothing.
+    /// M4 and H8 together. A zero-byte item cannot reduce `over_by`, so
+    /// evicting it purges the quarantine to reclaim nothing (M4) — but
+    /// *stopping* at it disabled the cap outright, because candidates are
+    /// ordered oldest-first and one empty `.tmp` at the head left the
+    /// quarantine over its cap for the whole retention window (H8). The right
+    /// answer is neither: skip it and keep evicting real items.
     #[test]
-    fn the_size_cap_stops_rather_than_purging_everything_for_nothing() {
+    fn the_size_cap_skips_zero_byte_items_and_keeps_evicting() {
         let h = harness(RetentionPolicy {
             retention_days: 7,
             max_bytes: 5,
@@ -2204,6 +2210,8 @@ mod tests {
         let real = write(&h.work, "real.bin", &[b'x'; 10]);
         let empty_item = h.quarantine.take(&h.conn, batch, &empty).expect("take");
         let real_item = h.quarantine.take(&h.conn, batch, &real).expect("take");
+        // The empty one is the *oldest*, so it is the head of the candidate
+        // list — exactly the arrangement that used to abort the eviction.
         for (index, item) in [&empty_item, &real_item].iter().enumerate() {
             h.conn
                 .execute(
@@ -2219,11 +2227,70 @@ mod tests {
         let report = h.quarantine.enforce_size_cap(&h.conn).expect("cap");
 
         assert_eq!(
-            report.purged_items, 0,
-            "a zero-byte item at the head must stop the eviction, not start it"
+            report.purged_items, 1,
+            "the 10-byte item is what puts the quarantine over its 5-byte cap"
         );
-        assert!(empty_item.quarantine_path.exists());
-        assert!(real_item.quarantine_path.exists());
+        assert_eq!(report.freed_bytes, 10);
+        assert!(
+            !real_item.quarantine_path.exists(),
+            "the item that was actually over the cap must be evicted"
+        );
+        assert!(
+            empty_item.quarantine_path.exists(),
+            "a zero-byte item frees nothing, so evicting it would cost the user a \
+             restorable file for no reclaimed bytes"
+        );
+        assert!(h.quarantine.stats(&h.conn).expect("stats").total_bytes <= 5);
+    }
+
+    /// H8, the shape that disabled the cap indefinitely: a steady trickle of
+    /// empty `.tmp`/lock files — exactly what this app quarantines — at the
+    /// head of the candidate list. The eviction must walk past all of them and
+    /// reach the item that is actually holding the bytes.
+    #[test]
+    fn a_long_run_of_zero_byte_items_does_not_disable_the_size_cap() {
+        let h = harness(RetentionPolicy {
+            retention_days: 7,
+            max_bytes: 5,
+        });
+        let batch = h.quarantine.start_batch();
+
+        let mut empties = Vec::new();
+        for index in 0..25 {
+            let path = write(&h.work, &format!("empty-{index}.tmp"), b"");
+            empties.push(h.quarantine.take(&h.conn, batch, &path).expect("take"));
+        }
+        let big = write(&h.work, "big.bin", &[b'x'; 100]);
+        let big_item = h.quarantine.take(&h.conn, batch, &big).expect("take");
+
+        // Every empty is older than the big one, so all 25 are ahead of it.
+        for (index, item) in empties.iter().enumerate() {
+            h.conn
+                .execute(
+                    "UPDATE quarantine SET quarantined_at = ?2 WHERE id = ?1",
+                    rusqlite::params![
+                        item.id.to_string(),
+                        timestamp(Utc::now() - Duration::minutes(60 - index as i64))
+                    ],
+                )
+                .expect("age");
+        }
+
+        let report = h.quarantine.enforce_size_cap(&h.conn).expect("cap");
+
+        assert_eq!(report.purged_items, 1, "only the item holding bytes");
+        assert_eq!(report.freed_bytes, 100);
+        assert!(!big_item.quarantine_path.exists());
+        for item in &empties {
+            assert!(
+                item.quarantine_path.exists(),
+                "zero-byte items are skipped, not evicted"
+            );
+        }
+        assert!(
+            h.quarantine.stats(&h.conn).expect("stats").total_bytes <= 5,
+            "the cap must actually be enforced"
+        );
     }
 
     /// M4: an unreadable directory used to be measured as zero bytes.
