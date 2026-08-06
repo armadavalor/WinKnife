@@ -354,6 +354,9 @@ fn notify_quarantine_changed<R: Runtime>(
 /// # Errors
 /// Returns [`CoreError::InvalidTimer`] for a target that is zero-length, over
 /// 24 hours away, or not a real clock time.
+/// Persist before arming. The other order left a live countdown running
+/// whenever the write failed, while the UI reported the failure and showed no
+/// timer — the worst of both (security review H4).
 #[tauri::command]
 pub fn shutdown_schedule(
     mode: ScheduleMode,
@@ -362,14 +365,21 @@ pub fn shutdown_schedule(
     db: State<'_, Database>,
 ) -> Result<TimerStatus, ApiError> {
     let now = Utc::now();
-    let persisted = timer.schedule(mode, action, now)?;
+    let persisted = ShutdownTimer::prepare(mode, action, now)?;
     db.with(|conn| {
         crate::core::settings::set_json(conn, crate::core::settings::KEY_ACTIVE_TIMER, &persisted)
     })?;
+    timer.arm(persisted);
     Ok(timer.status(now))
 }
 
 /// Cancel the timer. Cancelling when nothing is armed is not an error.
+///
+/// Persistence is cleared *before* memory. The other order disarmed the live
+/// timer and then, if the write failed, left the row behind — so the shutdown
+/// the user had just cancelled came back on the next app start
+/// (security review H3). Failing here leaves the timer armed and visibly so,
+/// which is a state the user can act on.
 ///
 /// # Errors
 /// Returns an error only if the setting could not be cleared.
@@ -378,8 +388,8 @@ pub fn shutdown_cancel(
     timer: State<'_, Arc<ShutdownTimer>>,
     db: State<'_, Database>,
 ) -> Result<TimerStatus, ApiError> {
-    timer.cancel();
     db.with(|conn| crate::core::settings::clear(conn, crate::core::settings::KEY_ACTIVE_TIMER))?;
+    timer.cancel();
     Ok(timer.status(Utc::now()))
 }
 

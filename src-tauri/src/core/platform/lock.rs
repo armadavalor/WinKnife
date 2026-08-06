@@ -59,10 +59,14 @@ impl LockProbe for SystemLockProbe {
         {
             use std::os::windows::fs::OpenOptionsExt;
 
-            // A directory cannot be opened as a file; treat it as free and let
-            // the move itself fail if something inside is held.
+            // A directory cannot be opened as a file, so the exclusive-open
+            // question cannot be asked about one. It used to be answered
+            // "free" anyway, which is a claim this probe has no evidence for:
+            // any of a thousand children could be held open, and the caller
+            // treats Free as permission to move (security review M9). The
+            // honest answer is that we cannot tell.
             if path.is_dir() {
-                return LockState::Free;
+                return LockState::Inaccessible;
             }
 
             let opened = std::fs::OpenOptions::new()
@@ -157,6 +161,22 @@ mod tests {
             .expect("hold the file open exclusively");
 
         assert_eq!(SystemLockProbe.probe(&path), LockState::InUse);
+    }
+
+    /// Security review M9: a directory is never reported free, because this
+    /// probe has no way to prove it.
+    #[test]
+    fn a_directory_is_never_reported_free() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join("sub")).expect("sub");
+        std::fs::write(dir.path().join("sub/held.txt"), b"x").expect("write");
+
+        let state = SystemLockProbe.probe(&dir.path().join("sub"));
+        assert!(
+            !state.is_free(),
+            "a directory must not be reported as safe to move"
+        );
+        assert!(!state.reason().is_empty());
     }
 
     #[test]

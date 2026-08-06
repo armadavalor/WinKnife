@@ -22,7 +22,7 @@ use crate::core::brain::{Brain, ProtectedPaths};
 use crate::core::db::{self, Database};
 use crate::core::error::{CoreError, Result};
 use crate::core::platform::{
-    DryRunPower, EnvResolver, PowerController, RecycleBin, SystemEnv, SystemLockProbe,
+    DryRunPower, EnvResolver, PowerController, SystemEnv, SystemLockProbe,
 };
 use crate::core::quarantine::{Quarantine, RetentionPolicy};
 use crate::core::settings;
@@ -87,32 +87,17 @@ fn build_brain(
         .build())
 }
 
-/// The recycle-bin wrapper for this platform.
-fn recycle_bin() -> Arc<dyn RecycleBin> {
-    #[cfg(windows)]
-    {
-        Arc::new(core::platform::WindowsRecycleBin)
-    }
-    #[cfg(not(windows))]
-    {
-        // Nothing to query off Windows; report an empty bin rather than lying.
-        Arc::new(core::platform::StubRecycleBin::default())
-    }
-}
-
 /// The power controller for this run.
 ///
-/// The single call site of the real implementation in the whole crate.
+/// The single call site of the real implementation in the whole crate. It only
+/// does anything at all because [`run`] armed real OS effects; a test that got
+/// here would get a controller that refuses (`core::platform::guard`).
 fn power_controller(dry_run: bool) -> Arc<dyn PowerController> {
-    #[cfg(windows)]
-    if !dry_run {
-        return Arc::new(core::platform::SystemPower);
+    if dry_run {
+        tracing::warn!("dry run: power actions will be logged, not executed");
+        return Arc::new(DryRunPower::new());
     }
-    #[cfg(not(windows))]
-    let _ = dry_run;
-
-    tracing::warn!("dry run: power actions will be logged, not executed");
-    Arc::new(DryRunPower::new())
+    core::platform::real_power_controller()
 }
 
 /// Build and run the desktop application.
@@ -123,6 +108,13 @@ fn power_controller(dry_run: bool) -> Arc<dyn PowerController> {
 /// loudly is the only honest option.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The composition root, and the only place allowed to do this: from here on
+    // the real power controller and the real recycle bin will act rather than
+    // refuse. Nothing else in the crate — and nothing at all outside it — can
+    // reach this, which is what keeps every test binary harmless
+    // (`core::platform::guard`, security review H5).
+    core::platform::arm_real_os_effects();
+
     let dry_run = is_dry_run(std::env::args());
 
     tauri::Builder::default()
@@ -183,7 +175,7 @@ pub fn run() {
             app.manage(commands::Services {
                 quarantine,
                 brain,
-                recycle_bin: recycle_bin(),
+                recycle_bin: core::platform::real_recycle_bin(),
                 rules_dir,
             });
             app.manage(Database::new(connection));
@@ -342,18 +334,54 @@ mod tray {
                     let _ = window.set_focus();
                 }
             }
-            ITEM_CANCEL => {
-                if let Some(timer) = app.try_state::<Arc<ShutdownTimer>>() {
-                    timer.cancel();
-                }
-                if let Some(db) = app.try_state::<Database>() {
-                    let _ = db.with(|conn| settings::clear(conn, settings::KEY_ACTIVE_TIMER));
-                }
-                set_tooltip(app, None);
-            }
+            ITEM_CANCEL => cancel_timer(app),
             ITEM_QUIT => app.exit(0),
             other => tracing::debug!(item = other, "unhandled tray menu item"),
         }
+    }
+
+    /// How many times the tray retries clearing the persisted timer before it
+    /// gives up and leaves the countdown running.
+    const CANCEL_ATTEMPTS: u32 = 3;
+
+    /// Cancel from the tray, in the same order the command uses: persistence
+    /// first, memory second.
+    ///
+    /// This used to be `let _ = db.with(...)` *after* `timer.cancel()`, so a
+    /// failed write silently resurrected the shutdown on the next app start —
+    /// and the user, having watched the countdown disappear, had no way to know
+    /// (security review H3). The write is retried, and if it will not go
+    /// through the timer stays armed and the tooltip keeps counting, because a
+    /// visible timer the user can cancel again beats an invisible one that
+    /// comes back.
+    fn cancel_timer(app: &AppHandle) {
+        let Some(db) = app.try_state::<Database>() else {
+            tracing::error!("no database is registered; the timer cannot be cancelled safely");
+            return;
+        };
+
+        let mut last = None;
+        for attempt in 1..=CANCEL_ATTEMPTS {
+            match db.with(|conn| settings::clear(conn, settings::KEY_ACTIVE_TIMER)) {
+                Ok(()) => {
+                    if let Some(timer) = app.try_state::<Arc<ShutdownTimer>>() {
+                        timer.cancel();
+                    }
+                    set_tooltip(app, None);
+                    return;
+                }
+                Err(err) => {
+                    tracing::warn!(attempt, error = %err, "clearing the persisted timer failed");
+                    last = Some(err);
+                }
+            }
+        }
+
+        tracing::error!(
+            error = ?last.map(|err| err.to_string()),
+            "could not clear the persisted timer after {CANCEL_ATTEMPTS} attempts; \
+             leaving it armed rather than letting it come back on the next start"
+        );
     }
 
     /// Refresh the tooltip. `None` means no timer is armed.

@@ -8,9 +8,12 @@
 //!
 //! # Safety rule
 //!
-//! Emptying is irreversible, so [`WindowsRecycleBin::empty`] carries the same
-//! `cfg!(test)` guard as the power controller, and everything above this file
-//! only ever holds a `dyn RecycleBin`. Tests get [`StubRecycleBin`].
+//! Emptying is irreversible, so `WindowsRecycleBin::empty` carries the same
+//! process-global guard as the power controller: it refuses until `lib.rs::run()`
+//! has armed real OS effects. It used to check `cfg!(test)`, which is false in
+//! an integration-test binary and so guarded nothing there (security review H5).
+//! The type is crate-private and not re-exported; everything above this file
+//! only ever holds a `dyn RecycleBin`, and tests get [`StubRecycleBin`].
 
 use std::sync::{Arc, Mutex};
 
@@ -52,10 +55,11 @@ pub trait RecycleBin: Send + Sync {
     fn empty(&self) -> Result<()>;
 }
 
-/// The real shell-API implementation.
+/// The real shell-API implementation. Reachable only through
+/// `platform::real_recycle_bin`.
 #[cfg(windows)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct WindowsRecycleBin;
+pub(crate) struct WindowsRecycleBin;
 
 #[cfg(windows)]
 impl RecycleBin for WindowsRecycleBin {
@@ -85,8 +89,9 @@ impl RecycleBin for WindowsRecycleBin {
             SHEmptyRecycleBinW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND,
         };
 
-        // The same guard as the power controller: no test may reach this call.
-        if cfg!(test) {
+        // The same guard as the power controller: no test binary of any kind
+        // may reach this call, because only the composition root can arm it.
+        if !crate::core::platform::real_os_effects_armed() {
             return Err(CoreError::RecycleBinBlocked);
         }
 

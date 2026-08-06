@@ -11,17 +11,54 @@
 //! that expanded it for real would scan the developer's actual temp folder. The
 //! [`EnvResolver`] indirection points fixtures at a tempdir instead.
 
-pub mod env;
-pub mod lock;
-pub mod power;
-pub mod recycle_bin;
+//! The two implementations that can do something irreversible — `SystemPower`
+//! and `WindowsRecycleBin` — are deliberately not re-exported and their modules
+//! are crate-private, so no test can name them. They are reachable only as the
+//! trait objects [`real_power_controller`] and [`real_recycle_bin`] hand back,
+//! and those refuse to act until [`guard::arm_real_os_effects`] has run, which
+//! only `lib.rs::run()` can do (security review H5).
+
+pub(crate) mod env;
+pub(crate) mod guard;
+pub(crate) mod lock;
+pub(crate) mod power;
+pub(crate) mod recycle_bin;
+
+use std::sync::Arc;
 
 pub use env::{EnvResolver, MapEnv, SystemEnv};
+pub use guard::real_os_effects_armed;
 pub use lock::{AlwaysUnlocked, LockProbe, LockState, SystemLockProbe};
 pub use power::{DryRunPower, PowerAction, PowerController, PowerEvent};
 pub use recycle_bin::{RecycleBin, RecycleBinStats, StubRecycleBin};
 
-#[cfg(windows)]
-pub use power::SystemPower;
-#[cfg(windows)]
-pub use recycle_bin::WindowsRecycleBin;
+pub(crate) use guard::arm_real_os_effects;
+
+/// The power controller that talks to the operating system.
+///
+/// Public so a test can prove it refuses; useless to a test for the same
+/// reason it is safe — nothing outside the composition root can arm it.
+pub fn real_power_controller() -> Arc<dyn PowerController> {
+    #[cfg(windows)]
+    {
+        Arc::new(power::SystemPower)
+    }
+    #[cfg(not(windows))]
+    {
+        // No power API to reach off Windows; log instead of pretending.
+        Arc::new(DryRunPower::new())
+    }
+}
+
+/// The recycle bin that talks to the shell API.
+pub fn real_recycle_bin() -> Arc<dyn RecycleBin> {
+    #[cfg(windows)]
+    {
+        Arc::new(recycle_bin::WindowsRecycleBin)
+    }
+    #[cfg(not(windows))]
+    {
+        // Nothing to query off Windows; report an empty bin rather than lying.
+        Arc::new(StubRecycleBin::default())
+    }
+}

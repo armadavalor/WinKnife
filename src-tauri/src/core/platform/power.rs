@@ -8,10 +8,14 @@
 //! 1. The timer engine only ever holds an `Arc<dyn PowerController>`; it has no
 //!    way to name a concrete implementation.
 //! 2. [`SystemPower`] — the only implementation that touches the OS — refuses
-//!    to act when `cfg!(test)` is true, which covers every unit test in this
-//!    crate. There is a test below proving that refusal.
-//! 3. The application only installs [`SystemPower`] in `lib.rs`, and only when
-//!    the `--dry-run` flag is absent. Tests never run `lib.rs::run()`.
+//!    to act until the process has armed real OS effects, which only
+//!    `lib.rs::run()` can do. It used to check `cfg!(test)` instead, which is
+//!    false in an integration-test binary and so guarded nothing there
+//!    (security review H5). There is a test below proving the refusal, and one
+//!    in `tests/` proving it across the compilation-unit boundary.
+//! 3. The type is crate-private and is not re-exported, so the only way to hold
+//!    one at all is `platform::real_power_controller`, and the application only
+//!    calls that when the `--dry-run` flag is absent.
 //!
 //! [`DryRunPower`] records what *would* have happened into a log the tests and
 //! the `--dry-run` build assert against. Nothing else.
@@ -137,19 +141,20 @@ impl PowerController for DryRunPower {
     }
 }
 
-/// The real thing. Constructed in exactly one place: `lib.rs::run()`, and only
-/// when `--dry-run` was not passed.
+/// The real thing. Reachable only through
+/// `platform::real_power_controller`, which `lib.rs::run()` calls when
+/// `--dry-run` was not passed.
 #[cfg(windows)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct SystemPower;
+pub(crate) struct SystemPower;
 
 #[cfg(windows)]
 impl PowerController for SystemPower {
     fn apply(&self, action: PowerAction) -> Result<()> {
-        // Guard 2 of 3 (see the module header). `cfg!(test)` is true for every
-        // unit test compiled into this crate, so no test can get past here even
-        // if one managed to construct a `SystemPower`.
-        if cfg!(test) {
+        // Guard 2 of 3 (see the module header). The flag is armed by the
+        // composition root and by nothing else, so no test binary of any kind
+        // gets past here even if one managed to hold a `SystemPower`.
+        if !crate::core::platform::real_os_effects_armed() {
             return Err(CoreError::PowerActionBlocked(action.slug()));
         }
 
@@ -231,6 +236,8 @@ mod tests {
 
     /// Guard 2 of 3: even a direct call to the real controller from a test is
     /// refused. If this test ever fails, a test run can shut the machine down.
+    /// `tests/os_effects_stay_disarmed.rs` proves the same thing from the other
+    /// side of the compilation-unit boundary, where `cfg!(test)` is false.
     #[cfg(windows)]
     #[test]
     fn the_system_controller_refuses_to_act_inside_tests() {

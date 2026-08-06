@@ -120,6 +120,15 @@ pub struct PersistedTimer {
     pub target: DateTime<Utc>,
     /// When it was scheduled, shown in the UI as "set at".
     pub scheduled_at: DateTime<Utc>,
+    /// How the user expressed it, so an `At` target can be resolved again.
+    ///
+    /// "At 23:30" is a *wall-clock* request, and storing only the UTC instant
+    /// froze it against the offset in force when it was set: a DST change or a
+    /// travelled-with laptop between two runs of the app made it fire an hour
+    /// out (security review L3). Optional so a timer written by an earlier
+    /// version still re-arms, at its stored instant.
+    #[serde(default)]
+    pub mode: Option<ScheduleMode>,
 }
 
 /// The live timer.
@@ -225,10 +234,53 @@ impl ShutdownTimer {
         self.power.is_dry_run()
     }
 
-    /// Arm a timer, replacing any existing one.
+    /// Work out what a request means, without arming anything.
+    ///
+    /// Separate from [`ShutdownTimer::arm`] so the command can persist first
+    /// and arm second. Doing it the other way round left a live countdown
+    /// behind whenever the write failed, while the UI reported the failure and
+    /// showed no timer (security review H4).
+    ///
+    /// # Errors
+    /// See [`ScheduleMode::resolve`].
+    pub fn prepare(
+        mode: ScheduleMode,
+        action: PowerAction,
+        now: DateTime<Utc>,
+    ) -> Result<PersistedTimer> {
+        Ok(PersistedTimer {
+            id: Uuid::new_v4(),
+            action,
+            target: mode.resolve(now)?,
+            scheduled_at: now,
+            mode: Some(mode),
+        })
+    }
+
+    /// Arm `persisted`, replacing any existing timer.
     ///
     /// Replacing is deliberate: the UI confirms first, and two competing
     /// timers would be worse than one clear winner (module spec, edge cases).
+    pub fn arm(&self, persisted: PersistedTimer) -> Option<PersistedTimer> {
+        let (id, action, target) = (persisted.id, persisted.action, persisted.target);
+        let replaced = self.replace(Some(ActiveTimer {
+            persisted,
+            fired_warnings: Vec::new(),
+        }));
+
+        tracing::info!(
+            timer = %id,
+            action = action.slug(),
+            target = %target,
+            replaced = replaced.is_some(),
+            dry_run = self.power.is_dry_run(),
+            "timer armed"
+        );
+        replaced.map(|timer| timer.persisted)
+    }
+
+    /// Resolve and arm in one step. The app persists in between, so it uses
+    /// [`ShutdownTimer::prepare`] and [`ShutdownTimer::arm`] separately.
     ///
     /// # Errors
     /// See [`ScheduleMode::resolve`].
@@ -238,27 +290,8 @@ impl ShutdownTimer {
         action: PowerAction,
         now: DateTime<Utc>,
     ) -> Result<PersistedTimer> {
-        let target = mode.resolve(now)?;
-        let persisted = PersistedTimer {
-            id: Uuid::new_v4(),
-            action,
-            target,
-            scheduled_at: now,
-        };
-
-        let replaced = self.replace(Some(ActiveTimer {
-            persisted: persisted.clone(),
-            fired_warnings: Vec::new(),
-        }));
-
-        tracing::info!(
-            timer = %persisted.id,
-            action = action.slug(),
-            target = %target,
-            replaced = replaced.is_some(),
-            dry_run = self.power.is_dry_run(),
-            "timer armed"
-        );
+        let persisted = Self::prepare(mode, action, now)?;
+        self.arm(persisted.clone());
         Ok(persisted)
     }
 
@@ -267,6 +300,15 @@ impl ShutdownTimer {
     /// Returns whether it was re-armed. A target in the past is discarded: the
     /// machine clearly did not shut down, and firing now would be a nasty
     /// surprise on the next app start.
+    ///
+    /// An `At` target is re-resolved here rather than trusted. "At 23:30" is a
+    /// wall-clock request, and the instant it resolved to was fixed against the
+    /// UTC offset in force when it was set; a DST boundary or a timezone change
+    /// between two runs moves it by an hour (security review L3). Re-resolving
+    /// only ever happens for a timer that is *still live* — a stale one is
+    /// discarded first — so this cannot resurrect a timer as tomorrow's.
+    /// Re-resolution per tick is deliberately not done: a countdown that jumps
+    /// mid-count is worse than one that is right at every restart.
     pub fn rearm(&self, persisted: PersistedTimer, now: DateTime<Utc>) -> bool {
         if persisted.target <= now {
             tracing::info!(
@@ -276,6 +318,32 @@ impl ShutdownTimer {
             );
             return false;
         }
+
+        let persisted = match persisted.mode {
+            Some(mode @ ScheduleMode::At { .. }) => match mode.resolve(now) {
+                Ok(target) if target != persisted.target => {
+                    tracing::info!(
+                        timer = %persisted.id,
+                        was = %persisted.target,
+                        now_targets = %target,
+                        "re-resolved a wall-clock timer; the local offset has changed"
+                    );
+                    PersistedTimer { target, ..persisted }
+                }
+                Ok(_) => persisted,
+                // The clock time no longer resolves at all (it fell into a DST
+                // gap). The stored instant is still in the future, so honour it.
+                Err(err) => {
+                    tracing::warn!(
+                        timer = %persisted.id,
+                        error = %err,
+                        "could not re-resolve a wall-clock timer; keeping the stored instant"
+                    );
+                    persisted
+                }
+            },
+            _ => persisted,
+        };
 
         tracing::info!(timer = %persisted.id, target = %persisted.target, "timer re-armed after restart");
         self.replace(Some(ActiveTimer {
@@ -736,6 +804,7 @@ mod tests {
             action: PowerAction::Shutdown,
             target: at(10, 30),
             scheduled_at: at(9, 0),
+            mode: Some(ScheduleMode::In { minutes: 90 }),
         };
 
         assert!(timer.rearm(persisted.clone(), now));
@@ -750,6 +819,7 @@ mod tests {
             action: PowerAction::Shutdown,
             target: at(9, 0),
             scheduled_at: at(8, 0),
+            mode: None,
         };
 
         assert!(!timer.rearm(persisted, at(10, 0)));
@@ -767,13 +837,175 @@ mod tests {
             action: PowerAction::Sleep,
             target: at(11, 0),
             scheduled_at: at(10, 0),
+            mode: Some(ScheduleMode::At {
+                hour: 23,
+                minute: 30,
+            }),
         };
         let json = serde_json::to_string(&persisted).expect("serialize");
         assert!(json.contains(r#""scheduledAt""#), "got {json}");
+        assert!(json.contains(r#""mode""#), "got {json}");
         assert_eq!(
             serde_json::from_str::<PersistedTimer>(&json).expect("deserialize"),
             persisted
         );
+    }
+
+    /* ---------------------------------------------------------------------
+     * Security-review regressions
+     * ------------------------------------------------------------------ */
+
+    /// H4: preparing must not arm. The command persists in between, and an
+    /// armed-but-unpersisted timer is a live countdown the UI says failed.
+    #[test]
+    fn preparing_a_timer_does_not_arm_it() {
+        let (timer, power) = timer();
+        let now = at(10, 0);
+
+        let persisted = ShutdownTimer::prepare(
+            ScheduleMode::In { minutes: 30 },
+            PowerAction::Shutdown,
+            now,
+        )
+        .expect("prepare");
+
+        assert_eq!(persisted.target, at(10, 30));
+        assert_eq!(timer.snapshot(), None, "nothing is armed yet");
+        assert_eq!(timer.tick(at(11, 0)), Tick::Idle);
+        assert!(power.is_empty(), "an unarmed timer can never fire");
+
+        // ...and arming it afterwards behaves exactly as scheduling did.
+        timer.arm(persisted.clone());
+        assert_eq!(timer.snapshot(), Some(persisted));
+    }
+
+    /// H4: an invalid request is refused before anything is armed, so a
+    /// failure can never leave a timer behind.
+    #[test]
+    fn a_refused_request_arms_nothing() {
+        let (timer, power) = timer();
+        timer
+            .schedule(ScheduleMode::In { minutes: 20 }, PowerAction::Sleep, at(10, 0))
+            .expect("a good timer first");
+
+        assert!(ShutdownTimer::prepare(
+            ScheduleMode::In { minutes: 0 },
+            PowerAction::Shutdown,
+            at(10, 0)
+        )
+        .is_err());
+
+        let armed = timer.snapshot().expect("the good timer survives");
+        assert_eq!(armed.action, PowerAction::Sleep);
+        assert!(power.is_empty());
+    }
+
+    #[test]
+    fn arming_reports_what_it_replaced() {
+        let (timer, _) = timer();
+        let now = at(10, 0);
+        let first =
+            ShutdownTimer::prepare(ScheduleMode::In { minutes: 10 }, PowerAction::Sleep, now)
+                .expect("prepare");
+        let second = ShutdownTimer::prepare(
+            ScheduleMode::In { minutes: 20 },
+            PowerAction::Restart,
+            now,
+        )
+        .expect("prepare");
+
+        assert_eq!(timer.arm(first.clone()), None);
+        assert_eq!(timer.arm(second.clone()), Some(first));
+        assert_eq!(timer.snapshot(), Some(second));
+    }
+
+    /// L3: "at 23:30" is a wall-clock request. Storing only the instant froze
+    /// it against the offset in force when it was set.
+    #[test]
+    fn a_wall_clock_timer_is_re_resolved_when_it_is_rearmed() {
+        let (timer, _) = timer();
+        let now = Utc::now();
+        let local = now.with_timezone(&chrono::Local) + Duration::hours(3);
+        let mode = ScheduleMode::At {
+            hour: local.format("%H").to_string().parse().expect("hour"),
+            minute: local.format("%M").to_string().parse().expect("minute"),
+        };
+        let correct = mode.resolve(now).expect("resolve");
+
+        // As if a DST change had shifted the stored instant by an hour.
+        let stored = PersistedTimer {
+            id: Uuid::new_v4(),
+            action: PowerAction::Shutdown,
+            target: correct + Duration::hours(1),
+            scheduled_at: now - Duration::hours(1),
+            mode: Some(mode),
+        };
+
+        assert!(timer.rearm(stored, now));
+        let armed = timer.snapshot().expect("armed");
+        assert_eq!(
+            armed.target, correct,
+            "the wall-clock time the user asked for wins over the stored instant"
+        );
+    }
+
+    /// L3: a duration is not a wall-clock request, so its instant is honoured
+    /// as written — and a stale timer is still discarded rather than rolled
+    /// forward to tomorrow.
+    #[test]
+    fn re_resolution_never_resurrects_a_stale_timer() {
+        let (timer, power) = timer();
+        let now = Utc::now();
+        let local = now.with_timezone(&chrono::Local) - Duration::hours(2);
+        let stale = PersistedTimer {
+            id: Uuid::new_v4(),
+            action: PowerAction::Shutdown,
+            // Already passed while the app was closed.
+            target: now - Duration::hours(1),
+            scheduled_at: now - Duration::hours(3),
+            mode: Some(ScheduleMode::At {
+                hour: local.format("%H").to_string().parse().expect("hour"),
+                minute: local.format("%M").to_string().parse().expect("minute"),
+            }),
+        };
+
+        assert!(
+            !timer.rearm(stale, now),
+            "a target that has passed is discarded, not rolled on to tomorrow"
+        );
+        assert_eq!(timer.snapshot(), None);
+        assert!(power.is_empty());
+
+        // A duration keeps its instant untouched.
+        let duration = PersistedTimer {
+            id: Uuid::new_v4(),
+            action: PowerAction::Restart,
+            target: now + Duration::minutes(30),
+            scheduled_at: now,
+            mode: Some(ScheduleMode::In { minutes: 45 }),
+        };
+        assert!(timer.rearm(duration.clone(), now));
+        assert_eq!(timer.snapshot().expect("armed").target, duration.target);
+    }
+
+    /// L3: a timer written before `mode` existed still re-arms at its instant.
+    #[test]
+    fn a_timer_persisted_without_a_mode_still_rearms() {
+        let json = r#"{
+            "id": "00000000-0000-0000-0000-000000000000",
+            "action": "shutdown",
+            "target": "2030-01-01T10:30:00Z",
+            "scheduledAt": "2030-01-01T10:00:00Z"
+        }"#;
+        let persisted: PersistedTimer = serde_json::from_str(json).expect("older format");
+        assert_eq!(persisted.mode, None);
+
+        let (timer, _) = timer();
+        let now = DateTime::parse_from_rfc3339("2030-01-01T10:00:00Z")
+            .expect("parse")
+            .with_timezone(&Utc);
+        assert!(timer.rearm(persisted.clone(), now));
+        assert_eq!(timer.snapshot().expect("armed").target, persisted.target);
     }
 
     #[test]
