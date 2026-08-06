@@ -1060,3 +1060,69 @@ construction site. **L16** `cancelling_a_big_walk_stops_it_promptly` is no longe
 recorded in `docs/DECISIONS-NEEDED.md`. The M16 lag could not be reproduced on
 this machine's volume — the test asserts the invariant that makes it impossible
 and prints both sources so a run says which regime it was in.
+
+---
+
+## 2026-08-06 — every command was dead at runtime; the suite never looked
+
+**The bug.** `lib.rs` registered `Arc<Database>` (phase 3 introduced the `Arc` so
+`StartupControlAdapter` could hold a clone) while `commands.rs` still asked for
+`State<'_, Database>`. Tauri resolves managed state by `TypeId`, so those are two
+unrelated keys: every one of the nineteen database-taking commands failed on its
+first invocation with `state not managed for field `db``. The app was completely
+non-functional and `cargo check`, `cargo clippy` and 486 unit tests all passed —
+the mismatch does not exist until runtime.
+
+**Fixed.** `commands.rs` now spells the parameter `State<'_, Arc<Database>>` in
+all nineteen places; the bodies were untouched because `Deref` carries `db.with`
+and `&db` through. The audit that followed found two more of the same mistake in
+`lib.rs`, both outside the IPC path and both silent: `clear_persisted_timer` and
+the tray's `Cancel timer` asked `try_state::<Database>()` and got `None`, so a
+fired timer stayed in the settings table to re-arm on the next start and the tray
+menu item refused outright. All four out-of-band call sites now go through one
+`managed_database()` accessor, so there is a single spelling to get right and it
+sits next to the `app.manage` call that decides it. Full audit: seven managed
+types, seven consumers, all matching.
+
+**The structural half.** `tests/command_wiring.rs` builds a real Tauri app on
+`tauri::test::mock_builder()` and invokes **every** registered command through
+`get_ipc_response`. It asserts two things per command: no response says
+`state not managed` (the bug), and none says `invalid args` (which would mean the
+probe's arguments stopped at deserialization and never reached the state lookup,
+i.e. the probe proves nothing). Against the broken code it fails 19 of 26 with
+the user's verbatim error — and the `invalid args` guard fires too, on the one
+probe whose payload depends on another command having worked.
+
+Coverage is enforced rather than maintained: `run()` and the test share
+`manage_state()` and `invoke_handler()`, so the test cannot register a different
+app than production; and two source-parsing tests hold three lists in step — the
+`#[tauri::command]` functions, the `generate_handler!` list, and the probe table.
+A new command that is never registered fails one; a registered command with no
+probe fails the other.
+
+**Decisions taken.**
+
+- `State<'_, Arc<Database>>` rather than unwrapping the `Arc`: the startup
+  adapter genuinely needs a second handle, and it matches the `Arc<ShutdownTimer>`
+  parameter already in the file.
+- `tauri = { features = ["test"] }` under `[dev-dependencies]`. Resolver 2 keeps
+  the feature out of `cargo build --release`.
+- `build.rs` now embeds a ComCtl32 v6 manifest into **test** binaries
+  (`cargo::rustc-link-arg-tests`). Tauri's default features pull in `muda`, which
+  imports `SetWindowSubclass` and friends — exported only by ComCtl32 v6, which
+  Windows hands over only to a process whose manifest asks for it. `tauri-build`
+  manifests the app binary; nothing manifested a test binary, so any test target
+  linking Tauri's runtime died at *load* time with `STATUS_ENTRYPOINT_NOT_FOUND`
+  before a single test function ran.
+
+**Verified against the running app**, not just the log's startup lines: the
+shipping binary (`tauri build --no-bundle`, so the WebView loads
+`tauri.localhost` rather than `devUrl`) was launched with `--dry-run` and driven
+through its own `__TAURI_INTERNALS__.invoke` over WebView2 CDP. Twelve commands
+returned real payloads, and the app's own log recorded `timer armed`,
+`timer cancelled`, `startup scan finished entries=44` and a full cleaner
+`scan finished` — all from commands that take the database.
+
+**Deferred.** The probe table's arguments are chosen to be refused early and
+cheaply; the test proves dispatch and state resolution, not command behaviour.
+Behaviour stays the job of the unit tests.
