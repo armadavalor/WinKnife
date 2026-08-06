@@ -70,6 +70,11 @@ pub const DEFAULT_ROOT_NAMES: &[&str] = &["Downloads", "Documents", "Pictures", 
 
 /// Folder names that mean "passing through", so a copy sitting in one is a worse
 /// keeper than the same bytes filed somewhere deliberate.
+///
+/// Compared as **component names**, not as paths: the question is "is one of
+/// this path's folders called `Downloads`", which is about a name and not about
+/// where two paths point, so it does not go through
+/// [`crate::core::path_compare`] (standing rule, `docs/DECISIONS-NEEDED.md`).
 const TRANSIENT_DIR_NAMES: &[&str] = &["downloads", "temp", "tmp", "cache", "desktop", "recent"];
 
 /// Suffixes Windows and browsers add when they will not overwrite a file.
