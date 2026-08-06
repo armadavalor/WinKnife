@@ -974,3 +974,89 @@ signature badge on a folder entry reports on the shortcut; resolving it needs
 `IShellLink`, which is a fourth COM surface and was not worth adding to close
 this phase. Long scans still run on the async runtime rather than
 `spawn_blocking`, matching the shape phases 1 and 2 shipped.
+
+## 2026-08-06 — phase 3 review remediation (H11, M16-M21, L12-L16)
+
+**The block, and the structural answer.** `modules::startup::stash_link` moved a
+Startup-folder `.lnk` and *then* wrote the row that remembered where it came
+from. With a ledger write that failed — a full disk, a locked database,
+`SQLITE_BUSY`, the `startup_disabled_link_origin` unique index firing — the
+shortcut left the Startup folder, nothing recorded where it went, and it vanished
+from the startup manager entirely. Never deleted; merely invisible, which through
+the only interface the user has is the same thing (H11).
+
+The local fix would have been to swap two statements. The finding was that the
+order was a *comment* — stated in `core::quarantine`'s header, obeyed by
+`Quarantine::take`, and re-derived backwards by the next module that called into
+the same file. So the order is a type now:
+
+- `core/ledger.rs` — `ledgered_move(conn, what, step, perform)`. `LedgerStep`
+  has two variants and the variant fixes when the row is written relative to the
+  move: `Claim` commits the row in its own transaction *before* anything moves
+  and retracts it if the move then fails; `Retire` drops the row only once the
+  file is somewhere the user can see without our help. Writing a row after moving
+  a file into custody — the one order that is never correct — is not expressible.
+- `perform` receives a `Recorded`, and `ledger::move_user_file` will not move
+  anything without one. `quarantine::move_user_file` is `pub(in crate::core)`,
+  so a module has no other door. All four write surfaces (`Quarantine::take`,
+  `Quarantine::restore_item`, `stash_link`, `restore_link`) are callers.
+- `ledger::reconcile` closes the crash window a `Retire` leaves open. Only a
+  clean `NotFound` counts as evidence that a row is stale; "we could not look" is
+  not, because acting on that would be the orphan arriving by the other door.
+
+**Ledger rows are surfaced, not dropped.** `disabled_links` returns
+`DisabledLinks { links, unreadable_rows, reconciled_rows }` and the scan states
+the count, the way `QuarantineStats.unreadableRows` already did.
+`find_disabled_link` now *errors* on a row it cannot parse instead of returning
+`None` — `None` means "not held", which sent `read_entry` on to the folder and let
+a re-disable collide with the unique index. That was the second route to the same
+orphan.
+
+**M16 — the fast path was not only about clocks.** With
+`accurate_timestamps: true` the walk paid for `symlink_metadata` and then read
+`size_bytes` from the stale listing anyway. Both figures now come from the same
+`Metadata`, and `core::scanner`'s header no longer claims sizes are unaffected —
+it says sizes lag on the fast path and that the treemap accepts that.
+
+**M17 — the treemap's two path arguments are tied together.** `treemap_children`
+took `root` and `path` from the WebView with no containment check: `path` under
+`C:\Windows\System32\drivers\etc` with an unrelated `root` enumerated it and the
+breadcrumb walked to `C:\`. Both commands run `root` through `brain::gate_path`
+and `path` through `path_compare::is_inside`.
+
+**M18 — catalog-signed is not unsigned.** `verify()` asked only
+`WTD_CHOICE_FILE`, so `notepad.exe` — like almost everything Windows ships —
+came back `TRUST_E_NOSIGNATURE` and was reported "unsigned, unknown publisher".
+A file with no embedded signature is now hashed with
+`CryptCATAdminCalcHashFromFileHandle2`, looked up with
+`CryptCATAdminEnumCatalogFromHash` and verified with `WTD_CHOICE_CATALOG`; the
+publisher comes from the `.cat`. Both questions answered "no" is what `Unsigned`
+now means, and a catalog database that cannot be consulted is `Unknown`.
+
+**M19 — the signature check leaves the access time alone.** It opens the binary
+itself and hands the handle to `WINTRUST_FILE_INFO.hFile`. The measurement found
+more than the review did: `SetFileTime`'s `0xFFFFFFFF` opt-out needs
+`FILE_WRITE_ATTRIBUTES` on the handle, so a read-only open has it rejected and
+the clock moves anyway. Every stage — open, read, `WTD_CHOICE_FILE`, catalog
+hash, `WTD_CHOICE_CATALOG` — was measured; all five hold the clock now.
+
+**M20** — the folded tail row is `sized: tail.iter().all(|row| row.sized)`.
+**M21** — the treemap's arena is keyed on `(parent slot, one normalised name)`
+instead of a whole canonical path string, and resolves through
+`Path::strip_prefix` instead of `same_path`/`is_inside`. A 3 000-deep tree went
+from 75.3 s around a 5.34 s walk (14×) to 5.7 s around 4.7 s (1.2×).
+
+**L12** an entry whose metadata call failed is recorded in `WalkSummary::unreadable`
+rather than dropped. **L13** `approval_payload`'s doc now matches the code (seven
+bits of byte 0, not bytes 1-3). **L14** `read_entry` computes `os_owned` for
+Startup-folder entries the way `describe` does. **L15** `Recommendation`
+deserialises through `#[serde(try_from)]`, so `validate()` runs at every
+construction site. **L16** `cancelling_a_big_walk_stops_it_promptly` is no longer
+`#[ignore]` — it builds a cheap 12 000-file fixture of its own — and
+`tests/treemap_perf.rs` gained a deep-tree case for the axis M21 lived on.
+
+**Deferred.** A "move in flight" column on both ledger tables would close the
+`Retire` crash window without a filesystem read; it needs a migration and is
+recorded in `docs/DECISIONS-NEEDED.md`. The M16 lag could not be reproduced on
+this machine's volume — the test asserts the invariant that makes it impossible
+and prints both sources so a run says which regime it was in.

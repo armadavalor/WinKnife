@@ -456,3 +456,30 @@ found late and blamed on something else.
       whole-drive walk on a slow disk is minutes, and it blocks one tokio worker
       for that time. Worth doing properly for all three modules at once rather
       than for one of them now.
+- [ ] 2026-08-06 (phase 3 review): `core::ledger` admits exactly two orders for a
+      move of user data — `Claim` (row committed first) and `Retire` (row dropped
+      after). The quarantine's restore stays a `Claim` because it *marks*
+      `restored_at` rather than deleting the row, so the file never stops being
+      findable (the M2 argument still holds); the startup restore is a `Retire`
+      because its row really is deleted. A third shape — "amend the row to say
+      the move is in flight" — would close the crash window on both without a
+      `reconcile` pass, but it needs a column on both tables and therefore a
+      migration. Safest interpretation taken: `reconcile` reads the filesystem
+      instead, and only a clean `NotFound` counts as evidence.
+- [ ] 2026-08-06 (phase 3 review): `SetFileTime`'s `0xFFFFFFFF` access-time
+      opt-out needs `FILE_WRITE_ATTRIBUTES` on the handle, which is not obvious
+      and fails silently as `ACCESS_DENIED`. `lock.rs` already asks for it;
+      `signature.rs` did not, and on a volume where last-access updates are live
+      the suppression was rejected outright. Both now ask for it and fall back to
+      plain read when an ACL refuses. Worth a note because any future reader of a
+      user's file has to know: **read access alone is not enough to promise the
+      clock will not move.**
+- [ ] 2026-08-06 (phase 3 review): the treemap's arena no longer asks
+      `path_compare::same_path`/`is_inside` per directory — it uses
+      `Path::strip_prefix` against the scan root, which is exact for paths the
+      walk built by joining onto that root and costs no syscall. A path the walk
+      could not have produced (outside the root, or containing `.`/`..`) gets a
+      parentless node rather than a guess. This is a deliberate narrowing of what
+      the arena resolves, justified by the walk's own guarantee that it never
+      leaves its root; if a future caller feeds `treemap::scan` paths from
+      somewhere else, that assumption is the one to re-check.
