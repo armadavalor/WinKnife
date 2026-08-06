@@ -51,6 +51,59 @@ pub enum CoreError {
         /// The underlying Tauri error.
         source: tauri::Error,
     },
+
+    /// A rule pack could not be parsed or violated the schema. Carries the
+    /// pack name and the offending field so the failure is actionable
+    /// (RULES-FORMAT.md: "loud failure beats silent skip").
+    #[error("rule pack `{pack}` is invalid at `{field}`: {message}")]
+    RulePack {
+        /// File stem or declared id of the pack.
+        pack: String,
+        /// Dotted path to the field at fault, e.g. `rules[0].score.max_bucket`.
+        field: String,
+        /// What is wrong with it.
+        message: String,
+    },
+
+    /// A quarantine operation failed for one item.
+    #[error("quarantine error: {0}")]
+    Quarantine(String),
+
+    /// A copy into or out of quarantine did not verify byte-for-byte. The
+    /// source is always left untouched when this happens.
+    #[error("verification failed after copying `{0}`; the original was left in place")]
+    VerifyFailed(String),
+
+    /// A quarantine item id or batch id is not in the ledger.
+    #[error("no quarantine record for `{0}`")]
+    UnknownQuarantineItem(String),
+
+    /// The OS refused a power action.
+    #[error("power action failed: {0}")]
+    PowerAction(String),
+
+    /// A power action was requested from a context that must never reach the
+    /// operating system (a test build). See `core::platform::power`.
+    #[error("power action `{0}` blocked: this build must never touch the real power API")]
+    PowerActionBlocked(&'static str),
+
+    /// The recycle-bin shell API refused.
+    #[error("recycle bin error: {0}")]
+    RecycleBin(String),
+
+    /// Emptying the recycle bin was requested from a test build.
+    #[error("emptying the recycle bin is blocked: this build must never touch the real bin")]
+    RecycleBinBlocked,
+
+    /// A shutdown timer request does not make sense (past target, over the 24h
+    /// limit, malformed clock time).
+    #[error("invalid timer: {0}")]
+    InvalidTimer(String),
+
+    /// A scan id the UI referred to is not in the store (app restarted, or the
+    /// scan was evicted).
+    #[error("unknown scan: {0}")]
+    UnknownScan(String),
 }
 
 impl CoreError {
@@ -65,6 +118,16 @@ impl CoreError {
             Self::InvalidRecommendation(_) => "invalid_recommendation",
             Self::AppDataDir(_) => "app_data_dir",
             Self::Emit { .. } => "emit",
+            Self::RulePack { .. } => "rule_pack",
+            Self::Quarantine(_) => "quarantine",
+            Self::VerifyFailed(_) => "verify_failed",
+            Self::UnknownQuarantineItem(_) => "unknown_quarantine_item",
+            Self::PowerAction(_) => "power_action",
+            Self::PowerActionBlocked(_) => "power_action_blocked",
+            Self::RecycleBin(_) => "recycle_bin",
+            Self::RecycleBinBlocked => "recycle_bin_blocked",
+            Self::InvalidTimer(_) => "invalid_timer",
+            Self::UnknownScan(_) => "unknown_scan",
         }
     }
 }

@@ -7,7 +7,14 @@ pub mod brain;
 pub mod db;
 pub mod error;
 pub mod events;
+pub mod executor;
+pub mod logging;
 pub mod module;
+pub mod platform;
+pub mod quarantine;
+pub mod scanner;
+pub mod settings;
+pub mod state;
 pub mod types;
 
 pub use error::{ApiError, CoreError, Result};
