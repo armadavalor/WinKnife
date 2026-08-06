@@ -531,8 +531,14 @@ fn build_set(content_hash: String, members: Vec<Candidate>) -> (DuplicateSet, Ve
             .then_with(|| a.2.path.cmp(&b.2.path))
     });
 
-    let mut copies = Vec::with_capacity(scored.len());
-    let mut findings = Vec::with_capacity(scored.len());
+    // Counted before the loop consumes `scored`. This used to report
+    // `copies.capacity()`, which is the allocator's business and not the set's:
+    // it happened to equal the real count only because `Vec::with_capacity` had
+    // been asked for exactly that many and nothing had grown it (review M15).
+    // Every finding in a set must agree about how big the set is.
+    let total = scored.len();
+    let mut copies = Vec::with_capacity(total);
+    let mut findings = Vec::with_capacity(total);
 
     for (index, (score, reason, candidate)) in scored.into_iter().enumerate() {
         let keeper = index == 0;
@@ -545,7 +551,7 @@ fn build_set(content_hash: String, members: Vec<Candidate>) -> (DuplicateSet, Ve
             "setId": set_id,
             "contentHash": content_hash,
             "keeper": keeper,
-            "copiesInSet": copies.capacity(),
+            "copiesInSet": total,
         });
 
         copies.push(DuplicateCopy {
@@ -1551,6 +1557,45 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    /// Review M15: `copiesInSet` reported `Vec::capacity()`, which is a fact
+    /// about the allocator and not about the set.
+    ///
+    /// **This test could not have failed against the old code**, and saying so
+    /// is the point: `Vec::with_capacity(n)` is only guaranteed to give *at
+    /// least* `n`, and in practice gives exactly `n`, so the wrong expression
+    /// returned the right number on every allocator anyone was going to run. The
+    /// defect was that the number was right by coincidence — not reachable from
+    /// the outside, and so not something a test can reproduce.
+    ///
+    /// What this pins is the contract the UI reads: every finding in a set
+    /// agrees about how big that set is, across several set sizes, whatever the
+    /// vectors underneath do next.
+    #[test]
+    fn every_finding_reports_the_real_size_of_its_set() {
+        for copies in [2usize, 3, 5] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let bytes = payload(32 * 1024, 21, None);
+            for index in 0..copies {
+                write(&dir.path().join(format!("Pictures/copy-{index}.bin")), &bytes);
+            }
+
+            let scan = run(dir.path(), MIN_ALLOWED_SIZE_BYTES);
+            assert_eq!(scan.sets.len(), 1, "one set of {copies}");
+            assert_eq!(scan.sets[0].copies.len(), copies);
+            assert_eq!(scan.findings.len(), copies);
+
+            for finding in &scan.findings {
+                assert_eq!(
+                    finding.meta.get("copiesInSet").and_then(|v| v.as_u64()),
+                    Some(copies as u64),
+                    "`{}` disagrees about how big its set is: {}",
+                    finding.path.display(),
+                    finding.meta
+                );
+            }
+        }
     }
 
     #[test]
