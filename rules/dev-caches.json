@@ -1,0 +1,43 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "dev-caches",
+  "name": "Developer Tool Caches",
+  "version": 1,
+  "module": "cleaner",
+  "enabled_by_default": false,
+  "description": "Package caches for npm, pip, Cargo and Gradle. Off by default: they are re-downloadable rather than lost, but clearing one turns your next build into a long one.",
+  "rules": [
+    {
+      "id": "npm-cache",
+      "paths": ["%LOCALAPPDATA%\\npm-cache\\_cacache\\**"],
+      "match": { "min_age_hours": 720 },
+      "score": { "base": 60, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "npm's package cache. Everything here can be downloaded again, but your next install will be slower and will need a network connection."
+    },
+    {
+      "id": "pip-cache",
+      "paths": ["%LOCALAPPDATA%\\pip\\Cache\\**"],
+      "match": { "min_age_hours": 720 },
+      "score": { "base": 60, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "pip's wheel cache. Everything here can be downloaded again, but your next install will be slower and will need a network connection."
+    },
+    {
+      "id": "cargo-registry-cache",
+      "paths": ["%USERPROFILE%\\.cargo\\registry\\cache\\**"],
+      "match": { "min_age_hours": 720 },
+      "score": { "base": 58, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "Cargo's downloaded crate archives. Cargo re-fetches them on the next build that needs them, so this costs build time rather than data."
+    },
+    {
+      "id": "gradle-cache",
+      "paths": ["%USERPROFILE%\\.gradle\\caches\\**"],
+      "match": { "min_age_hours": 720 },
+      "score": { "base": 55, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "Gradle's dependency and build cache. Gradle rebuilds it on the next build, which will take considerably longer than usual."
+    }
+  ]
+}

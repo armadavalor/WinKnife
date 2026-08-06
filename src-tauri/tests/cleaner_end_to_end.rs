@@ -97,9 +97,11 @@ impl World {
         let packs = self.packs();
         let protected = self.protected();
         let cancel = CancellationToken::new();
+        let settings = cleaner::CleanerSettings::default();
         cleaner::scan(
             &CleanerContext {
                 packs: &packs,
+                settings: &settings,
                 protected: &protected,
                 recycle_bin: bin,
                 now: Utc::now(),
@@ -219,7 +221,20 @@ fn scan_clean_and_restore_round_trips_byte_identically() {
         .filter(|rec| rec.risk == RiskBucket::Safe)
         .map(|rec| rec.id)
         .collect();
-    assert_eq!(approved.len(), 3, "three green items were expected");
+    assert_eq!(
+        approved.len(),
+        3,
+        "three green items were expected; the scan produced {:?} and rated them {:?}",
+        output
+            .findings
+            .iter()
+            .map(|f| f.path.display().to_string())
+            .collect::<Vec<_>>(),
+        recommendations
+            .iter()
+            .map(|r| (r.risk, r.confidence, r.reason.clone()))
+            .collect::<Vec<_>>(),
+    );
 
     // 2. Clean.
     let units = executor::plan(&approved, &recommendations, &output.findings);

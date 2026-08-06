@@ -23,6 +23,39 @@ pub const KEY_RETENTION_DAYS: &str = "quarantine.retention_days";
 /// Quarantine size cap, in bytes.
 pub const KEY_MAX_BYTES: &str = "quarantine.max_bytes";
 
+/// Prefix under which each module stores its own settings blob.
+///
+/// One row per module rather than one row per field: a module owns the shape of
+/// its own settings, and adding a field to it must not need a migration
+/// (ARCHITECTURE section 5, "`settings(key, value)` — includes per-module
+/// settings JSON").
+pub const MODULE_KEY_PREFIX: &str = "module.";
+
+/// The settings key for one module.
+pub fn module_key(module_id: &str) -> String {
+    format!("{MODULE_KEY_PREFIX}{module_id}")
+}
+
+/// Read a module's settings, or `None` when it has never saved any.
+///
+/// A stored blob that no longer deserialises reads as `None` and is logged, so
+/// an upgrade that changed a field falls back to defaults instead of refusing to
+/// start (see [`get_json`]).
+///
+/// # Errors
+/// Returns an error if the table cannot be queried.
+pub fn get_module<T: DeserializeOwned>(conn: &Connection, module_id: &str) -> Result<Option<T>> {
+    get_json(conn, &module_key(module_id))
+}
+
+/// Write a module's settings.
+///
+/// # Errors
+/// Returns an error if serialisation or the write fails.
+pub fn set_module<T: Serialize>(conn: &Connection, module_id: &str, value: &T) -> Result<()> {
+    set_json(conn, &module_key(module_id), value)
+}
+
 /// Read a raw string setting.
 ///
 /// # Errors
@@ -181,6 +214,38 @@ mod tests {
         clear(&conn, "theme").expect("clear");
         assert_eq!(get_raw(&conn, "theme").expect("read"), None);
         clear(&conn, "theme").expect("clearing twice is fine");
+    }
+
+    #[test]
+    fn module_settings_are_namespaced_and_round_trip() {
+        let conn = conn();
+        assert_eq!(module_key("cleaner"), "module.cleaner");
+
+        let value = Sample {
+            label: "packs".to_owned(),
+            count: 6,
+        };
+        set_module(&conn, "cleaner", &value).expect("write");
+        assert_eq!(
+            get_module::<Sample>(&conn, "cleaner").expect("read"),
+            Some(value)
+        );
+        assert_eq!(
+            get_module::<Sample>(&conn, "duplicates").expect("read"),
+            None,
+            "one module's settings must not answer for another's"
+        );
+    }
+
+    #[test]
+    fn module_settings_that_no_longer_parse_fall_back_rather_than_fail() {
+        let conn = conn();
+        set_raw(&conn, &module_key("cleaner"), "{ from an older version }").expect("write");
+        assert_eq!(
+            get_module::<Sample>(&conn, "cleaner").expect("read"),
+            None,
+            "an upgrade must not brick the settings page"
+        );
     }
 
     #[test]

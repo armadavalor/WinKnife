@@ -1,0 +1,55 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "browser-cache",
+  "name": "Browser Caches",
+  "version": 1,
+  "module": "cleaner",
+  "enabled_by_default": true,
+  "description": "Cached pages, images and scripts your browsers keep to load sites faster. They refill as you browse. Cookies, history, passwords and profiles are never touched.",
+  "rules": [
+    {
+      "id": "chrome-web-cache",
+      "paths": [
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\Cache\\**",
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\Code Cache\\**",
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\GPUCache\\**"
+      ],
+      "match": { "min_age_hours": 24, "owner_process_absent": "chrome.exe" },
+      "score": { "base": 88, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "Chrome's web cache. Chrome refills it as you browse; your history, cookies and saved passwords live elsewhere and are not touched."
+    },
+    {
+      "id": "edge-web-cache",
+      "paths": [
+        "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\Cache\\**",
+        "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\Code Cache\\**",
+        "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\GPUCache\\**"
+      ],
+      "match": { "min_age_hours": 24, "owner_process_absent": "msedge.exe" },
+      "score": { "base": 88, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "Edge's web cache. Edge refills it as you browse; your history, cookies and saved passwords live elsewhere and are not touched."
+    },
+    {
+      "id": "brave-web-cache",
+      "paths": [
+        "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\Cache\\**",
+        "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\Code Cache\\**",
+        "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\GPUCache\\**"
+      ],
+      "match": { "min_age_hours": 24, "owner_process_absent": "brave.exe" },
+      "score": { "base": 88, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "Brave's web cache. Brave refills it as you browse; your history, cookies and saved passwords live elsewhere and are not touched."
+    },
+    {
+      "id": "firefox-web-cache",
+      "paths": ["%LOCALAPPDATA%\\Mozilla\\Firefox\\Profiles\\*\\cache2\\**"],
+      "match": { "min_age_hours": 24, "owner_process_absent": "firefox.exe" },
+      "score": { "base": 88, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "Firefox's web cache. Firefox refills it as you browse; your profile, bookmarks and logins live elsewhere and are not touched."
+    }
+  ]
+}

@@ -1120,6 +1120,7 @@ mod tests {
         };
         let idle = |days: i64| Signals {
             idle_days: Some(days),
+            written_days: Some(days),
             ..Signals::unknown()
         };
 
@@ -1191,6 +1192,7 @@ mod tests {
                 what: "the same rule, with every bonus firing, still cannot go green",
                 signals: Signals {
                     idle_days: Some(400),
+                    written_days: Some(400),
                     size_bytes: BIG,
                     in_known_cache_dir: true,
                     owner_process_running: false,
@@ -1312,6 +1314,7 @@ mod tests {
                 what: "age and the cache directory stack",
                 signals: Signals {
                     idle_days: Some(400),
+                    written_days: Some(400),
                     in_known_cache_dir: true,
                     ..Signals::unknown()
                 },
@@ -1401,6 +1404,7 @@ mod tests {
                 chrome: true,
                 signals: Signals {
                     idle_days: Some(400),
+                    written_days: Some(400),
                     in_known_cache_dir: true,
                     ..Signals::unknown()
                 },
@@ -1431,6 +1435,7 @@ mod tests {
                 what: "a 400-day-old download still cannot climb past needs_review",
                 signals: Signals {
                     idle_days: Some(400),
+                    written_days: Some(400),
                     size_bytes: BIG,
                     ..Signals::unknown()
                 },
@@ -1450,6 +1455,7 @@ mod tests {
                 path: "C:\\Windows\\System32\\ntoskrnl.exe",
                 signals: Signals {
                     idle_days: Some(400),
+                    written_days: Some(400),
                     in_known_cache_dir: true,
                     ..Signals::unknown()
                 },

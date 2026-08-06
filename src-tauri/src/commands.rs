@@ -72,10 +72,18 @@ pub async fn start_scan<R: Runtime>(
     module_id: String,
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
+    db: State<'_, Database>,
 ) -> Result<ScanResult, ApiError> {
     if module_id != "cleaner" {
         return Err(CoreError::UnknownModule(module_id).into());
     }
+
+    // Which packs run is the user's decision, re-read per scan so a change on
+    // the settings page takes effect on the next scan rather than the next
+    // restart.
+    let settings: cleaner::CleanerSettings = db
+        .with(|conn| crate::core::settings::get_module(conn, "cleaner"))?
+        .unwrap_or_default();
 
     let scan_id = Uuid::new_v4();
     let cancel = CancellationToken::new();
@@ -101,6 +109,7 @@ pub async fn start_scan<R: Runtime>(
         cleaner::scan(
             &CleanerContext {
                 packs: services.brain.packs(),
+                settings: &settings,
                 protected: services.brain.protected_paths(),
                 recycle_bin: services.recycle_bin.as_ref(),
                 now: Utc::now(),

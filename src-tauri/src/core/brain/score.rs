@@ -110,10 +110,22 @@ const CACHE_DIR_NAMES: &[&str] = &[
 /// unchanged rather than a guess.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Signals {
-    /// Days since the file was last opened, falling back to its modification
-    /// time when Windows has last-access updates turned off. `None` when the
-    /// filesystem gave us neither.
+    /// Days since **anything** touched the file — the later of its access and
+    /// modification times. `None` when the filesystem gave us neither.
+    ///
+    /// Drives the age *bonuses*, because "nothing has been near this in six
+    /// months" needs both halves to be old.
     pub idle_days: Option<i64>,
+    /// Days since the file was last *written*. Drives the freshness *penalty*.
+    ///
+    /// Deliberately a different signal from [`Signals::idle_days`], and the
+    /// reason is self-inflicted: `SystemLockProbe` opens every candidate for
+    /// reading, so on a volume with last-access updates enabled a scan bumps the
+    /// access time of everything it looked at. Keyed on access, the second scan
+    /// of the day would find nothing safe — every file would look like it had
+    /// just been used, by us. A write is a claim only the owning program can
+    /// make.
+    pub written_days: Option<i64>,
     /// Size in bytes.
     pub size_bytes: u64,
     /// Whether a component of the path names a known cache directory.
@@ -127,6 +139,16 @@ impl Signals {
     /// Signals that say nothing, so scoring is the rule's base score alone.
     pub fn unknown() -> Self {
         Self::default()
+    }
+
+    /// What an untouched file looks like: nothing has read it or written it for
+    /// `days`.
+    pub fn untouched_for(days: i64) -> Self {
+        Self {
+            idle_days: Some(days),
+            written_days: Some(days),
+            ..Self::default()
+        }
     }
 }
 
@@ -178,6 +200,9 @@ impl Scored {
 /// Label of the modifier that fires when the owning process is open.
 pub const OWNER_RUNNING_LABEL: &str = "owner-process-running";
 
+/// Label of the modifier that fires when the file was written today.
+pub const FRESH_LABEL: &str = "idle:fresh";
+
 /// Which bucket a bare score lands in, before any ceiling.
 pub fn bucket_for(score: u8) -> RiskBucket {
     if score >= SAFE_THRESHOLD {
@@ -209,9 +234,10 @@ pub fn score(base: u8, ceiling: MaxBucket, signals: &Signals) -> Scored {
     let declared_ceiling = RiskBucket::from(ceiling);
     let mut ceiling = declared_ceiling;
 
-    // Step 3a: idle age. The strongest signal a cleaner has, in both directions.
-    if let Some(days) = signals.idle_days {
-        let modifier = if days >= STALE_DAYS {
+    // Step 3a: age. The strongest signal a cleaner has, in both directions —
+    // and read from two different clocks, for the reason on `Signals`.
+    let age = if let Some(days) = signals.idle_days.filter(|days| *days >= WARM_DAYS) {
+        if days >= STALE_DAYS {
             Some(Modifier {
                 label: "idle:stale",
                 delta: STALE_BONUS,
@@ -221,23 +247,23 @@ pub fn score(base: u8, ceiling: MaxBucket, signals: &Signals) -> Scored {
                 label: "idle:cold",
                 delta: COLD_BONUS,
             })
-        } else if days >= WARM_DAYS {
+        } else {
             Some(Modifier {
                 label: "idle:warm",
                 delta: WARM_BONUS,
             })
-        } else if days < FRESH_DAYS {
-            Some(Modifier {
-                label: "idle:fresh",
-                delta: FRESH_PENALTY,
-            })
-        } else {
-            None
-        };
-        if let Some(modifier) = modifier {
-            running += modifier.delta;
-            modifiers.push(modifier);
         }
+    } else if signals.written_days.is_some_and(|days| days < FRESH_DAYS) {
+        Some(Modifier {
+            label: FRESH_LABEL,
+            delta: FRESH_PENALTY,
+        })
+    } else {
+        None
+    };
+    if let Some(modifier) = age {
+        running += modifier.delta;
+        modifiers.push(modifier);
     }
 
     // Step 3b: the path agreeing with the rule.
@@ -352,6 +378,7 @@ mod tests {
             MaxBucket::Safe,
             &Signals {
                 idle_days: Some(400),
+                written_days: Some(400),
                 in_known_cache_dir: true,
                 ..signals()
             },
@@ -363,6 +390,7 @@ mod tests {
             MaxBucket::NeedsReview,
             &Signals {
                 idle_days: Some(0),
+                written_days: Some(0),
                 owner_process_running: true,
                 ..signals()
             },
@@ -378,6 +406,7 @@ mod tests {
                 MaxBucket::NeedsReview,
                 &Signals {
                     idle_days: Some(days),
+                    written_days: Some(days),
                     ..signals()
                 },
             )
@@ -388,9 +417,56 @@ mod tests {
         assert_eq!(at(10).modifiers[0].label, "idle:warm");
         assert!(
             at(3).modifiers.is_empty(),
-            "the band between warm and fresh"
+            "the band between warm and written-today"
         );
         assert_eq!(at(0).modifiers[0].label, "idle:fresh");
+    }
+
+    /// The self-poisoning bug the two clocks exist to avoid: `SystemLockProbe`
+    /// opens every candidate, so on a volume with last-access updates enabled a
+    /// scan bumps the access time of everything it examined. Read from the
+    /// access clock alone, the *second* scan of the day would find nothing safe
+    /// — every file would look freshly used, by us.
+    #[test]
+    fn a_bumped_access_time_does_not_make_a_quiet_file_look_fresh() {
+        // Something (us) read it minutes ago; nothing has written it in two days.
+        let scanned_today = Signals {
+            idle_days: Some(0),
+            written_days: Some(2),
+            ..signals()
+        };
+        let scored = score(90, MaxBucket::Safe, &scanned_today);
+        assert!(
+            !scored.fired(FRESH_LABEL),
+            "a read is not a claim on the file: {:?}",
+            scored.modifiers
+        );
+        assert_eq!(scored.score, 90);
+        assert_eq!(scored.bucket, RiskBucket::Safe);
+
+        // A real write today still lands the penalty.
+        let written_today = Signals {
+            idle_days: Some(0),
+            written_days: Some(0),
+            ..signals()
+        };
+        let scored = score(90, MaxBucket::Safe, &written_today);
+        assert!(scored.fired(FRESH_LABEL));
+        assert_eq!(scored.bucket, RiskBucket::NeedsReview);
+
+        // And the age *bonus* needs both clocks to be old, so a file read this
+        // morning gets no "nothing has been near this in months" credit.
+        let old_but_read = Signals {
+            idle_days: Some(0),
+            written_days: Some(400),
+            ..signals()
+        };
+        assert!(
+            score(80, MaxBucket::Safe, &old_but_read)
+                .modifiers
+                .is_empty(),
+            "a fresh read cancels the age bonus without earning the penalty"
+        );
     }
 
     #[test]
@@ -448,6 +524,7 @@ mod tests {
             MaxBucket::Safe,
             &Signals {
                 idle_days: Some(365),
+                written_days: Some(365),
                 in_known_cache_dir: true,
                 owner_process_running: true,
                 ..signals()

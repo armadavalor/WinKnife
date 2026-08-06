@@ -67,10 +67,42 @@ pub struct ScanOutput {
     pub cancelled: bool,
 }
 
+/// Per-module settings for the cleaner, stored under `module.cleaner`.
+///
+/// Only *overrides* are stored. A pack the user has never touched is not in the
+/// map and answers with its own `enabled_by_default`, so shipping a new pack
+/// turns it on (or leaves it off) without needing to touch anybody's database.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CleanerSettings {
+    /// Pack id → enabled, for packs the user has decided about.
+    pub packs: BTreeMap<String, bool>,
+}
+
+impl CleanerSettings {
+    /// Whether a pack runs, honouring the user's choice and falling back to the
+    /// pack's own declared default.
+    pub fn is_enabled(&self, pack: &RulePack) -> bool {
+        self.packs
+            .get(pack.id())
+            .copied()
+            .unwrap_or(pack.spec.enabled_by_default)
+    }
+
+    /// Record a decision about one pack.
+    pub fn set_enabled(&mut self, pack_id: impl Into<String>, enabled: bool) {
+        self.packs.insert(pack_id.into(), enabled);
+    }
+}
+
 /// Everything the cleaner needs that is not a rule pack.
 pub struct CleanerContext<'a> {
-    /// Packs to run, already compiled and expanded.
+    /// Packs to run, already compiled and expanded. Disabled packs are filtered
+    /// out by [`scan`] rather than by the caller, so a pack that ships off by
+    /// default really is off everywhere.
     pub packs: &'a [RulePack],
+    /// Which packs the user has turned on or off.
+    pub settings: &'a CleanerSettings,
     /// Hard gates, consulted before a walk root is walked rather than only
     /// afterwards: a root that resolves into a protected location is never
     /// entered at all (security review C1d).
@@ -97,6 +129,15 @@ pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) ->
     let mut seen = 0u64;
 
     for pack in ctx.packs {
+        // A pack the user turned off — or one that ships off, like `dev-caches`
+        // and `windows-update-leftovers` — is not walked at all. Silently:
+        // "you asked for this not to run" is not a partial scan, so it has no
+        // business in `skipped_rules`.
+        if !ctx.settings.is_enabled(pack) {
+            tracing::debug!(pack = pack.id(), "pack disabled; not scanned");
+            continue;
+        }
+
         for (rule_id, variable) in &pack.skipped {
             output
                 .skipped_rules
@@ -387,14 +428,15 @@ pub fn analyze_at(findings: &[Finding], brain: &Brain, now: DateTime<Utc>) -> Ve
 /// process list itself, through its own cached probe, so a module cannot forget
 /// to (see `Brain::classify_by_rule`).
 fn signals_for(finding: &Finding, now: DateTime<Utc>) -> brain::Signals {
+    let days_since = |when: Option<DateTime<Utc>>| when.map(|when| (now - when).num_days());
+
     brain::Signals {
-        // Last *access*, falling back to last modification. Windows has
-        // last-access updates off by default on most installs, so a scan that
-        // insisted on `accessed` would treat every file as ageless.
-        idle_days: finding
-            .accessed
-            .or(finding.modified)
-            .map(|when| (now - when).num_days()),
+        // The *later* of the two clocks: "nothing has been near this in six
+        // months" is only true if neither reading nor writing has happened.
+        // `Option::max` is what we want here — `None` sorts below `Some`, so a
+        // filesystem that reports only one of them still answers.
+        idle_days: days_since(finding.accessed.max(finding.modified)),
+        written_days: days_since(finding.modified),
         size_bytes: finding.size_bytes,
         in_known_cache_dir: brain::score::in_known_cache_dir(&finding.path),
         owner_process_running: false,
@@ -505,14 +547,17 @@ pub fn empties_recycle_bin(rule: &CompiledRule) -> bool {
 mod tests {
     use super::*;
     use crate::core::brain::{rules, ProtectedPaths};
-    use crate::core::platform::{AlwaysUnlocked, MapEnv, StubRecycleBin};
+    use crate::core::platform::{AlwaysUnlocked, MapEnv, StubProcessProbe, StubRecycleBin};
     use std::fs;
     use std::sync::Arc;
     use std::time::SystemTime;
 
-    /// A miniature dirty Windows profile, built in a tempdir. `%TEMP%` and
-    /// `%LOCALAPPDATA%` are pointed at it, so the shipped rule packs are the
-    /// ones under test and the real machine is never touched.
+    /// A miniature dirty Windows profile, built in a tempdir. Every variable the
+    /// shipped packs expand is pointed at it, so the packs under test are the
+    /// real ones and the developer's machine is never touched.
+    ///
+    /// One fixture entry exists for every shipped pack, which is what
+    /// `docs/RULES-FORMAT.md` asks a new pack to bring with it.
     struct Fixture {
         _dir: tempfile::TempDir,
         root: PathBuf,
@@ -524,15 +569,16 @@ mod tests {
             let dir = tempfile::tempdir().expect("tempdir");
             let root = dir.path().to_path_buf();
 
-            let temp = root.join("AppData/Local/Temp");
-            let explorer = root.join("AppData/Local/Microsoft/Windows/Explorer");
+            let local = root.join("AppData/Local");
+            let temp = local.join("Temp");
+            let explorer = local.join("Microsoft/Windows/Explorer");
             let windows = root.join("Windows");
             let downloads = root.join("Downloads");
             for path in [&temp, &explorer, &windows, &downloads] {
                 fs::create_dir_all(path).expect("fixture dirs");
             }
 
-            // Green: old temp files.
+            // windows-temp — green: old temp files.
             aged(&temp.join("old-installer.tmp"), b"0123456789", 48);
             aged(&temp.join("nested/deep.tmp"), b"deep", 72);
             // Excluded by the pack's own `exclude` pattern.
@@ -540,17 +586,66 @@ mod tests {
             // Too new: the quiet-period rule and the pack's 24h rule.
             aged(&temp.join("being-written.tmp"), b"live", 0);
             aged(&temp.join("yesterdayish.tmp"), b"recent", 12);
-            // Green: the icon cache.
+
+            // thumbnail-icon-cache — green.
             aged(&explorer.join("iconcache_32.db"), b"icon-cache", 48);
             aged(&explorer.join("notes.txt"), b"not a db", 48);
-            // Red by injection: a `C:\Windows` stand-in inside the fixture.
-            aged(&windows.join("System32/critical.sys"), b"do not touch", 200);
-            // Untouched by any pack.
+
+            // browser-cache — green while the browser is closed, yellow while it
+            // is open. One entry per browser the pack knows.
+            aged(
+                &local.join("Google/Chrome/User Data/Default/Cache/f_000001"),
+                b"chrome cache entry",
+                72,
+            );
+            aged(
+                &local.join("Microsoft/Edge/User Data/Default/Cache/f_000001"),
+                b"edge cache entry",
+                72,
+            );
+            aged(
+                &local.join("Mozilla/Firefox/Profiles/abc.default/cache2/entries/E1"),
+                b"firefox cache entry",
+                72,
+            );
+            // Not a cache: the pack must not reach a profile file.
+            aged(
+                &local.join("Google/Chrome/User Data/Default/Cookies"),
+                b"do not touch my logins",
+                72,
+            );
+
+            // crash-dumps-logs — green dump, yellow stray dump in temp.
+            aged(&local.join("CrashDumps/app.exe.1234.dmp"), b"crash", 48);
+            aged(&temp.join("stray.dmp"), b"a stray memory dump", 400);
+
+            // old-downloads — yellow, and never green whatever its age.
+            aged(&downloads.join("forgotten.zip"), b"downloaded once", 5_000);
+            // Recent enough that the 180-day rule leaves it alone.
             aged(&downloads.join("keep-me.zip"), b"user data", 500);
 
+            // installer-leftovers — yellow.
+            aged(&temp.join("setup-something.msi"), b"an installer", 1_000);
+
+            // dev-caches — off by default, so it must produce nothing unless the
+            // settings say otherwise.
+            aged(&local.join("npm-cache/_cacache/index-v5/aa/bb"), b"npm", 900);
+
+            // windows-update-leftovers — off by default and informational.
+            aged(
+                &windows.join("SoftwareDistribution/Download/abc/payload.cab"),
+                b"update payload",
+                900,
+            );
+
+            // Red by injection: a `C:\Windows` stand-in inside the fixture.
+            aged(&windows.join("System32/critical.sys"), b"do not touch", 200);
+
             let env = MapEnv::new()
+                .with("USERPROFILE", root.to_string_lossy())
                 .with("TEMP", temp.to_string_lossy())
-                .with("LOCALAPPDATA", root.join("AppData/Local").to_string_lossy());
+                .with("LOCALAPPDATA", local.to_string_lossy())
+                .with("WINDIR", windows.to_string_lossy());
 
             Self {
                 root,
@@ -570,10 +665,15 @@ mod tests {
         }
 
         fn brain(&self, packs: Vec<RulePack>) -> Brain {
+            self.brain_with(packs, StubProcessProbe::none())
+        }
+
+        fn brain_with(&self, packs: Vec<RulePack>, processes: StubProcessProbe) -> Brain {
             Brain::builder()
                 .protected_paths(self.protected())
                 .packs(packs)
                 .lock_probe(Arc::new(AlwaysUnlocked))
+                .process_probe(Arc::new(processes))
                 .build()
         }
     }
@@ -621,9 +721,11 @@ mod tests {
         let packs = fixture.packs();
         let protected = fixture.protected();
         let cancel = CancellationToken::new();
+        let settings = CleanerSettings::default();
         scan(
             &CleanerContext {
                 packs: &packs,
+                settings: &settings,
                 protected: &protected,
                 recycle_bin: bin,
                 now: Utc::now(),
@@ -633,19 +735,31 @@ mod tests {
         )
     }
 
+    /// A stock Windows layout, for the pack-level tests that are not about a
+    /// fixture tree.
+    fn stock_env() -> MapEnv {
+        MapEnv::new()
+            .with("WINDIR", "C:\\Windows")
+            .with("ProgramFiles", "C:\\Program Files")
+            .with("ProgramFiles(x86)", "C:\\Program Files (x86)")
+            .with("ProgramData", "C:\\ProgramData")
+            .with("USERPROFILE", "C:\\Users\\dev")
+            .with("TEMP", "C:\\Users\\dev\\AppData\\Local\\Temp")
+            .with("LOCALAPPDATA", "C:\\Users\\dev\\AppData\\Local")
+            .with("APPDATA", "C:\\Users\\dev\\AppData\\Roaming")
+    }
+
     /// The validate-all-packs test RULES-FORMAT.md asks CI to run: every pack
     /// that ships must parse, and its id must match its file name.
     #[test]
     fn every_shipped_rule_pack_is_valid() {
-        let env = MapEnv::new()
-            .with("TEMP", "C:\\Temp")
-            .with("LOCALAPPDATA", "C:\\Users\\dev\\AppData\\Local");
-        let packs = rules::load_dir(&repo_rules_dir(), &env).expect("all packs must load");
+        let packs = rules::load_dir(&repo_rules_dir(), &stock_env()).expect("all packs must load");
 
         assert!(!packs.is_empty(), "the app ships with no rule packs");
         for pack in &packs {
             assert_eq!(pack.spec.module, "cleaner", "{} targets no module", pack.id());
             assert!(!pack.rules.is_empty(), "{} compiled to nothing", pack.id());
+            assert!(pack.skipped.is_empty(), "{} skipped {:?}", pack.id(), pack.skipped);
             for rule in &pack.rules {
                 assert!(
                     !rule.spec.reason.trim().is_empty(),
@@ -657,13 +771,11 @@ mod tests {
         }
     }
 
-    /// Phase 1 ships exactly the three green packs the brief names.
+    /// The packs phase 2 ships, named so adding or losing one is a deliberate
+    /// edit rather than a surprise.
     #[test]
-    fn the_shipped_packs_are_the_phase_one_set() {
-        let env = MapEnv::new()
-            .with("TEMP", "C:\\Temp")
-            .with("LOCALAPPDATA", "C:\\Users\\dev\\AppData\\Local");
-        let mut ids: Vec<_> = rules::load_dir(&repo_rules_dir(), &env)
+    fn the_shipped_packs_are_the_phase_two_set() {
+        let mut ids: Vec<_> = rules::load_dir(&repo_rules_dir(), &stock_env())
             .expect("load")
             .iter()
             .map(|pack| pack.id().to_owned())
@@ -671,27 +783,91 @@ mod tests {
         ids.sort();
         assert_eq!(
             ids,
-            vec!["recycle-bin", "thumbnail-icon-cache", "windows-temp"]
+            vec![
+                "browser-cache",
+                "crash-dumps-logs",
+                "dev-caches",
+                "installer-leftovers",
+                "old-downloads",
+                "recycle-bin",
+                "thumbnail-icon-cache",
+                "windows-temp",
+                "windows-update-leftovers",
+            ]
         );
     }
 
-    /// No shipped rule may point at a protected path — RULES-FORMAT.md calls
-    /// that "a test failure, not a runtime decision".
+    /// Which packs run when the user has said nothing.
+    ///
+    /// `dev-caches` is off because module spec 02 says so. `windows-update-leftovers`
+    /// is off because its only location is inside `%WINDIR%`, which is protected
+    /// in code: the pack can report but never act, so leaving it on by default
+    /// would put a permanent "not walked, it is protected" line in front of every
+    /// user (`docs/DECISIONS-NEEDED.md`, phase 2).
+    #[test]
+    fn the_default_pack_selection_is_the_one_the_module_spec_states() {
+        let packs = rules::load_dir(&repo_rules_dir(), &stock_env()).expect("load");
+        let settings = CleanerSettings::default();
+
+        let mut on: Vec<_> = packs
+            .iter()
+            .filter(|pack| settings.is_enabled(pack))
+            .map(|pack| pack.id().to_owned())
+            .collect();
+        let mut off: Vec<_> = packs
+            .iter()
+            .filter(|pack| !settings.is_enabled(pack))
+            .map(|pack| pack.id().to_owned())
+            .collect();
+        on.sort();
+        off.sort();
+
+        assert_eq!(off, vec!["dev-caches", "windows-update-leftovers"]);
+        assert_eq!(
+            on,
+            vec![
+                "browser-cache",
+                "crash-dumps-logs",
+                "installer-leftovers",
+                "old-downloads",
+                "recycle-bin",
+                "thumbnail-icon-cache",
+                "windows-temp",
+            ]
+        );
+
+        // And a user override wins over the pack's own default, both ways.
+        let mut settings = CleanerSettings::default();
+        settings.set_enabled("dev-caches", true);
+        settings.set_enabled("windows-temp", false);
+        let by_id = |id: &str| packs.iter().find(|p| p.id() == id).expect("pack");
+        assert!(settings.is_enabled(by_id("dev-caches")));
+        assert!(!settings.is_enabled(by_id("windows-temp")));
+    }
+
+    /// No shipped rule may point at a protected path **with an action** —
+    /// RULES-FORMAT.md calls that "a test failure, not a runtime decision".
+    ///
+    /// One pack does name a protected location: `windows-update-leftovers`, whose
+    /// only location is `%WINDIR%\SoftwareDistribution\Download`. It is allowed
+    /// to *say so* and nothing else — `action: info_only` plus
+    /// `max_bucket: do_not_delete`, a combination the parser can enforce and the
+    /// brain's gates enforce again. Reporting a protected location is the red
+    /// bucket's "produced, not targeted" honesty feature (module spec 02);
+    /// proposing to remove one is the thing the rule exists to forbid, and the
+    /// second half of this test proves the brain refuses it either way.
     #[test]
     fn no_shipped_rule_targets_a_protected_path() {
-        let env = MapEnv::new()
-            .with("WINDIR", "C:\\Windows")
-            .with("ProgramFiles", "C:\\Program Files")
-            .with("ProgramFiles(x86)", "C:\\Program Files (x86)")
-            .with("ProgramData", "C:\\ProgramData")
-            .with("USERPROFILE", "C:\\Users\\dev")
-            .with("TEMP", "C:\\Users\\dev\\AppData\\Local\\Temp")
-            .with("LOCALAPPDATA", "C:\\Users\\dev\\AppData\\Local");
+        let env = stock_env();
         let protected = ProtectedPaths::from_env(
             &env,
             Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife"),
             Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife\\quarantine"),
         );
+        let brain = Brain::builder()
+            .protected_paths(protected.clone())
+            .packs(rules::load_dir(&repo_rules_dir(), &env).expect("load"))
+            .build();
 
         for pack in rules::load_dir(&repo_rules_dir(), &env).expect("load") {
             for rule in &pack.rules {
@@ -711,16 +887,77 @@ mod tests {
                         );
                         continue;
                     }
-                    assert!(
-                        !protected.is_protected(root),
-                        "{}/{} walks the protected path {}",
+                    if !protected.is_protected(root) {
+                        continue;
+                    }
+
+                    // The narrow, structural exception: a rule may name a
+                    // protected location only if it can never propose anything
+                    // about it.
+                    assert_eq!(
+                        rule.spec.action,
+                        RuleAction::InfoOnly,
+                        "{}/{} names the protected path {} and proposes an action",
                         pack.id(),
                         rule.spec.id,
                         root.display()
                     );
+                    assert_eq!(
+                        rule.spec.score.max_bucket,
+                        brain::MaxBucket::DoNotDelete,
+                        "{}/{} names the protected path {} without capping itself at do_not_delete",
+                        pack.id(),
+                        rule.spec.id,
+                        root.display()
+                    );
+
+                    // And asserted rather than assumed: the real brain, asked
+                    // about a real file under that root, refuses it.
+                    let victim = root.join("something.bin");
+                    let verdict = brain.classify(&victim, Some(rule));
+                    assert_eq!(verdict.bucket, RiskBucket::DoNotDelete, "{}", victim.display());
+                    assert_eq!(verdict.action, Action::InfoOnly, "{}", victim.display());
+                    assert!(!verdict.is_actionable(), "{}", victim.display());
                 }
             }
         }
+    }
+
+    /// A rule pack that names a protected location can report and nothing else.
+    /// The one that ships is `windows-update-leftovers`; this pins the whole
+    /// chain for it — parse, plan, rate — rather than trusting the JSON.
+    #[test]
+    fn the_informational_windows_pack_can_report_but_never_act() {
+        let env = stock_env();
+        let packs = rules::load_dir(&repo_rules_dir(), &env).expect("load");
+        let pack = packs
+            .iter()
+            .find(|pack| pack.id() == "windows-update-leftovers")
+            .expect("the pack ships");
+
+        assert!(
+            !pack.spec.enabled_by_default,
+            "an inert pack must not put a refusal line in front of every user"
+        );
+        for rule in &pack.rules {
+            assert_eq!(rule.spec.action, RuleAction::InfoOnly);
+            assert_eq!(rule.spec.score.max_bucket, brain::MaxBucket::DoNotDelete);
+        }
+
+        // Even enabled, its walk root is refused before anything is walked.
+        let protected = ProtectedPaths::from_env(
+            &env,
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife"),
+            Path::new("C:\\Users\\dev\\AppData\\Roaming\\WinKnife\\quarantine"),
+        );
+        let (groups, refused) = plan_walks(pack, &protected);
+        assert!(groups.is_empty(), "nothing under %WINDIR% is ever walked");
+        assert_eq!(refused.len(), 1);
+        assert!(
+            refused[0].contains("protected location"),
+            "the refusal must say why: {}",
+            refused[0]
+        );
     }
 
     #[test]
@@ -746,9 +983,11 @@ mod tests {
 
         let protected = fixture.protected();
         let cancel = CancellationToken::new();
+        let settings = CleanerSettings::default();
         let mut output = scan(
             &CleanerContext {
                 packs: &packs,
+                settings: &settings,
                 protected: &protected,
                 recycle_bin: &bin,
                 now: Utc::now(),
@@ -791,11 +1030,69 @@ mod tests {
                 .any(|f| f.path.to_string_lossy().replace('\\', "/").ends_with(name))
         };
 
+        let pack_of = |name: &str| {
+            output
+                .findings
+                .iter()
+                .find(|f| f.path.to_string_lossy().replace('\\', "/").ends_with(name))
+                .and_then(|f| f.meta.get("packId").and_then(|v| v.as_str()))
+                .map(str::to_owned)
+                .unwrap_or_else(|| panic!("`{name}` was not found by the scan"))
+        };
+
+        println!("{:<58} | {:<24} | bucket", "fixture path", "pack");
+        for name in [
+            "Temp/old-installer.tmp",
+            "Temp/nested/deep.tmp",
+            "Explorer/iconcache_32.db",
+            "Chrome/User Data/Default/Cache/f_000001",
+            "Edge/User Data/Default/Cache/f_000001",
+            "Firefox/Profiles/abc.default/cache2/entries/E1",
+            "CrashDumps/app.exe.1234.dmp",
+            "Temp/stray.dmp",
+            "Temp/setup-something.msi",
+            "Downloads/forgotten.zip",
+            "shell:RecycleBinFolder",
+        ] {
+            println!(
+                "{name:<58} | {:<24} | {:?}",
+                pack_of(name),
+                bucket_of(name)
+            );
+        }
+
         // Green.
         assert_eq!(bucket_of("Temp/old-installer.tmp"), RiskBucket::Safe);
         assert_eq!(bucket_of("Temp/nested/deep.tmp"), RiskBucket::Safe);
         assert_eq!(bucket_of("Explorer/iconcache_32.db"), RiskBucket::Safe);
         assert_eq!(bucket_of("shell:RecycleBinFolder"), RiskBucket::Safe);
+        // browser-cache, with every browser closed.
+        assert_eq!(
+            bucket_of("Chrome/User Data/Default/Cache/f_000001"),
+            RiskBucket::Safe
+        );
+        assert_eq!(
+            bucket_of("Edge/User Data/Default/Cache/f_000001"),
+            RiskBucket::Safe
+        );
+        assert_eq!(
+            bucket_of("Firefox/Profiles/abc.default/cache2/entries/E1"),
+            RiskBucket::Safe
+        );
+        // crash-dumps-logs, the green half.
+        assert_eq!(bucket_of("CrashDumps/app.exe.1234.dmp"), RiskBucket::Safe);
+
+        // Yellow.
+        assert_eq!(bucket_of("Temp/stray.dmp"), RiskBucket::NeedsReview);
+        assert_eq!(bucket_of("Temp/setup-something.msi"), RiskBucket::NeedsReview);
+        assert_eq!(bucket_of("Downloads/forgotten.zip"), RiskBucket::NeedsReview);
+
+        // The pack that claimed each of them, so a rule moving between packs is
+        // a visible change rather than a silent one.
+        assert_eq!(pack_of("Temp/stray.dmp"), "crash-dumps-logs");
+        assert_eq!(pack_of("Temp/setup-something.msi"), "installer-leftovers");
+        assert_eq!(pack_of("Downloads/forgotten.zip"), "old-downloads");
+        assert_eq!(pack_of("Temp/old-installer.tmp"), "windows-temp");
 
         // Red, by protected-path injection, despite a Safe rule claiming it.
         assert_eq!(
@@ -808,7 +1105,177 @@ mod tests {
         assert!(!found("Temp/being-written.tmp"), "inside the quiet period");
         assert!(!found("Temp/yesterdayish.tmp"), "younger than 24h");
         assert!(!found("Explorer/notes.txt"), "not a *.db");
-        assert!(!found("Downloads/keep-me.zip"), "no pack targets Downloads");
+        assert!(
+            !found("Downloads/keep-me.zip"),
+            "younger than the 180-day rule"
+        );
+        assert!(
+            !found("User Data/Default/Cookies"),
+            "the browser pack must never reach a profile file"
+        );
+        assert!(
+            !found("npm-cache/_cacache/index-v5/aa/bb"),
+            "dev-caches ships off by default"
+        );
+        assert!(
+            !found("SoftwareDistribution/Download/abc/payload.cab"),
+            "windows-update-leftovers ships off by default"
+        );
+    }
+
+    /// `owner_process_absent`, end to end through the shipped `browser-cache`
+    /// pack: **browser closed → Safe, browser running → NeedsReview.**
+    ///
+    /// The field has been parsed and validated since phase 1 and acted on by
+    /// nobody. This is the acceptance criterion for making it work, and it runs
+    /// against the real pack file rather than a fixture rule.
+    #[test]
+    fn a_browser_cache_drops_to_review_while_that_browser_is_running() {
+        let fixture = Fixture::new();
+        let packs = fixture.packs();
+        let bin = StubRecycleBin::default();
+        let output = run(&fixture, &bin);
+
+        let entry = |name: &str| {
+            output
+                .findings
+                .iter()
+                .find(|f| f.path.to_string_lossy().replace('\\', "/").ends_with(name))
+                .unwrap_or_else(|| panic!("`{name}` was not found by the scan"))
+                .clone()
+        };
+        let bucket = |brain: &Brain, finding: &Finding| {
+            analyze(std::slice::from_ref(finding), brain)[0].risk
+        };
+
+        let chrome = entry("Chrome/User Data/Default/Cache/f_000001");
+        let edge = entry("Edge/User Data/Default/Cache/f_000001");
+
+        let closed = fixture.brain_with(packs.clone(), StubProcessProbe::none());
+        assert_eq!(bucket(&closed, &chrome), RiskBucket::Safe);
+        assert_eq!(bucket(&closed, &edge), RiskBucket::Safe);
+
+        let chrome_open =
+            fixture.brain_with(packs.clone(), StubProcessProbe::running(["chrome.exe"]));
+        assert_eq!(
+            bucket(&chrome_open, &chrome),
+            RiskBucket::NeedsReview,
+            "Chrome is open, so its cache is not safe to take"
+        );
+        assert_eq!(
+            bucket(&chrome_open, &edge),
+            RiskBucket::Safe,
+            "one browser being open says nothing about another"
+        );
+
+        // And the row explains itself rather than still claiming to be safe.
+        let recs = analyze(std::slice::from_ref(&chrome), &chrome_open);
+        assert!(
+            recs[0].reason.contains("chrome.exe"),
+            "the downgrade must name the process: `{}`",
+            recs[0].reason
+        );
+        assert_eq!(recs[0].action, Action::Quarantine, "yellow is still offered");
+    }
+
+    /// The pack toggle from the settings page, exercised through `scan` rather
+    /// than through the struct: turning `dev-caches` on has to make it walk.
+    #[test]
+    fn a_pack_toggle_decides_whether_a_pack_is_walked_at_all() {
+        let fixture = Fixture::new();
+        let packs = fixture.packs();
+        let protected = fixture.protected();
+        let bin = StubRecycleBin::default();
+
+        let scan_with = |settings: &CleanerSettings| {
+            let cancel = CancellationToken::new();
+            scan(
+                &CleanerContext {
+                    packs: &packs,
+                    settings,
+                    protected: &protected,
+                    recycle_bin: &bin,
+                    now: Utc::now(),
+                    cancel: &cancel,
+                },
+                None,
+            )
+        };
+        let found = |output: &ScanOutput, name: &str| {
+            output
+                .findings
+                .iter()
+                .any(|f| f.path.to_string_lossy().replace('\\', "/").ends_with(name))
+        };
+
+        let default = scan_with(&CleanerSettings::default());
+        assert!(!found(&default, "npm-cache/_cacache/index-v5/aa/bb"));
+        assert!(found(&default, "Temp/old-installer.tmp"));
+
+        let mut on = CleanerSettings::default();
+        on.set_enabled("dev-caches", true);
+        let enabled = scan_with(&on);
+        assert!(
+            found(&enabled, "npm-cache/_cacache/index-v5/aa/bb"),
+            "turning a pack on must make it walk"
+        );
+
+        let mut off = CleanerSettings::default();
+        off.set_enabled("windows-temp", false);
+        let disabled = scan_with(&off);
+        assert!(
+            !found(&disabled, "Temp/old-installer.tmp"),
+            "turning a pack off must stop it walking"
+        );
+        assert!(
+            disabled.skipped_rules.is_empty(),
+            "a pack the user turned off is not a partial scan: {:?}",
+            disabled.skipped_rules
+        );
+    }
+
+    /// Module spec 02: old downloads are **never Safe**, whatever the heuristics
+    /// add. The ceiling in the pack is what guarantees it, so this asserts on the
+    /// shipped pack rather than on the code.
+    #[test]
+    fn old_downloads_can_never_be_rated_safe() {
+        let fixture = Fixture::new();
+        let packs = fixture.packs();
+        let brain = fixture.brain(packs.clone());
+        let rule = packs
+            .iter()
+            .find(|pack| pack.id() == "old-downloads")
+            .expect("the pack ships")
+            .rules
+            .first()
+            .expect("its rule");
+
+        assert_eq!(rule.spec.score.max_bucket, brain::MaxBucket::NeedsReview);
+
+        // Every combination of bonuses, on a path nothing protects.
+        let path = fixture.root.join("Downloads/forgotten.zip");
+        for idle in [None, Some(0), Some(10), Some(400), Some(10_000)] {
+            for size in [0, 4_096, 8 * 1024 * 1024 * 1024] {
+                for cache in [false, true] {
+                    let verdict = brain.classify_with(
+                        &path,
+                        Some(rule),
+                        &brain::Signals {
+                            idle_days: idle,
+                            written_days: idle,
+                            size_bytes: size,
+                            in_known_cache_dir: cache,
+                            owner_process_running: false,
+                        },
+                    );
+                    assert_ne!(
+                        verdict.bucket,
+                        RiskBucket::Safe,
+                        "idle={idle:?} size={size} cache={cache} made a download green"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -928,11 +1395,13 @@ mod tests {
         let packs = fixture.packs();
         let protected = fixture.protected();
         let cancel = CancellationToken::new();
+        let settings = CleanerSettings::default();
         cancel.cancel();
 
         let output = scan(
             &CleanerContext {
                 packs: &packs,
+                settings: &settings,
                 protected: &protected,
                 recycle_bin: &StubRecycleBin::default(),
                 now: Utc::now(),
@@ -951,6 +1420,7 @@ mod tests {
         let packs = fixture.packs();
         let protected = fixture.protected();
         let cancel = CancellationToken::new();
+        let settings = CleanerSettings::default();
         let mut ticks = 0u64;
         let mut last = 0u64;
         let mut sink = |seen: u64, _: &Path| {
@@ -961,6 +1431,7 @@ mod tests {
         scan(
             &CleanerContext {
                 packs: &packs,
+                settings: &settings,
                 protected: &protected,
                 recycle_bin: &StubRecycleBin::default(),
                 now: Utc::now(),
@@ -979,10 +1450,12 @@ mod tests {
         let packs = rules::load_dir(&repo_rules_dir(), &MapEnv::new()).expect("load");
         let protected = ProtectedPaths::empty();
         let cancel = CancellationToken::new();
+        let settings = CleanerSettings::default();
 
         let output = scan(
             &CleanerContext {
                 packs: &packs,
+                settings: &settings,
                 protected: &protected,
                 recycle_bin: &StubRecycleBin::default(),
                 now: Utc::now(),
@@ -1011,10 +1484,12 @@ mod tests {
         // Somebody pointed a pack at a place the gates protect.
         let protected = ProtectedPaths::from_trees([fixture.root.join("AppData/Local/Temp")]);
         let cancel = CancellationToken::new();
+        let settings = CleanerSettings::default();
 
         let output = scan(
             &CleanerContext {
                 packs: &packs,
+                settings: &settings,
                 protected: &protected,
                 recycle_bin: &StubRecycleBin::default(),
                 now: Utc::now(),

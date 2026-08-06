@@ -1,0 +1,19 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "old-downloads",
+  "name": "Old Downloads",
+  "version": 1,
+  "module": "cleaner",
+  "enabled_by_default": true,
+  "description": "Files in your Downloads folder that nothing has opened for six months. These are yours, so they are never removed automatically.",
+  "rules": [
+    {
+      "id": "untouched-downloads",
+      "paths": ["%USERPROFILE%\\Downloads\\**"],
+      "match": { "min_age_hours": 4320 },
+      "score": { "base": 45, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "Nothing has opened this in your Downloads folder for over 180 days. Downloads are your files, so this is never treated as safe to remove — look before you decide."
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "crash-dumps-logs",
+  "name": "Crash Dumps and Error Reports",
+  "version": 1,
+  "module": "cleaner",
+  "enabled_by_default": true,
+  "description": "Snapshots Windows and applications write when something crashes. Useful to a developer for a few days, then dead weight.",
+  "rules": [
+    {
+      "id": "crash-dumps",
+      "paths": ["%LOCALAPPDATA%\\CrashDumps\\**"],
+      "match": { "min_age_hours": 24 },
+      "score": { "base": 86, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "A crash dump written when a program stopped working. Nothing reads it unless you are debugging that crash."
+    },
+    {
+      "id": "error-report-archive",
+      "paths": [
+        "%LOCALAPPDATA%\\Microsoft\\Windows\\WER\\ReportArchive\\**",
+        "%LOCALAPPDATA%\\Microsoft\\Windows\\WER\\ReportQueue\\**"
+      ],
+      "match": { "min_age_hours": 168 },
+      "score": { "base": 86, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "A Windows Error Reporting record for a crash over a week old. It has already been sent or abandoned."
+    },
+    {
+      "id": "stray-memory-dumps",
+      "paths": ["%LOCALAPPDATA%\\Temp\\**"],
+      "match": { "min_age_hours": 168, "extensions": ["dmp", "mdmp", "hdmp"] },
+      "score": { "base": 55, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "A memory dump left in your temp folder over a week ago. These are often large, and they are only useful to whoever was diagnosing that crash."
+    }
+  ]
+}

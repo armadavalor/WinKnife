@@ -1,0 +1,20 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "windows-update-leftovers",
+  "name": "Windows Update Leftovers",
+  "version": 1,
+  "module": "cleaner",
+  "enabled_by_default": false,
+  "description": "Installer payloads Windows Update downloaded. They sit inside the Windows directory, which WinKnife reports on and never removes anything from — so this pack is informational and is off by default.",
+  "rules": [
+    {
+      "id": "software-distribution-download",
+      "paths": ["%WINDIR%\\SoftwareDistribution\\Download\\**"],
+      "match": { "min_age_hours": 720 },
+      "score": { "base": 60, "max_bucket": "do_not_delete" },
+      "action": "info_only",
+      "reason": "Windows Update keeps the installers it downloaded here. This is inside the Windows directory, which WinKnife never removes anything from, so it is only ever reported: use Windows' own Disk Cleanup and tick \"Windows Update Cleanup\" if you want the space back.",
+      "requires_admin": true
+    }
+  ]
+}

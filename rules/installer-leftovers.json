@@ -1,0 +1,22 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "installer-leftovers",
+  "name": "Installer Leftovers",
+  "version": 1,
+  "module": "cleaner",
+  "enabled_by_default": true,
+  "description": "Setup packages left behind in your temp folder after an install finished. Removing one does not uninstall anything.",
+  "rules": [
+    {
+      "id": "stale-temp-installers",
+      "paths": ["%TEMP%\\**"],
+      "match": {
+        "min_age_hours": 720,
+        "extensions": ["msi", "msp", "exe", "cab"]
+      },
+      "score": { "base": 55, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "An installer left in your temp folder over 30 days ago. Removing it uninstalls nothing, but you would have to download it again to repair or reinstall that program."
+    }
+  ]
+}
