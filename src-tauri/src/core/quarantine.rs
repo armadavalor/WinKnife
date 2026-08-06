@@ -675,7 +675,9 @@ fn non_colliding_target(original: &Path) -> (PathBuf, bool) {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let ext = original.extension().map(|e| e.to_string_lossy().into_owned());
+    let ext = original
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned());
 
     for attempt in 0..1_000u32 {
         let mut name = stem.clone();
@@ -1038,7 +1040,13 @@ mod tests {
         let h = harness(RetentionPolicy::default());
         let batch = h.quarantine.start_batch();
         let sources: Vec<_> = (0..5)
-            .map(|i| write(&h.work, &format!("f{i}.log"), format!("body {i}").as_bytes()))
+            .map(|i| {
+                write(
+                    &h.work,
+                    &format!("f{i}.log"),
+                    format!("body {i}").as_bytes(),
+                )
+            })
             .collect();
         for source in &sources {
             h.quarantine.take(&h.conn, batch, source).expect("take");
@@ -1053,7 +1061,10 @@ mod tests {
         assert_eq!(restored.len(), 5);
         assert!(failed.is_empty());
         for (i, source) in sources.iter().enumerate() {
-            assert_eq!(fs::read(source).expect("read"), format!("body {i}").into_bytes());
+            assert_eq!(
+                fs::read(source).expect("read"),
+                format!("body {i}").into_bytes()
+            );
         }
         assert_eq!(h.quarantine.stats(&h.conn).expect("stats").item_count, 0);
     }
@@ -1172,7 +1183,7 @@ mod tests {
         let batch = h.quarantine.start_batch();
         let mut items = Vec::new();
         for i in 0..4 {
-            let source = write(&h.work, &format!("f{i}.bin"), &vec![b'x'; 10]);
+            let source = write(&h.work, &format!("f{i}.bin"), &[b'x'; 10]);
             let item = h.quarantine.take(&h.conn, batch, &source).expect("take");
             // Force a deterministic age ordering; the wall clock is too coarse.
             h.conn
@@ -1225,8 +1236,8 @@ mod tests {
             max_bytes: 5,
         });
         let batch = h.quarantine.start_batch();
-        let a = write(&h.work, "a.bin", &vec![b'a'; 10]);
-        let b = write(&h.work, "b.bin", &vec![b'b'; 10]);
+        let a = write(&h.work, "a.bin", &[b'a'; 10]);
+        let b = write(&h.work, "b.bin", &[b'b'; 10]);
         let item_a = h.quarantine.take(&h.conn, batch, &a).expect("take");
         h.quarantine.take(&h.conn, batch, &b).expect("take");
         h.conn
@@ -1265,7 +1276,10 @@ mod tests {
             .purge_expired(&h.conn, Utc::now())
             .expect("purge");
 
-        assert_eq!(h.quarantine.find_item(&h.conn, item.id).expect("find"), None);
+        assert_eq!(
+            h.quarantine.find_item(&h.conn, item.id).expect("find"),
+            None
+        );
     }
 
     #[test]
@@ -1303,9 +1317,9 @@ mod tests {
         let h = harness(RetentionPolicy::default());
         let first = h.quarantine.start_batch();
         let second = h.quarantine.start_batch();
-        let a = write(&h.work, "a.log", &vec![b'a'; 10]);
-        let b = write(&h.work, "b.log", &vec![b'b'; 20]);
-        let c = write(&h.work, "c.log", &vec![b'c'; 30]);
+        let a = write(&h.work, "a.log", &[b'a'; 10]);
+        let b = write(&h.work, "b.log", &[b'b'; 20]);
+        let c = write(&h.work, "c.log", &[b'c'; 30]);
         h.quarantine.take(&h.conn, first, &a).expect("take");
         h.quarantine.take(&h.conn, first, &b).expect("take");
         let c_item = h.quarantine.take(&h.conn, second, &c).expect("take");
@@ -1336,11 +1350,20 @@ mod tests {
         let batch = h.quarantine.start_batch();
         let source = write(&h.work, "x.log", b"x");
         let item = h.quarantine.take(&h.conn, batch, &source).expect("take");
-        assert_eq!(h.quarantine.list_batches(&h.conn).expect("batches").len(), 1);
+        assert_eq!(
+            h.quarantine.list_batches(&h.conn).expect("batches").len(),
+            1
+        );
 
-        h.quarantine.restore_item(&h.conn, item.id).expect("restore");
+        h.quarantine
+            .restore_item(&h.conn, item.id)
+            .expect("restore");
 
-        assert!(h.quarantine.list_batches(&h.conn).expect("batches").is_empty());
+        assert!(h
+            .quarantine
+            .list_batches(&h.conn)
+            .expect("batches")
+            .is_empty());
         assert!(h.quarantine.list_items(&h.conn).expect("items").is_empty());
         let row = h
             .quarantine

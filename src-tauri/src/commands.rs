@@ -16,7 +16,9 @@ use uuid::Uuid;
 use crate::core::brain::Brain;
 use crate::core::db::Database;
 use crate::core::error::{ApiError, CoreError};
-use crate::core::events::{self, ExecProgress, ProgressThrottle, QuarantineChanged, ScanDone, ScanProgress};
+use crate::core::events::{
+    self, ExecProgress, ProgressThrottle, QuarantineChanged, ScanDone, ScanProgress,
+};
 use crate::core::executor::{self, ExecEnvironment};
 use crate::core::module::{ModuleManifest, ModuleRegistry};
 use crate::core::platform::{PowerAction, RecycleBin};
@@ -281,8 +283,7 @@ pub fn quarantine_restore<R: Runtime>(
     services: State<'_, Services>,
     db: State<'_, Database>,
 ) -> Result<RestoreReport, ApiError> {
-    let (restored, failed) =
-        db.with(|conn| services.quarantine.restore_batch(conn, batch_id))?;
+    let (restored, failed) = db.with(|conn| services.quarantine.restore_batch(conn, batch_id))?;
     notify_quarantine_changed(&app, &services, &db, Some(batch_id));
     Ok(RestoreReport {
         restored,
@@ -362,11 +363,7 @@ pub fn shutdown_schedule(
     let now = Utc::now();
     let persisted = timer.schedule(mode, action, now)?;
     db.with(|conn| {
-        crate::core::settings::set_json(
-            conn,
-            crate::core::settings::KEY_ACTIVE_TIMER,
-            &persisted,
-        )
+        crate::core::settings::set_json(conn, crate::core::settings::KEY_ACTIVE_TIMER, &persisted)
     })?;
     Ok(timer.status(now))
 }
@@ -381,9 +378,7 @@ pub fn shutdown_cancel(
     db: State<'_, Database>,
 ) -> Result<TimerStatus, ApiError> {
     timer.cancel();
-    db.with(|conn| {
-        crate::core::settings::clear(conn, crate::core::settings::KEY_ACTIVE_TIMER)
-    })?;
+    db.with(|conn| crate::core::settings::clear(conn, crate::core::settings::KEY_ACTIVE_TIMER))?;
     Ok(timer.status(Utc::now()))
 }
 

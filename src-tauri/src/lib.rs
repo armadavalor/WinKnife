@@ -166,9 +166,7 @@ pub fn run() {
             let timer = Arc::new(ShutdownTimer::new(power_controller(dry_run)));
             // Re-arm a timer that survived a restart, if its target is still
             // ahead; discard it otherwise.
-            if let Some(persisted) =
-                settings::get_json(&connection, settings::KEY_ACTIVE_TIMER)?
-            {
+            if let Some(persisted) = settings::get_json(&connection, settings::KEY_ACTIVE_TIMER)? {
                 if !timer.rearm(persisted, chrono::Utc::now()) {
                     settings::clear(&connection, settings::KEY_ACTIVE_TIMER)?;
                 }
@@ -315,9 +313,11 @@ mod tray {
         let menu = Menu::with_items(app, &[&show, &cancel, &quit])?;
 
         TrayIconBuilder::with_id(TRAY_ID)
-            .icon(app.default_window_icon().cloned().ok_or_else(|| {
-                tauri::Error::UnknownPath
-            })?)
+            .icon(
+                app.default_window_icon()
+                    .cloned()
+                    .ok_or_else(|| tauri::Error::UnknownPath)?,
+            )
             .tooltip("Cleanify")
             .menu(&menu)
             .show_menu_on_left_click(true)
@@ -367,12 +367,12 @@ mod tests {
 
     #[test]
     fn the_dry_run_flag_is_detected() {
-        assert!(is_dry_run(["cleanify.exe".to_owned(), DRY_RUN_FLAG.to_owned()]));
-        assert!(!is_dry_run(["cleanify.exe".to_owned()]));
-        assert!(!is_dry_run([
+        assert!(is_dry_run([
             "cleanify.exe".to_owned(),
-            "--dry".to_owned()
+            DRY_RUN_FLAG.to_owned()
         ]));
+        assert!(!is_dry_run(["cleanify.exe".to_owned()]));
+        assert!(!is_dry_run(["cleanify.exe".to_owned(), "--dry".to_owned()]));
     }
 
     #[test]

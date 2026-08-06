@@ -165,10 +165,7 @@ mod tests {
             expand("C:\\100% done\\x", &env()),
             Expansion::Expanded("C:\\100% done\\x".to_owned())
         );
-        assert_eq!(
-            expand("50%", &env()),
-            Expansion::Expanded("50%".to_owned())
-        );
+        assert_eq!(expand("50%", &env()), Expansion::Expanded("50%".to_owned()));
     }
 
     #[test]

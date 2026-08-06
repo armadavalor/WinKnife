@@ -174,7 +174,13 @@ mod tests {
         let files: Vec<_> = entries
             .iter()
             .filter(|e| !e.is_dir)
-            .map(|e| e.path.file_name().expect("name").to_string_lossy().into_owned())
+            .map(|e| {
+                e.path
+                    .file_name()
+                    .expect("name")
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
 
         assert_eq!(files, vec!["a.log", "b.tmp", "c.bin"]);
@@ -294,9 +300,8 @@ mod tests {
     #[test]
     fn the_walk_order_is_stable_across_runs() {
         let dir = fixture();
-        let paths = |entries: Vec<WalkEntry>| {
-            entries.into_iter().map(|e| e.path).collect::<Vec<_>>()
-        };
+        let paths =
+            |entries: Vec<WalkEntry>| entries.into_iter().map(|e| e.path).collect::<Vec<_>>();
         let (first, _) = collect(dir.path(), &CancellationToken::new());
         let (second, _) = collect(dir.path(), &CancellationToken::new());
 

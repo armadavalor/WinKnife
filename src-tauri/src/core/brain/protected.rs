@@ -63,10 +63,7 @@ impl ProtectedPaths {
             paths
                 .into_iter()
                 .map(|path| ProtectedEntry {
-                    reason: format!(
-                        "`{}` is a protected system location",
-                        path.display()
-                    ),
+                    reason: format!("`{}` is a protected system location", path.display()),
                     path: normalise(&path),
                     scope: Scope::Tree,
                 })
@@ -194,7 +191,8 @@ impl ProtectedPaths {
                             .any(|part| part == &entry_components[0])
                     } else {
                         candidate_components.len() >= entry_components.len()
-                            && candidate_components[..entry_components.len()] == entry_components[..]
+                            && candidate_components[..entry_components.len()]
+                                == entry_components[..]
                     }
                 }
             };
@@ -268,16 +266,32 @@ mod tests {
         let protected = windows_like();
         let cases: &[(&str, bool, &str)] = &[
             ("C:\\Windows", true, "the Windows directory itself"),
-            ("C:\\Windows\\System32\\ntoskrnl.exe", true, "deep inside Windows"),
+            (
+                "C:\\Windows\\System32\\ntoskrnl.exe",
+                true,
+                "deep inside Windows",
+            ),
             ("c:\\windows\\temp\\a.tmp", true, "case-insensitive match"),
             ("C:/Windows/System32", true, "forward slashes normalise"),
             ("C:\\Windows\\", true, "a trailing separator is ignored"),
-            ("C:\\Program Files\\App\\app.exe", true, "installed programs"),
-            ("C:\\Program Files (x86)\\Old\\x.dll", true, "32-bit programs"),
+            (
+                "C:\\Program Files\\App\\app.exe",
+                true,
+                "installed programs",
+            ),
+            (
+                "C:\\Program Files (x86)\\Old\\x.dll",
+                true,
+                "32-bit programs",
+            ),
             ("C:\\ProgramData\\Vendor\\cache.db", true, "shared app data"),
             ("C:\\Users\\dev", true, "the profile root itself"),
             ("C:\\USERS\\DEV\\", true, "profile root, different case"),
-            ("C:\\Users\\dev\\Downloads", false, "a profile subdirectory is not"),
+            (
+                "C:\\Users\\dev\\Downloads",
+                false,
+                "a profile subdirectory is not",
+            ),
             (
                 "C:\\Users\\dev\\AppData\\Local\\Temp\\a.tmp",
                 false,
@@ -301,13 +315,21 @@ mod tests {
                 true,
                 "volume metadata at any depth",
             ),
-            ("C:\\Windows.old\\x", false, "a similar prefix is not a match"),
+            (
+                "C:\\Windows.old\\x",
+                false,
+                "a similar prefix is not a match",
+            ),
             (
                 "C:\\WindowsApps-backup\\x",
                 false,
                 "component matching, not string prefix matching",
             ),
-            ("C:\\Users\\dev2", false, "a sibling profile is not the profile"),
+            (
+                "C:\\Users\\dev2",
+                false,
+                "a sibling profile is not the profile",
+            ),
         ];
 
         for (path, expected, why) in cases {
@@ -345,8 +367,11 @@ mod tests {
 
     #[test]
     fn missing_environment_variables_are_simply_skipped() {
-        let protected =
-            ProtectedPaths::from_env(&MapEnv::new(), Path::new("C:\\app"), Path::new("C:\\app\\q"));
+        let protected = ProtectedPaths::from_env(
+            &MapEnv::new(),
+            Path::new("C:\\app"),
+            Path::new("C:\\app\\q"),
+        );
         // No WINDIR in this environment, so nothing claims it — but drive roots
         // and our own directories are unconditional.
         assert!(!protected.is_protected(Path::new("C:\\Windows\\System32")));
@@ -375,8 +400,14 @@ mod tests {
 
     #[test]
     fn normalisation_is_stable() {
-        assert_eq!(normalise(Path::new("C:/Windows/")), PathBuf::from("c:\\windows"));
+        assert_eq!(
+            normalise(Path::new("C:/Windows/")),
+            PathBuf::from("c:\\windows")
+        );
         assert_eq!(normalise(Path::new("C:\\")), PathBuf::from("c:"));
-        assert_eq!(split(Path::new("c:\\windows\\temp")), vec!["c:", "windows", "temp"]);
+        assert_eq!(
+            split(Path::new("c:\\windows\\temp")),
+            vec!["c:", "windows", "temp"]
+        );
     }
 }

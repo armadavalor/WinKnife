@@ -174,9 +174,8 @@ impl PowerController for SystemPower {
                 // the values themselves: hibernate = false (sleep, not
                 // hibernate), force = false (let apps veto), wake_events =
                 // false (do not arm wake timers).
-                let ok = unsafe {
-                    windows::Win32::System::Power::SetSuspendState(false, false, false)
-                };
+                let ok =
+                    unsafe { windows::Win32::System::Power::SetSuspendState(false, false, false) };
                 if ok {
                     Ok(())
                 } else {

@@ -208,10 +208,7 @@ pub fn parse_pack(pack_name: &str, json: &str) -> Result<RulePackSpec> {
         return Err(invalid("id", "must not be empty".to_owned()));
     }
     if !is_kebab_case(&spec.id) {
-        return Err(invalid(
-            "id",
-            format!("`{}` is not kebab-case", spec.id),
-        ));
+        return Err(invalid("id", format!("`{}` is not kebab-case", spec.id)));
     }
     if spec.name.trim().is_empty() {
         return Err(invalid("name", "must not be empty".to_owned()));
@@ -226,7 +223,10 @@ pub fn parse_pack(pack_name: &str, json: &str) -> Result<RulePackSpec> {
         return Err(invalid("module", "must not be empty".to_owned()));
     }
     if spec.rules.is_empty() {
-        return Err(invalid("rules", "a pack with no rules does nothing".to_owned()));
+        return Err(invalid(
+            "rules",
+            "a pack with no rules does nothing".to_owned(),
+        ));
     }
 
     let mut seen = BTreeSet::new();
@@ -268,8 +268,7 @@ pub fn parse_pack(pack_name: &str, json: &str) -> Result<RulePackSpec> {
                 "`empty_recycle_bin` is only valid in the `recycle-bin` pack".to_owned(),
             ));
         }
-        if rule.action == RuleAction::Quarantine
-            && rule.score.max_bucket == MaxBucket::DoNotDelete
+        if rule.action == RuleAction::Quarantine && rule.score.max_bucket == MaxBucket::DoNotDelete
         {
             return Err(invalid(
                 &field("action"),
@@ -294,9 +293,8 @@ pub fn parse_pack(pack_name: &str, json: &str) -> Result<RulePackSpec> {
             }
             // Compile-check every pattern now so a typo fails at load, not
             // halfway through a scan.
-            compile_glob(pattern).map_err(|message| {
-                invalid(&field(&format!("paths[{pattern_index}]")), message)
-            })?;
+            compile_glob(pattern)
+                .map_err(|message| invalid(&field(&format!("paths[{pattern_index}]")), message))?;
         }
 
         // An absolute pattern that does not start from an environment variable
@@ -374,11 +372,13 @@ pub fn compile_spec(spec: RulePackSpec, env: &dyn EnvResolver) -> Result<RulePac
         let mut exclude = Vec::new();
         for pattern in &rule.exclude {
             if let env::Expansion::Expanded(expanded) = env::expand(pattern, env) {
-                exclude.push(compile_glob(&expanded).map_err(|message| CoreError::RulePack {
-                    pack: spec.id.clone(),
-                    field: format!("rules.{}.exclude", rule.id),
-                    message,
-                })?);
+                exclude.push(
+                    compile_glob(&expanded).map_err(|message| CoreError::RulePack {
+                        pack: spec.id.clone(),
+                        field: format!("rules.{}.exclude", rule.id),
+                        message,
+                    })?,
+                );
             }
         }
 
@@ -605,12 +605,18 @@ mod tests {
             ),
             (
                 "action on a red rule",
-                VALID.replace(r#""max_bucket": "safe""#, r#""max_bucket": "do_not_delete""#),
+                VALID.replace(
+                    r#""max_bucket": "safe""#,
+                    r#""max_bucket": "do_not_delete""#,
+                ),
                 "rules[0].action",
             ),
             (
                 "recycle-bin action in the wrong pack",
-                VALID.replace(r#""action": "quarantine""#, r#""action": "empty_recycle_bin""#),
+                VALID.replace(
+                    r#""action": "quarantine""#,
+                    r#""action": "empty_recycle_bin""#,
+                ),
                 "rules[0].action",
             ),
             (
@@ -653,8 +659,11 @@ mod tests {
 
     #[test]
     fn the_error_message_reads_like_a_bug_report() {
-        let err = parse_pack("windows-temp", &VALID.replace(r#""base": 90"#, r#""base": 200"#))
-            .expect_err("invalid");
+        let err = parse_pack(
+            "windows-temp",
+            &VALID.replace(r#""base": 90"#, r#""base": 200"#),
+        )
+        .expect_err("invalid");
         let message = err.to_string();
         assert!(message.contains("windows-temp"), "got `{message}`");
         assert!(message.contains("score.base"), "got `{message}`");
@@ -712,7 +721,10 @@ mod tests {
     #[test]
     fn max_bucket_maps_onto_the_shared_risk_bucket() {
         assert_eq!(RiskBucket::from(MaxBucket::Safe), RiskBucket::Safe);
-        assert_eq!(RiskBucket::from(MaxBucket::NeedsReview), RiskBucket::NeedsReview);
+        assert_eq!(
+            RiskBucket::from(MaxBucket::NeedsReview),
+            RiskBucket::NeedsReview
+        );
         assert_eq!(
             RiskBucket::from(MaxBucket::DoNotDelete),
             RiskBucket::DoNotDelete

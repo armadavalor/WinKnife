@@ -115,7 +115,7 @@ pub fn execute(
         });
     }
 
-    if let Some(sink) = progress.as_deref_mut() {
+    if let Some(sink) = progress {
         if let Some(last) = units.last() {
             sink(total, total, last.finding);
         }
@@ -190,10 +190,7 @@ fn apply_one(
         return skipped(format!("skipped: {}", lock.reason()));
     }
 
-    match env
-        .quarantine
-        .take(env.conn, batch, &unit.finding.path)
-    {
+    match env.quarantine.take(env.conn, batch, &unit.finding.path) {
         Ok(item) => {
             *moved_anything = true;
             (ExecOutcome::Succeeded, item.size_bytes)
@@ -319,7 +316,7 @@ mod tests {
         let h = harness();
         let brain = brain();
         let bin = StubRecycleBin::default();
-        let a = write(&h.work, "a.tmp", &vec![b'a'; 100]);
+        let a = write(&h.work, "a.tmp", &[b'a'; 100]);
         let b = write(&h.work, "b.tmp", &vec![b'b'; 250]);
         let (fa, fb) = (finding_at(&a, 100), finding_at(&b, 250));
         let (ra, rb) = (quarantine_rec(&fa), quarantine_rec(&fb));
@@ -341,10 +338,7 @@ mod tests {
         assert_eq!(report.reclaimed_bytes, 350);
         assert!(report.batch_id.is_some());
         assert!(!a.exists() && !b.exists());
-        assert_eq!(
-            h.quarantine.stats(&h.conn).expect("stats").item_count,
-            2
-        );
+        assert_eq!(h.quarantine.stats(&h.conn).expect("stats").item_count, 2);
     }
 
     #[test]
