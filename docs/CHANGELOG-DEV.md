@@ -201,3 +201,172 @@ cleaner → drawer UI.
 - CI is still **unverified**: no git remote exists, so the workflow has never
   run. The workflow was not updated for the new `cargo fmt`/integration-test
   steps beyond what phase 0 already ran.
+
+---
+
+## 2026-08-06 — Phase 1: security remediation
+
+**Built.** Nothing new. An adversarial security review blocked phase 1; this is
+every finding it raised, fixed, with a regression test per fix. 262 unit tests
+(was 218) and 11 integration tests (was 7).
+
+### Critical
+
+- **C1 — the protected-path gate was a string comparison.** Windows accepts
+  several spellings of the same file that a lexical comparison reads as
+  different places, so a community rule pack could name `C:\Windows\System32`
+  as something the list had never seen, have it walked, quarantined and rated
+  Safe. Six parts:
+  - **(a)** `executor.rs` canonicalises through `dunce` before consulting the
+    list, and refuses anything it cannot resolve. A missing path still falls
+    through to the move, which reports the miss properly. New dependency:
+    `dunce` (`std::fs::canonicalize` always returns `\\?\` paths, which is the
+    very form the list cannot match).
+  - **(b)** `ProtectedPaths` strips `\\?\` and `\\.\`, discards the trailing
+    dots and spaces Win32 discards, and resolves `..` lexically — in list
+    entries and probes alike. A path that still carries a `..` is reported as
+    protected rather than guessed at: a lexical answer is the wrong one as soon
+    as a junction is involved, and nothing legitimate reaches the gate with one.
+  - **(c)** `parse_pack` rejects patterns containing `..`, a `\\?\` / `\\.\`
+    prefix, or an 8.3 component, in `paths` and `exclude` alike. Malformed
+    pack, app refuses to start, same as every other pack validation.
+  - **(d)** The scanner resolves every walk root before walking it; a root that
+    is, or resolves into, a protected location is skipped and named in
+    `skipped_rules`. `CleanerContext` carries the gates for this. The *spelled*
+    root is what gets walked — the globs were compiled against that spelling —
+    and the *resolved* root is what decides whether to walk at all.
+  - **(e)** `C:\Windows`, `C:\Program Files`, `C:\Program Files (x86)` and
+    `C:\ProgramData` are compiled in unconditionally. Environment variables now
+    only ever widen the list.
+  - **(f)** Table-driven regressions over every probe form, plus pack-rejection
+    cases for each banned shape. The 8.3 case is proved at the executor, with a
+    fixture whose short name comes from `GetShortPathNameW`; the junction case
+    likewise, skipped when the environment cannot create links.
+
+### High
+
+- **H1 — `cleanup_partial` was an unguarded `remove_dir_all`.** On the restore
+  path its argument is a user directory, so a failed copy onto an existing
+  folder deleted the folder. It now tracks whether the destination pre-existed
+  and only removes what this call created; `take` also refuses any destination
+  outside the quarantine root; failures log instead of `let _ =`.
+- **H2 — restore could overwrite an existing file.** `Path::exists` answers "no"
+  for a path we merely cannot see, and `fs::rename` is `MoveFileEx` *with*
+  `MOVEFILE_REPLACE_EXISTING`. Occupancy is probed with `symlink_metadata` and
+  anything but a clean not-found counts as occupied; the rename itself is
+  `MoveFileExW` **without** the replace flag, so the suffix loop retries on
+  `AlreadyExists` instead of clobbering.
+- **H3 — timer cancel cleared memory before persistence.** A failed write
+  resurrected the shutdown on the next start, after the user had watched the
+  countdown disappear. Persistence is cleared first; the tray path retries and
+  logs, and leaves the timer armed if it cannot clear it.
+- **H4 — `shutdown_schedule` armed before persisting.** A failed write left a
+  live countdown while the UI reported failure. `ShutdownTimer::prepare`
+  resolves without arming, the command persists, then `arm` runs.
+- **H5 — `cfg!(test)` guards are inert in integration-test binaries.**
+  `cfg(test)` is set for the compilation unit being tested, so the guards inside
+  `SystemPower` and `WindowsRecycleBin` were false in `tests/` — where both
+  types were `pub`-reachable. Replaced by a process-global `AtomicBool` armed
+  exactly once in `lib.rs::run()`; `arm_real_os_effects` is `pub(crate)`, so
+  nothing outside the crate can arm it. Both types are crate-private and no
+  longer re-exported; they are reachable only as the trait objects
+  `platform::real_power_controller` / `real_recycle_bin` return.
+  `tests/os_effects_stay_disarmed.rs` holds both, calls them, and asserts the
+  refusal from the far side of the boundary.
+- **H6 — the recycle bin emptied off a bare Uuid.** The one irreversible action
+  in a batch now needs `confirm_empty_recycle_bin` on the `execute` command;
+  without it the item is Skipped with a reason. It empties at most once per
+  batch, and reports what it actually freed by querying the bin again
+  afterwards rather than trusting the analyze-time figure.
+- **H7 — retention policy unvalidated.** `RetentionPolicy::validated` clamps
+  retention to [1, 365] days and the size cap to a 64 MB floor. A stored `0`
+  used to mean "purge everything on the next start".
+
+### Medium
+
+- **M1** — `clippy.toml` disallows `fs::remove_file`, `fs::remove_dir`,
+  `fs::remove_dir_all` and `fs::rename` **by resolved path**, which an aliased
+  import or a fully-qualified call cannot dodge. Four `#[allow]`s, all in
+  `quarantine.rs` and all commented. The grep test survives as a smoke check and
+  now reads `tests/` and `build.rs` too.
+- **M2** — `restore_item` marks the ledger row before the move and puts it back
+  on failure, mirroring `take`.
+- **M3** — the compensating DELETE after a failed move logs its own failure.
+- **M4** — the size-cap loop stops at an item that frees nothing instead of
+  dooming every remaining item to reclaim zero bytes; an unmeasurable directory
+  is an error rather than zero bytes.
+- **M5** — `PurgeReport::affected_batches` names the batches a purge took items
+  out of.
+- **M6** — a cross-volume copy keeps modification times and the read-only flag,
+  and verification checks them, so the preservation is enforced rather than
+  hoped for. `destroy` clears read-only before removing, or a preserved flag
+  would make an item unpurgeable on Windows. The rename primitive is injectable,
+  so a test can force the cross-volume branch.
+- **M7** — `copy_dir_recursive` never follows a link, and a tree containing one
+  is refused rather than moved. `dirs_are_identical` compares `symlink_metadata`
+  file types.
+- **M8** — the `requires_admin` guard was byte-indexed and exempted anything
+  starting with `%` or `\\`. Now a character-based shape check at parse time
+  (UNC and verbatim require admin) plus a profile-containment check after
+  expansion.
+- **M9** — the lock probe answers `Inaccessible` for a directory rather than
+  `Free`, which the callers read as permission to move.
+
+### Low
+
+- **L1** — the cross-volume errno is 17 on Windows and 18 elsewhere; they were
+  accepted interchangeably, with a dead clause.
+- **L2** — timestamps are written `to_rfc3339_opts(Millis, use_z)`, so the text
+  order the retention query compares on matches the time order. Still
+  parse-compatible with rows written by the old format, so no migration.
+- **L3** — `PersistedTimer` carries its `ScheduleMode`, and `rearm` re-resolves
+  an `At` target. Only for a timer still in the future, so a stale one is still
+  discarded rather than rolled on to tomorrow. Per-tick re-resolution is
+  deliberately not done: a countdown that jumps mid-count is worse than one
+  that is right at every restart.
+- **L4** — unparsable ledger rows are skipped and counted in
+  `QuarantineStats::unreadable_rows` rather than becoming nil-uuid items dated
+  1970 that the drawer offered to restore.
+- **L5** — walk roots are deduplicated by resolved identity, so `%TEMP%` and
+  `%LOCALAPPDATA%\Temp` are one walk with both rules attached rather than two.
+
+**Decisions taken.**
+
+- **M7 refuses rather than skips.** The review allowed "skip links with a
+  per-item Skipped report", but skipping and then removing the source destroys
+  the link — a permanent loss of user data, which CLAUDE.md forbids outright.
+  A directory containing a link is therefore refused for a cross-volume move,
+  the original untouched, and the error names the links. Same-volume moves are
+  unaffected (a rename carries links intact), and phase 1 never proposes a
+  directory, so nothing reachable from the UI changes.
+- **M5 reports rather than purges whole batches.** Purging whole batches would
+  destroy items still inside their retention window because a sibling was old —
+  more destructive than the cap requires. Item-level eviction stays; the report
+  names the affected batches.
+- **H3's tray path leaves the timer armed** when persistence will not clear
+  after three attempts. A visible timer the user can cancel again beats an
+  invisible one that comes back on the next start.
+- **A `..`-carrying path is treated as protected**, not merely resolved. See
+  C1(b).
+
+**Wire-format changes** (mirrored in `src/lib/types.ts` in the same commits):
+`QuarantineStats.unreadableRows`, `PurgeReport.affectedBatches`, and
+`execute(scanId, approved, confirmEmptyRecycleBin)`.
+
+**Verification.** `cargo fmt --all --check` clean, `cargo clippy --all-targets
+-- -D warnings` clean, `cargo test` 273/273 green (262 unit + 11 integration),
+`npm run check` 0 errors / 0 warnings, `npm run build` OK.
+
+**Deferred / not verified.**
+
+- The 8.3 and junction regressions **skip themselves** where the environment
+  cannot provide the fixture (8.3 generation disabled, or link creation without
+  developer mode). Both ran for real on the development machine; CI should be
+  checked once a remote exists.
+- `RetentionPolicy` is validated at the two constructors the app uses;
+  `Quarantine::with_root` deliberately still takes a policy verbatim, because
+  the size-cap tests need caps far below any sane floor.
+- The **UI does not yet surface** `unreadableRows` or `affectedBatches`. Both
+  are carried to the frontend and typed; showing them is a drawer change and
+  was not in this brief's scope.
+- Still not launched visually — same caveat as the phase-1 entry above.

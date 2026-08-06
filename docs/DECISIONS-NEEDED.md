@@ -76,6 +76,38 @@ Open scope questions and contradictions found while implementing. Format:
       shown in the UI rather than dropped silently, so a partial scan says it
       was partial. A *malformed* pack still refuses to start the app.
 
+- [ ] 2026-08-06 (phase 1 remediation): the security review's fix for M7 says a
+      link inside a quarantined directory should be "skipped with a per-item
+      Skipped report", but a cross-volume move removes the source after copying
+      — so skipping a link and then removing the source destroys it, which
+      CLAUDE.md forbids outright. Took the safest reading: a directory
+      containing a link is **refused** for a cross-volume move, the original is
+      left untouched, and the error names the links. Same-volume moves are
+      unaffected (a rename carries links intact) and phase 1 never proposes a
+      directory, so nothing reachable from the UI changes. Revisit if a later
+      phase wants directory cleaning across volumes — recreating links needs
+      `SeCreateSymbolicLinkPrivilege`, which this app does not ask for.
+- [ ] 2026-08-06 (phase 1 remediation): the M8 profile-containment check cannot
+      be evaluated when `%USERPROFILE%` is unset, which is the case for the
+      fixture environments the tests build. Took the safest interpretation that
+      does not break them: when the profile root is unknown the containment
+      half is skipped and the parse-time shape half (drive-absolute, UNC,
+      verbatim) still applies. `%USERPROFILE%` is always set on a real Windows
+      install, so the real app always gets both halves.
+- [ ] 2026-08-06 (phase 1 remediation): M4 says the size-cap loop should "break
+      when an iteration frees nothing". A zero-byte item at the head of the
+      queue therefore stops the cap from doing anything at all until retention
+      removes it. Took that reading deliberately — under-purging is the
+      harmless direction, and the alternative (the old behaviour) purged the
+      entire quarantine to reclaim nothing. Revisit if zero-byte items turn out
+      to be common enough to wedge the cap in practice.
+- [ ] 2026-08-06 (phase 1 remediation): `QuarantineStats.unreadableRows` and
+      `PurgeReport.affectedBatches` are produced, typed and carried to the
+      frontend but **not shown anywhere**. Surfacing them is a quarantine-drawer
+      change and the remediation brief did not ask for one; whoever owns the
+      drawer should decide how a corrupt ledger row and a partially-evicted
+      batch ought to read.
+
 Open items awaiting the producer (not blocking implementation):
 - LICENSE copyright holder (currently "Cleanify contributors") — decide with
   the final product name.
