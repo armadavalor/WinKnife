@@ -169,8 +169,11 @@ fn open_exclusive(path: &Path, access: u32) -> std::io::Result<std::fs::File> {
 /// handle" rather than "set the timestamp to that value". The creation and
 /// last-write arguments are `None`, so nothing else about the file is touched —
 /// which is what keeps `scan()` read-only.
+///
+/// Shared with `signature.rs`, which has to open the binary it verifies for the
+/// same reason and must not leave a trace either (security review M19).
 #[cfg(windows)]
-fn suppress_access_time_updates(file: &std::fs::File) -> bool {
+pub(super) fn suppress_access_time_updates(file: &std::fs::File) -> bool {
     use std::os::windows::io::AsRawHandle;
     use windows::Win32::Foundation::{FILETIME, HANDLE};
     use windows::Win32::Storage::FileSystem::SetFileTime;

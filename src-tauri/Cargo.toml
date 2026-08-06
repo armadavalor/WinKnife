@@ -59,6 +59,9 @@ windows = { version = "0.61", features = [
     # Authenticode publisher lookup for the startup manager
     # (core/platform/signature.rs).
     "Win32_Security_Cryptography",
+    # Catalog-signed binaries: almost everything Windows ships carries no
+    # embedded signature at all (security review M18).
+    "Win32_Security_Cryptography_Catalog",
     "Win32_Security_WinTrust",
     # The startup manager reads Run/RunOnce and writes the StartupApproved
     # flags through `core/platform/registry.rs`.
