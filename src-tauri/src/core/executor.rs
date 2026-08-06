@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::core::brain::{self, Brain, GateVerdict};
+use crate::core::brain::Brain;
 use crate::core::error::Result;
 use crate::core::platform::RecycleBin;
 use crate::core::quarantine::Quarantine;
@@ -208,34 +208,18 @@ fn apply_one(
     //    (security review C1a). Spellings that cannot be canonicalised into a
     //    plain local path at all — `\\localhost\C$\Windows\...`, `\??\C:\...`,
     //    `\\?\GLOBALROOT\...` — are refused by the gate, not guessed at (C2).
-    if let Some(reason) = env.brain.protection_reason(&unit.finding.path) {
+    //
+    //    `Brain::path_refusal` is the whole of gate 1, and `Brain::classify`
+    //    runs the identical call at analyze time, so the rating the user was
+    //    shown and the decision taken here cannot disagree (security review H9).
+    if let Some(refusal) = env.brain.path_refusal(&unit.finding.path) {
         tracing::warn!(
             path = %unit.finding.path.display(),
-            "refused to act on a protected path at execute time"
+            canonical = refusal.canonical.as_ref().map(|p| p.display().to_string()),
+            reason = refusal.reason.as_str(),
+            "refused to act on a path the hard gates do not clear"
         );
-        return skipped(reason);
-    }
-    match brain::gate_path(&unit.finding.path) {
-        GateVerdict::Local(canonical) => {
-            if let Some(reason) = env.brain.protection_reason(&canonical) {
-                tracing::warn!(
-                    path = %unit.finding.path.display(),
-                    canonical = %canonical.display(),
-                    "refused to act on a path that resolves into a protected location"
-                );
-                return skipped(reason);
-            }
-        }
-        // Nothing is there to protect, and `take` reports the miss properly.
-        GateVerdict::Missing => {}
-        GateVerdict::Refused(why) => {
-            tracing::warn!(
-                path = %unit.finding.path.display(),
-                reason = why.as_str(),
-                "refused to act on a path the gate cannot judge"
-            );
-            return skipped(format!("skipped: {why}"));
-        }
+        return skipped(refusal.reason);
     }
 
     // 3. Locks are re-checked too: a file can be opened between review and

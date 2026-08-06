@@ -75,6 +75,18 @@ impl Verdict {
     }
 }
 
+/// Why the hard path gates refuse a path. Produced by [`Brain::path_refusal`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathRefusal {
+    /// Plain-language justification, shown to the user verbatim.
+    pub reason: String,
+    /// The spelling the path really resolves to, when the gate could work one
+    /// out and it was that form which turned out to be protected. For the log —
+    /// "`C:\PROGRA~1\x` resolves into `C:\Program Files`" is the interesting
+    /// half of the audit line.
+    pub canonical: Option<std::path::PathBuf>,
+}
+
 /// Shared analysis context handed to every module's `analyze`.
 #[derive(Clone)]
 pub struct Brain {
@@ -127,12 +139,60 @@ impl Brain {
         &self.packs
     }
 
-    /// Why `path` is protected, or `None`. The executor calls this again at
-    /// execute time rather than trusting the analyze-time verdict.
+    /// Why `path` is protected according to the *lexical* list, or `None`.
+    ///
+    /// The list alone cannot see through a spelling — an 8.3 alias, a junction
+    /// or a symlink names a protected place while writing it as somewhere
+    /// harmless. Prefer [`Brain::path_refusal`], which resolves the path first
+    /// and consults this with the answer.
     pub fn protection_reason(&self, path: &Path) -> Option<String> {
         self.protected
             .reason_for(path)
             .map(|reason| format!("protected location, not cleanable: {reason}"))
+    }
+
+    /// Why the hard path gates refuse `path`, or `None` when they do not.
+    ///
+    /// This is gate 1 in full, and it is deliberately **one** function with two
+    /// callers: [`Brain::classify`], which decides the rating the user is shown,
+    /// and `core::executor`, which decides whether the move happens.
+    ///
+    /// They used to run different checks. `classify` consulted only the lexical
+    /// [`ProtectedPaths`] list, while the executor also canonicalised and
+    /// re-asked — so a path written in a spelling the list does not recognise
+    /// could be rated green at analyze time and then refused at execute time.
+    /// The delete was blocked, but CLAUDE.md's hard rule is that a protected
+    /// path never receives a Safe rating *or* a delete action, and the rating
+    /// half was unenforced (security review H9).
+    pub fn path_refusal(&self, path: &Path) -> Option<PathRefusal> {
+        // The lexical list first: it answers for paths that are not on disk,
+        // and it is the defence-in-depth layer for the spellings the gate
+        // refuses outright.
+        if let Some(reason) = self.protection_reason(path) {
+            return Some(PathRefusal {
+                reason,
+                canonical: None,
+            });
+        }
+
+        match gate_path(path) {
+            // `C:\PROGRA~1\…`, a junction and a symlink all name one place while
+            // spelling it as another. Only the resolved form answers that.
+            GateVerdict::Local(canonical) => {
+                self.protection_reason(&canonical)
+                    .map(|reason| PathRefusal {
+                        reason,
+                        canonical: Some(canonical),
+                    })
+            }
+            // Nothing is there to protect: a walk finds nothing and a move
+            // reports the miss honestly.
+            GateVerdict::Missing => None,
+            GateVerdict::Refused(why) => Some(PathRefusal {
+                reason: format!("left alone: {why}"),
+                canonical: None,
+            }),
+        }
     }
 
     /// Current lock state of `path`.
@@ -147,13 +207,16 @@ impl Brain {
     /// paths that do not exist and only care about the path gates.
     pub fn classify(&self, path: &Path, matched: Option<&CompiledRule>) -> Verdict {
         // Gate 1: protected paths beat everything, including a rule that
-        // claims otherwise. This is the line CLAUDE.md calls a hard rule.
-        if let Some(reason) = self.protection_reason(path) {
+        // claims otherwise. This is the line CLAUDE.md calls a hard rule — and
+        // it is the *same* gate the executor runs, so the rating the user sees
+        // and the decision the executor takes can never disagree about one path
+        // (security review H9).
+        if let Some(refusal) = self.path_refusal(path) {
             return Verdict {
                 bucket: RiskBucket::DoNotDelete,
                 confidence: GATE_CONFIDENCE,
                 action: Action::InfoOnly,
-                reason,
+                reason: refusal.reason,
                 source: VerdictSource::ProtectedPath,
                 rule: matched.map(|rule| (rule.pack_id.clone(), rule.spec.id.clone())),
             };
@@ -441,6 +504,182 @@ mod tests {
             assert!(!verdict.action.is_mutating(), "{path}");
             assert!(!verdict.is_actionable(), "{path}");
             assert_eq!(verdict.confidence, GATE_CONFIDENCE, "{path}");
+        }
+    }
+
+    /// Security review H9: the *rating* half of CLAUDE.md's hard rule, which
+    /// says a protected path can never receive a Safe rating **or** a delete
+    /// action.
+    ///
+    /// `widen` is one-directional. It registers the canonical twin of an entry
+    /// written as an 8.3 alias, but never the alias of an entry written in full
+    /// — so probing a long-form entry with the short spelling missed:
+    ///
+    /// ```text
+    /// entry=SHORT probe=LONG  -> protected=true    (fixed one review ago)
+    /// entry=LONG  probe=SHORT -> protected=false   (this one)
+    /// ```
+    ///
+    /// The delete was still blocked, because the executor canonicalises before
+    /// it re-checks. The rating was not — so analyze and execute disagreed about
+    /// one path, and the user was shown a green row for a protected file.
+    /// `classify` now runs the executor's gate rather than the lexical list.
+    #[cfg(windows)]
+    #[test]
+    fn a_protected_path_probed_by_its_8_3_alias_is_never_rated_safe() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // A long name with spaces is what makes Windows mint an alias.
+        let long = dir.path().join("Protected Program Files");
+        std::fs::create_dir_all(&long).expect("fixture dir");
+        let canonical = dunce::canonicalize(&long).expect("canonicalize");
+        let victim = canonical.join("kernel.sys");
+        std::fs::write(&victim, b"critical").expect("fixture file");
+
+        let Some(short_victim) =
+            crate::core::test_support::short_path_name(&victim).filter(|short| short != &victim)
+        else {
+            crate::core::test_support::privileged_operation_unavailable(
+                "a_protected_path_probed_by_its_8_3_alias_is_never_rated_safe",
+                "no 8.3 alias is available here (fsutil 8dot3name), so the two spellings \
+                 this test compares cannot be produced",
+            );
+            return;
+        };
+
+        let pack = pack();
+        let brain = Brain::builder()
+            // Registered in its long spelling — the direction `widen` does not
+            // cover, because it only ever adds the *canonical* twin.
+            .protected_paths(ProtectedPaths::from_trees([canonical.clone()]))
+            .packs(vec![pack.clone()])
+            .build();
+
+        assert!(
+            brain.protection_reason(&short_victim).is_none(),
+            "the premise: the lexical list on its own does not see through `{}`",
+            short_victim.display()
+        );
+
+        // A rule that claims this is safe, as a buggy community pack would.
+        let verdict = brain.classify(&short_victim, Some(rule(&pack, "user-temp-files")));
+        assert_eq!(
+            verdict.bucket,
+            RiskBucket::DoNotDelete,
+            "`{}` is `{}` spelled differently, and one of them may not be green",
+            short_victim.display(),
+            victim.display()
+        );
+        assert_ne!(verdict.bucket, RiskBucket::Safe);
+        assert_eq!(verdict.source, VerdictSource::ProtectedPath);
+        assert_eq!(verdict.action, Action::InfoOnly);
+        assert!(!verdict.is_actionable());
+    }
+
+    /// The other half of H9: analyze and execute must reach the same answer,
+    /// because they now ask the same question.
+    #[test]
+    fn the_gate_the_rating_runs_is_the_gate_the_executor_runs() {
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::from_trees([PathBuf::from("C:\\Windows")]))
+            .packs(vec![pack()])
+            .build();
+
+        for path in [
+            "C:\\Windows\\System32\\ntoskrnl.exe",
+            // Unjudgeable spellings are refused by the gate, not waved through.
+            "\\\\localhost\\C$\\Windows\\System32\\ntoskrnl.exe",
+            "C:Windows\\System32\\x",
+            "C:\\Temp\\..\\Windows",
+        ] {
+            let path = Path::new(path);
+            let refusal = brain
+                .path_refusal(path)
+                .unwrap_or_else(|| panic!("`{}` must be refused", path.display()));
+            let verdict = brain.classify(path, None);
+
+            assert_eq!(
+                verdict.reason,
+                refusal.reason,
+                "`{}` must be refused for the same stated reason at both ends",
+                path.display()
+            );
+            assert_eq!(verdict.bucket, RiskBucket::DoNotDelete);
+            assert_eq!(verdict.source, VerdictSource::ProtectedPath);
+        }
+    }
+
+    /// The nine attack spellings, run against every surface that can now judge
+    /// a path — including [`Brain::classify`], which until H9 was the one that
+    /// could not.
+    ///
+    /// Each names `C:\Windows\System32` while spelling it as somewhere else.
+    /// The allow-list gate refuses all nine as unjudgeable, and refused is not
+    /// allowed: the rating is red and no action is offered. Prints the table it
+    /// asserts, so `--nocapture` shows the evidence rather than just a pass.
+    #[test]
+    fn every_attack_spelling_is_refused_by_every_surface() {
+        let brain = brain();
+        let pack = pack();
+        // A rule claiming these are safe, as a buggy community pack would.
+        let safe = rule(&pack, "user-temp-files");
+
+        let spellings = [
+            (
+                "administrative share by host name",
+                "\\\\localhost\\C$\\Windows\\System32\\ntoskrnl.exe",
+            ),
+            (
+                "administrative share by loopback",
+                "\\\\127.0.0.1\\C$\\Windows\\System32\\ntoskrnl.exe",
+            ),
+            (
+                "verbatim UNC",
+                "\\\\?\\UNC\\localhost\\c$\\Windows\\System32\\ntoskrnl.exe",
+            ),
+            (
+                "NT object namespace",
+                "\\??\\C:\\Windows\\System32\\ntoskrnl.exe",
+            ),
+            (
+                "device namespace",
+                "\\\\.\\C:\\Windows\\System32\\ntoskrnl.exe",
+            ),
+            (
+                "volume by device name",
+                "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\Windows\\System32\\x",
+            ),
+            ("drive-relative", "C:Windows\\System32\\x"),
+            ("rooted, no drive", "\\Windows\\System32\\x"),
+            ("remote share", "\\\\server\\share\\x"),
+        ];
+
+        println!("spelling                           | gate     | list      | refusal  | rating");
+        for (label, spelling) in spellings {
+            let path = Path::new(spelling);
+            let gate = matches!(gate_path(path), GateVerdict::Refused(_));
+            let listed = brain.protected_paths().reason_for(path).is_some();
+            let refused = brain.path_refusal(path).is_some();
+            let verdict = brain.classify(path, Some(safe));
+
+            println!(
+                "{label:<34} | {:<8} | {:<9} | {:<8} | {:?}",
+                if gate { "REFUSED" } else { "accepted" },
+                if listed { "PROTECTED" } else { "unlisted" },
+                if refused { "REFUSED" } else { "cleared" },
+                verdict.bucket,
+            );
+
+            assert!(gate, "{label}: `{spelling}` must be refused by the gate");
+            assert!(listed, "{label}: the lexical list must refuse it too");
+            assert!(refused, "{label}: `Brain::path_refusal` must refuse it");
+            assert_eq!(
+                verdict.bucket,
+                RiskBucket::DoNotDelete,
+                "{label}: `{spelling}` must never be rated green"
+            );
+            assert_ne!(verdict.bucket, RiskBucket::Safe, "{label}");
+            assert_eq!(verdict.action, Action::InfoOnly, "{label}");
+            assert!(!verdict.is_actionable(), "{label}");
         }
     }
 
