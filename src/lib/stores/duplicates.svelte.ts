@@ -148,6 +148,15 @@ class DuplicatesStore {
       .reduce((total, rec) => total + rec.savingsBytes, 0);
   }
 
+  /**
+   * A single folder to scan instead of the saved roots.
+   *
+   * Set by the treemap's "Find duplicates here" cross-link, which is the glue
+   * module spec 04 says not to skip: you see a fat folder on the map and ask
+   * this module about that folder, not about your whole profile.
+   */
+  pinnedRoot = $state<string | null>(null);
+
   /** Run a scan. */
   async scan(): Promise<void> {
     this.step = "scanning";
@@ -162,7 +171,9 @@ class DuplicatesStore {
     await this.attachProgress();
 
     try {
-      this.result = await startDuplicateScan();
+      this.result = await startDuplicateScan(
+        this.pinnedRoot === null ? undefined : [this.pinnedRoot],
+      );
       this.step = "review";
     } catch (error: unknown) {
       this.error = message(error);

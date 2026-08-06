@@ -373,6 +373,106 @@ export interface DuplicateFindingMeta {
 export type ExtensionClass = "all" | "images" | "video" | "documents" | "other";
 
 /* -------------------------------------------------------------------------
+ * core/platform/volume.rs
+ * ---------------------------------------------------------------------- */
+
+/** What kind of volume a drive letter is. */
+export type DriveKind =
+  | "fixed"
+  | "removable"
+  | "network"
+  | "optical"
+  | "other";
+
+/** One drive, as the treemap's selector shows it. */
+export interface DriveInfo {
+  /** Root path, e.g. `C:\`. */
+  root: string;
+  label: string | null;
+  totalBytes: number;
+  freeBytes: number;
+  kind: DriveKind;
+}
+
+/* -------------------------------------------------------------------------
+ * modules/treemap.rs
+ * ---------------------------------------------------------------------- */
+
+/** Colour class of a rectangle. */
+export type TreemapCategory =
+  | "directory"
+  | "video"
+  | "image"
+  | "audio"
+  | "archive"
+  | "code"
+  | "app"
+  | "document"
+  | "other";
+
+/** One rectangle to draw. */
+export interface TreeChild {
+  /** Absolute path; empty for the folded "everything else" row. */
+  path: string;
+  name: string;
+  /** For a directory this is its aggregated total. */
+  sizeBytes: number;
+  /**
+   * Whether `sizeBytes` is the whole truth.
+   *
+   * `false` means something below could not be read, or the scan never covered
+   * it — either way the number is a floor and must not be drawn as a fact.
+   */
+  sized: boolean;
+  isDir: boolean;
+  /** A reparse point: drawn so it is visible, never counted. */
+  isLink: boolean;
+  category: TreemapCategory;
+  /** `1`, except for the folded tail row. */
+  itemCount: number;
+}
+
+/** One directory's worth of rectangles. */
+export interface TreeLevel {
+  path: string;
+  totalBytes: number;
+  sized: boolean;
+  /** Whether this directory could be listed just now. */
+  readable: boolean;
+  children: TreeChild[];
+  /** How many rows the tail stands for. */
+  folded: number;
+  unreadableBelow: number;
+  compressedBelow: number;
+  /** Root first, this directory last. */
+  breadcrumb: string[];
+}
+
+/** The header of a cached per-drive scan. */
+export interface CachedScan {
+  root: string;
+  /** RFC 3339 UTC. */
+  scannedAt: string;
+  totalBytes: number;
+  fileCount: number;
+  dirCount: number;
+  unreadableDirs: number;
+  /** False when the walk was stopped early. */
+  complete: boolean;
+}
+
+/** What `treemap_scan` hands back. */
+export interface TreemapScanResult {
+  scanId: string;
+  summary: CachedScan;
+  /** Reparse points drawn but deliberately not counted. */
+  links: string[];
+  unreadable: string[];
+  cancelled: boolean;
+  level: TreeLevel;
+}
+
+/* -------------------------------------------------------------------------
  * commands.rs — settings
  * ---------------------------------------------------------------------- */
 

@@ -11,7 +11,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   AppSettings,
+  CachedScan,
   CleanerSummary,
+  DriveInfo,
   DuplicateScanResult,
   ExecProgress,
   ExecReport,
@@ -30,6 +32,8 @@ import type {
   ScheduleMode,
   ShutdownTick,
   TimerStatus,
+  TreeLevel,
+  TreemapScanResult,
 } from "$lib/types";
 
 /** Event names, mirroring the constants in `core/events.rs` and `lib.rs`. */
@@ -87,6 +91,48 @@ export function startDuplicateScan(
   roots?: string[],
 ): Promise<DuplicateScanResult> {
   return invoke<DuplicateScanResult>("start_duplicate_scan", { roots });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — treemap
+ * ---------------------------------------------------------------------- */
+
+/** Drives the treemap can map, with their capacity. */
+export function treemapDrives(): Promise<DriveInfo[]> {
+  return invoke<DriveInfo[]>("treemap_drives");
+}
+
+/**
+ * Walk a drive, aggregate it, cache it and return its top level.
+ *
+ * Long-running and cancellable with {@link cancelScan} using the returned
+ * `scanId`; progress arrives on `scan:progress`.
+ */
+export function treemapScan(root: string): Promise<TreemapScanResult> {
+  return invoke<TreemapScanResult>("treemap_scan", { root });
+}
+
+/**
+ * One directory's children, sized from the cached scan of `root`.
+ *
+ * This is the zoom step: the directory itself is re-read from disk, so file
+ * names are current, and the folder totals come from the cache.
+ */
+export function treemapChildren(
+  root: string,
+  path: string,
+): Promise<TreeLevel> {
+  return invoke<TreeLevel>("treemap_children", { root, path });
+}
+
+/** The cached header for a drive, or null when it has never been scanned. */
+export function treemapCached(root: string): Promise<CachedScan | null> {
+  return invoke<CachedScan | null>("treemap_cached", { root });
+}
+
+/** Show a path in File Explorer. Opens a window; changes nothing. */
+export function revealInExplorer(path: string): Promise<void> {
+  return invoke<void>("reveal_in_explorer", { path });
 }
 
 /* -------------------------------------------------------------------------

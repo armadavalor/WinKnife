@@ -126,6 +126,10 @@ pub enum CoreError {
     /// An autostart entry id the UI referred to is not in the last scan.
     #[error("unknown startup entry: {0}")]
     UnknownStartupEntry(String),
+
+    /// File Explorer could not be opened.
+    #[error("could not show this in File Explorer: {0}")]
+    Explorer(String),
 }
 
 impl CoreError {
@@ -155,6 +159,7 @@ impl CoreError {
             Self::TaskScheduler(_) => "task_scheduler",
             Self::TaskSchedulerBlocked => "task_scheduler_blocked",
             Self::UnknownStartupEntry(_) => "unknown_startup_entry",
+            Self::Explorer(_) => "explorer",
         }
     }
 }

@@ -32,6 +32,7 @@ use crate::core::types::ExecReport;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, DuplicateProgress, DuplicateScan};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
+use crate::modules::treemap;
 
 /// Everything the settings page reads and writes, in one round trip.
 ///
@@ -444,6 +445,157 @@ fn percent(done: u64, total: u64) -> Option<u8> {
         return None;
     }
     u8::try_from(done.saturating_mul(100) / total).ok()
+}
+
+/* -------------------------------------------------------------------------
+ * Treemap: scan a drive once, then serve one directory at a time
+ * ---------------------------------------------------------------------- */
+
+/// What a treemap scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreemapScanResult {
+    /// Id for `cancel_scan`.
+    pub scan_id: Uuid,
+    /// The header row that was cached, so the UI can show staleness at once.
+    pub summary: treemap::CachedScan,
+    /// Reparse points that were drawn but deliberately not counted.
+    pub links: Vec<PathBuf>,
+    /// Directories the walk could not list.
+    pub unreadable: Vec<PathBuf>,
+    /// Whether the user stopped it.
+    pub cancelled: bool,
+    /// The root level, so the first paint needs no second round trip.
+    pub level: treemap::TreeLevel,
+}
+
+/// Drives the treemap can map, with their capacity.
+///
+/// # Errors
+/// Infallible today; keeps the shared `Result` shape.
+#[tauri::command]
+pub fn treemap_drives() -> Result<Vec<crate::core::platform::DriveInfo>, ApiError> {
+    use crate::core::platform::Volumes;
+    Ok(crate::core::platform::SystemVolumes.drives())
+}
+
+/// Walk `root`, aggregate it, cache it, and return its top level.
+///
+/// Read-only apart from the app's own cache. Blocking work; the caller runs it
+/// off the UI thread.
+///
+/// # Errors
+/// Returns an error if the cache cannot be written or the root cannot be served.
+#[tauri::command]
+pub async fn treemap_scan<R: Runtime>(
+    app: AppHandle<R>,
+    root: PathBuf,
+    db: State<'_, Database>,
+    cancels: State<'_, CancelRegistry>,
+) -> Result<TreemapScanResult, ApiError> {
+    let scan_id = Uuid::new_v4();
+    let cancel = cancels.start(scan_id);
+    let mut throttle = ProgressThrottle::new();
+
+    let scan = {
+        let mut emit = |progress: &treemap::TreeProgress<'_>| {
+            if !throttle.should_emit() {
+                return;
+            }
+            let payload = ScanProgress {
+                scan_id,
+                module: "treemap".to_owned(),
+                items_scanned: progress.entries,
+                current_path: Some(progress.current_path.display().to_string()),
+                pct: None,
+            };
+            if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                tracing::debug!(error = %err, "treemap progress event was not delivered");
+            }
+        };
+        treemap::scan(&root, &cancel, Some(&mut emit))
+    };
+    cancels.finish(scan_id);
+
+    tracing::info!(
+        scan = %scan_id,
+        root = %root.display(),
+        dirs = scan.dirs.len(),
+        bytes = scan.root_total().map_or(0, |t| t.total_bytes),
+        cancelled = scan.cancelled,
+        "treemap scan finished"
+    );
+
+    // A cancelled walk is still cached: a partial picture beats no picture, and
+    // `complete: false` stops anyone reading it as a total.
+    let summary = db.with(|conn| {
+        treemap::save_cache(conn, &scan)?;
+        treemap::cached_scan(conn, &root)
+    })?;
+    let summary = summary.ok_or_else(|| {
+        CoreError::Quarantine("the treemap cache was written but could not be read back".to_owned())
+    })?;
+
+    let oracle = treemap::MemoryOracle::new(&scan);
+    let level = treemap::children(&root, &root, &oracle)?;
+
+    let _ = events::emit_scan_done(
+        &app,
+        &ScanDone {
+            scan_id,
+            module: "treemap".to_owned(),
+            finding_count: scan.dirs.len() as u64,
+        },
+    );
+
+    Ok(TreemapScanResult {
+        scan_id,
+        summary,
+        links: scan.links,
+        unreadable: scan.unreadable,
+        cancelled: scan.cancelled,
+        level,
+    })
+}
+
+/// One directory's children, sized from the cached scan of `root`.
+///
+/// This is the zoom step. It reads a single directory from disk, so file names
+/// are always current, and takes subdirectory totals from the cache.
+///
+/// # Errors
+/// Returns an error if the cache cannot be read.
+#[tauri::command]
+pub fn treemap_children(
+    root: PathBuf,
+    path: PathBuf,
+    db: State<'_, Database>,
+) -> Result<treemap::TreeLevel, ApiError> {
+    Ok(db.with(|conn| treemap::children(&path, &root, &treemap::CacheOracle::new(conn, &root)))?)
+}
+
+/// The cached header for a root, or `None` when it has never been scanned.
+///
+/// # Errors
+/// Returns an error if the cache cannot be read.
+#[tauri::command]
+pub fn treemap_cached(
+    root: PathBuf,
+    db: State<'_, Database>,
+) -> Result<Option<treemap::CachedScan>, ApiError> {
+    Ok(db.with(|conn| treemap::cached_scan(conn, &root))?)
+}
+
+/// Open a path in Explorer, selecting it when it is a file.
+///
+/// The Swiss-knife glue module spec 04 asks for. It shows a location; it never
+/// changes one.
+///
+/// # Errors
+/// Returns an error if Explorer could not be started.
+#[tauri::command]
+pub fn reveal_in_explorer(path: PathBuf) -> Result<(), ApiError> {
+    crate::core::platform::reveal_in_explorer(&path).map_err(Into::into)
 }
 
 /* -------------------------------------------------------------------------

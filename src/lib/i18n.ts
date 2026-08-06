@@ -47,6 +47,8 @@ const en = {
   "cleaner.intro":
     "The scan is read-only: it looks at temporary files, Explorer's caches and your recycle bin, then shows you what it found before anything moves.",
   "cleaner.scan": "Scan for junk",
+  "cleaner.cameFrom":
+    "You came here from {path} on the disk map. The cleaner does not scan a folder you pick — it looks at the known junk locations its rule packs describe. If that folder is one of them it will show up below; if it is not, nothing here will touch it.",
   "cleaner.scanAgain": "Scan again",
   "cleaner.scanning": "Looking around…",
   "cleaner.itemsScanned": "{count} items looked at",
@@ -82,6 +84,8 @@ const en = {
   "duplicates.intro":
     "The scan reads your files and never writes to them. It compares sizes first, then the ends of each file, then the whole thing — so two files are only ever called duplicates when every byte matches.",
   "duplicates.scan": "Find duplicates",
+  "duplicates.pinnedRoot": "Only looking inside {path}, because you came here from the disk map.",
+  "duplicates.clearPinnedRoot": "Use my saved folders instead",
   "duplicates.scanAgain": "Scan again",
   "duplicates.scanning": "Comparing files…",
   "duplicates.stop": "Stop",
@@ -116,6 +120,54 @@ const en = {
   "duplicates.doneTitle": "Done",
   "duplicates.doneBody":
     "Reclaimed {size}. Everything moved is in quarantine if you want it back.",
+
+  "treemap.title": "Disk map",
+  "treemap.intro":
+    "This walks the drive read-only and adds up every folder, so the rectangles are sizes rather than guesses. Click a folder to go in, use the breadcrumb to come back out, right-click for what to do about it.",
+  "treemap.drive": "Drive",
+  "treemap.loadingDrives": "Looking for drives…",
+  "treemap.drivesError": "Could not list this machine's drives.",
+  "treemap.noDrives": "No drives were found that can be read.",
+  "treemap.scan": "Map this drive",
+  "treemap.rescan": "Map it again",
+  "treemap.stop": "Stop",
+  "treemap.scanning": "{count} items measured so far…",
+  "treemap.opening": "Opening…",
+  "treemap.capacity": "{used} used of {total} · {free} free",
+  "treemap.capacityLabel": "Space used on this drive",
+  "treemap.staleness": "Measured {when} · {size} across {files} files",
+  "treemap.partial": "stopped early, so this is part of the picture",
+  "treemap.unreadable":
+    "{count} folders could not be read, so some space is unaccounted for",
+  "treemap.breadcrumb": "Folder path",
+  "treemap.canvasLabel":
+    "Disk map. Arrow keys move between folders, Enter opens one, Backspace goes up.",
+  "treemap.empty": "This drive has not been mapped yet.",
+  "treemap.folderEmpty": "There is nothing in this folder.",
+  "treemap.folderUnreadable":
+    "This folder could not be opened, so what is inside it is unknown.",
+  "treemap.sizeUnknown": "size unknown",
+  "treemap.sizeUnknownLong":
+    "Size unknown — part of this folder could not be read, so any figure would be a guess.",
+  "treemap.linkNote":
+    "A junction. Its contents live elsewhere on this drive and are counted there, not here.",
+  "treemap.foldedNote": "{count} items grouped together",
+  "treemap.compressedNote":
+    "{count} files below here are compressed or sparse, so they take up less room than shown.",
+  "treemap.linksNote":
+    "{count} junctions were drawn but not counted, so nothing is measured twice.",
+  "treemap.openInExplorer": "Open in Explorer",
+  "treemap.scanWithCleaner": "Scan with Cleaner",
+  "treemap.findDuplicates": "Find duplicates here",
+  "treemap.category.directory": "Folder",
+  "treemap.category.video": "Video",
+  "treemap.category.image": "Images",
+  "treemap.category.audio": "Audio",
+  "treemap.category.archive": "Archives",
+  "treemap.category.code": "Code",
+  "treemap.category.app": "Programs",
+  "treemap.category.document": "Documents",
+  "treemap.category.other": "Other",
 
   "settings.title": "Settings",
   "settings.subtitle":

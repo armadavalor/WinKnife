@@ -88,7 +88,7 @@ pub(crate) fn short_path_name(path: &std::path::Path) -> Option<std::path::PathB
 /// and it is resolved on the machine that stores it — and in one that matters a
 /// great deal: **any standard user can create one.** `dunce::canonicalize`
 /// resolves it identically, `std::fs::FileType::is_symlink` reports it as a
-/// link, and `jwalk` refuses to follow it. So a junction-based companion asserts
+/// link, and the walker refuses to follow it. So a junction-based companion asserts
 /// the same guarantee on every machine, and a junction probe is what proved the
 /// last two real bugs (`docs/DECISIONS-NEEDED.md`, architect resolution).
 ///

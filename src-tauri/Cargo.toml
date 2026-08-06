@@ -31,8 +31,6 @@ uuid = { version = "1.24.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde", "std"] }
 thiserror = "2.0.19"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
-# Shared parallel walker for the scanner (ARCHITECTURE section 1).
-jwalk = "0.9"
 # Rule-pack path patterns; case-insensitive matching for Windows paths.
 globset = "0.4"
 # Duplicate detection: blake3 for the staged partial/full hashes, rayon for the

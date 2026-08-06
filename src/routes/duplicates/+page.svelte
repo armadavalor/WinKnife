@@ -7,6 +7,8 @@
   about a pair, and only a person can make it.
 -->
 <script lang="ts">
+  import { page } from "$app/state";
+
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
@@ -23,6 +25,13 @@
 
   let confirming = $state(false);
   let expanded = $state<Set<string>>(new Set());
+
+  // `?root=` is the treemap's "Find duplicates here" cross-link arriving with a
+  // folder already chosen (module spec 04). It narrows this scan only; the saved
+  // roots on the settings page are untouched.
+  $effect(() => {
+    store.pinnedRoot = page.url.searchParams.get("root");
+  });
 
   const sets = $derived(store.sets);
   const scan = $derived(store.result?.scan ?? null);
@@ -87,6 +96,20 @@
       <p class="max-w-xl text-sm leading-relaxed text-ink-muted">
         {t("duplicates.intro")}
       </p>
+      {#if store.pinnedRoot}
+        <p
+          class="flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-xs text-ink-muted"
+        >
+          <span>{t("duplicates.pinnedRoot", { path: truncatePath(store.pinnedRoot, 56) })}</span>
+          <button
+            type="button"
+            class="rounded px-1.5 py-0.5 text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+            onclick={() => (store.pinnedRoot = null)}
+          >
+            {t("duplicates.clearPinnedRoot")}
+          </button>
+        </p>
+      {/if}
       <button
         type="button"
         class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"

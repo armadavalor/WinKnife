@@ -27,11 +27,18 @@ pub struct Migration {
 }
 
 /// Every migration, in order. Append only — never edit a released entry.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "init",
-    sql: include_str!("../../migrations/001_init.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "init",
+        sql: include_str!("../../migrations/001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "treemap_cache",
+        sql: include_str!("../../migrations/002_treemap_cache.sql"),
+    },
+];
 
 /// The schema version the current build expects.
 pub fn target_version() -> u32 {
@@ -205,7 +212,15 @@ mod tests {
         let conn = open_in_memory().expect("open");
         assert_eq!(
             table_names(&conn),
-            vec!["actions", "quarantine", "scans", "settings"]
+            vec![
+                "actions",
+                "quarantine",
+                "scans",
+                "settings",
+                "startup_disabled_link",
+                "treemap_dir",
+                "treemap_scan",
+            ]
         );
     }
 

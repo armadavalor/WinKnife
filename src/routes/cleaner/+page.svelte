@@ -7,6 +7,8 @@
   oversight.
 -->
 <script lang="ts">
+  import { page } from "$app/state";
+
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import FindingList from "$lib/components/FindingList.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
@@ -23,6 +25,12 @@
   const store = scanStore;
 
   let confirming = $state(false);
+
+  // The treemap's "Scan with Cleaner" cross-link arrives with `?from=`. The
+  // cleaner does not scan a folder you pick — it scans the locations its rule
+  // packs name — so instead of pretending the path was applied, the route says
+  // plainly what it is about to do (module spec 02, and honesty over glue).
+  const cameFrom = $derived(page.url.searchParams.get("from"));
 
   const safeRows = $derived(store.rowsIn("safe"));
   const reviewRows = $derived(store.rowsIn("needsReview"));
@@ -53,6 +61,12 @@
       </p>
     {/if}
   </header>
+
+  {#if cameFrom}
+    <p class="rounded-xl bg-surface-2 p-4 text-sm leading-relaxed text-ink-muted">
+      {t("cleaner.cameFrom", { path: truncatePath(cameFrom, 56) })}
+    </p>
+  {/if}
 
   {#if store.error}
     <p

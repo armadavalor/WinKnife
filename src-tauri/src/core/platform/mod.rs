@@ -19,6 +19,7 @@
 //! only `lib.rs::run()` can do (security review H5).
 
 pub(crate) mod env;
+pub(crate) mod explorer;
 pub(crate) mod file_id;
 pub(crate) mod guard;
 pub(crate) mod lock;
@@ -33,6 +34,7 @@ pub(crate) mod volume;
 use std::sync::Arc;
 
 pub use env::{EnvResolver, MapEnv, SystemEnv};
+pub use explorer::reveal_in_explorer;
 pub use file_id::{file_identity, FileId};
 pub use guard::real_os_effects_armed;
 pub use lock::{AlwaysUnlocked, LockProbe, LockState, SystemLockProbe};

@@ -6,6 +6,30 @@
 //!
 //! Read-only by construction — the walker has no way to modify anything, which
 //! is what makes `scan()` honest about being read-only (CLAUDE.md hard rules).
+//!
+//! # Why `read_dir` and not a parallel crate
+//!
+//! This used to be `jwalk`, which walks directories on a rayon pool, and it was
+//! **sixty times slower** than what is here now. The cost was never the
+//! traversal: it was that `jwalk::DirEntry::metadata()` calls
+//! `fs::symlink_metadata`, which on Windows opens the file. One open per entry.
+//!
+//! Measured on the phase-3 100 000-file synthetic tree
+//! (`tests/treemap_perf.rs`), release build, warm cache:
+//!
+//! ```text
+//! jwalk enumeration alone                      64 ms
+//! jwalk + fs::symlink_metadata per entry     3924 ms
+//! read_dir + DirEntry::metadata()             143 ms
+//! ```
+//!
+//! `std::fs::DirEntry::metadata()` answers from the `WIN32_FIND_DATA` the
+//! directory listing already returned, and does not follow reparse points —
+//! which is exactly the semantics this walker wants. So the parallelism was
+//! worth 80 ms and the syscall was worth 3 800 ms, and the walk is now a plain
+//! sorted depth-first `read_dir`: streaming, deterministic, no arena, and
+//! twenty times faster than what it replaced. Every module that walks anything
+//! got that speedup (`docs/DECISIONS-NEEDED.md`, phase 3).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,6 +76,33 @@ pub struct WalkEntry {
     pub accessed: Option<DateTime<Utc>>,
     /// Whether this entry is a directory.
     pub is_dir: bool,
+    /// Whether this entry is a reparse point (a symlink or a junction).
+    ///
+    /// Only ever `true` when the caller asked for links with
+    /// [`WalkOptions::report_links`]; the walk never descends into one either
+    /// way.
+    pub is_link: bool,
+    /// Whether NTFS stores this file compressed or sparse, so `size_bytes` is
+    /// larger than the room it actually takes up.
+    pub compressed: bool,
+}
+
+/// How a walk should behave.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WalkOptions {
+    /// Report reparse points as entries instead of passing over them.
+    ///
+    /// Off by default, which is what every module before the treemap wanted: a
+    /// cleaner that saw a junction could offer to quarantine it, and moving a
+    /// link moves the link rather than the data.
+    ///
+    /// The treemap wants them *visible* precisely because it must not count them:
+    /// a junction pointing at a 40 GB folder would otherwise make that folder's
+    /// bytes appear twice, and simply hiding it leaves a hole in a picture whose
+    /// whole job is to add up to the disk (module spec 04). Reported entries
+    /// carry `size_bytes: 0` and `is_link: true`, and the walk still refuses to
+    /// descend into them.
+    pub report_links: bool,
 }
 
 impl WalkEntry {
@@ -89,6 +140,16 @@ pub fn walk(
     cancel: &CancellationToken,
     visit: &mut dyn FnMut(&WalkEntry),
 ) -> WalkSummary {
+    walk_with(root, WalkOptions::default(), cancel, visit)
+}
+
+/// [`walk`] with the behaviour switches in [`WalkOptions`].
+pub fn walk_with(
+    root: &Path,
+    options: WalkOptions,
+    cancel: &CancellationToken,
+    visit: &mut dyn FnMut(&WalkEntry),
+) -> WalkSummary {
     let mut summary = WalkSummary::default();
 
     if !root.exists() {
@@ -97,49 +158,97 @@ pub fn walk(
         return summary;
     }
 
-    let walker = jwalk::WalkDir::new(root)
-        .skip_hidden(false)
-        .follow_links(false)
-        .sort(true);
+    // Depth-first, deepest-last, so the emission order is the sorted DFS order
+    // every caller before this one relied on.
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
 
-    for entry in walker {
+    while let Some(dir) = stack.pop() {
         if cancel.is_cancelled() {
             summary.cancelled = true;
             break;
         }
 
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(err) => {
-                if let Some(path) = err.path() {
-                    summary.unreadable.push(path.to_path_buf());
-                }
+        let listing = match std::fs::read_dir(&dir) {
+            Ok(listing) => listing,
+            Err(_) => {
+                // Permission denied, or it went away between being listed and
+                // being opened. Both are ordinary on Windows and neither may
+                // abort a scan.
+                summary.unreadable.push(dir);
                 continue;
             }
         };
 
-        // `file_type` comes from the directory listing and does not follow the
-        // link, which is what we want.
-        if entry.path_is_symlink() {
-            continue;
+        let mut entries: Vec<WalkEntry> = Vec::new();
+        for entry in listing.flatten() {
+            // `DirEntry::metadata` answers from the directory listing Windows
+            // already returned, and does not follow a reparse point. That is the
+            // whole reason this walker exists in this shape — see the module
+            // header for the measurement.
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let is_link = metadata.file_type().is_symlink();
+            if is_link && !options.report_links {
+                continue;
+            }
+            let is_dir = metadata.is_dir();
+            entries.push(WalkEntry {
+                path: entry.path(),
+                // A link's own size is meaningless and its target's bytes belong
+                // to wherever the target really lives, so it contributes nothing.
+                size_bytes: if is_dir || is_link { 0 } else { metadata.len() },
+                modified: to_utc(metadata.modified().ok()),
+                created: to_utc(metadata.created().ok()),
+                accessed: to_utc(metadata.accessed().ok()),
+                is_dir,
+                is_link,
+                compressed: is_compressed(&metadata),
+            });
         }
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
 
-        let is_dir = entry.file_type().is_dir();
-        let metadata = entry.metadata().ok();
-        let walk_entry = WalkEntry {
-            path: entry.path(),
-            size_bytes: metadata.as_ref().filter(|_| !is_dir).map_or(0, |m| m.len()),
-            modified: metadata.as_ref().and_then(|m| to_utc(m.modified().ok())),
-            created: metadata.as_ref().and_then(|m| to_utc(m.created().ok())),
-            accessed: metadata.as_ref().and_then(|m| to_utc(m.accessed().ok())),
-            is_dir,
-        };
-
-        summary.entries_seen += 1;
-        visit(&walk_entry);
+        // Push children in reverse so the stack pops them in sorted order.
+        let mut descend: Vec<PathBuf> = Vec::new();
+        for entry in &entries {
+            if cancel.is_cancelled() {
+                summary.cancelled = true;
+                break;
+            }
+            summary.entries_seen += 1;
+            visit(entry);
+            // Never through a reparse point: it can send a walk out of the tree
+            // the user agreed to scan, and the whole promise of this app is that
+            // it stays where it was invited.
+            if entry.is_dir && !entry.is_link {
+                descend.push(entry.path.clone());
+            }
+        }
+        if summary.cancelled {
+            break;
+        }
+        descend.reverse();
+        stack.extend(descend);
     }
 
     summary
+}
+
+/// Whether the directory listing says this file is compressed or sparse.
+///
+/// Read from metadata the walk already has, never from a second syscall — the
+/// treemap asks this of every file on a drive.
+#[cfg(windows)]
+fn is_compressed(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_COMPRESSED: u32 = 0x0000_0800;
+    const FILE_ATTRIBUTE_SPARSE_FILE: u32 = 0x0000_0200;
+    metadata.file_attributes() & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE) != 0
+}
+
+#[cfg(not(windows))]
+fn is_compressed(_metadata: &std::fs::Metadata) -> bool {
+    false
 }
 
 fn to_utc(time: Option<std::time::SystemTime>) -> Option<DateTime<Utc>> {
@@ -225,6 +334,8 @@ mod tests {
             created: None,
             accessed: None,
             is_dir: false,
+            is_link: false,
+            compressed: false,
         };
         assert_eq!(entry.age_hours(Utc::now()), 30);
     }
@@ -238,6 +349,8 @@ mod tests {
             created: None,
             accessed: None,
             is_dir: false,
+            is_link: false,
+            compressed: false,
         };
         assert_eq!(entry.age_hours(Utc::now()), 0);
     }
@@ -362,6 +475,47 @@ mod tests {
                 root.display()
             );
         }
+    }
+
+    /// The treemap needs to *see* a junction so it can draw it without counting
+    /// it. Opting in reports it; the walk still refuses to go through it.
+    #[cfg(windows)]
+    #[test]
+    fn an_opted_in_walk_reports_a_junction_without_descending_into_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = dir.path().join("outside");
+        let inside = dir.path().join("inside");
+        fs::create_dir_all(&outside).expect("dirs");
+        fs::create_dir_all(&inside).expect("dirs");
+        fs::write(outside.join("secret.txt"), vec![b'x'; 4096]).expect("write");
+
+        let door = inside.join("door");
+        assert!(
+            crate::core::test_support::make_junction(&door, &outside),
+            "`mklink /J` needs no privilege, so a failure here is a real one"
+        );
+
+        let mut entries = Vec::new();
+        walk_with(
+            &inside,
+            WalkOptions { report_links: true },
+            &CancellationToken::new(),
+            &mut |entry| entries.push(entry.clone()),
+        );
+
+        let link = entries
+            .iter()
+            .find(|e| e.path == door)
+            .expect("the junction must be reported when asked for");
+        assert!(link.is_link);
+        assert_eq!(
+            link.size_bytes, 0,
+            "a link contributes no bytes; its target's bytes belong to the target"
+        );
+        assert!(
+            !entries.iter().any(|e| e.path.ends_with("secret.txt")),
+            "reporting a link must not mean walking through it"
+        );
     }
 
     #[test]

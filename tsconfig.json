@@ -10,7 +10,13 @@
     "sourceMap": true,
     "strict": true,
     "moduleResolution": "bundler"
-  }
+  },
+  // `*.test.ts` files run under Node (`npm run test:ui`), not in the WebView:
+  // they import `node:test` and `node:assert`, which are not part of the app's
+  // type environment and must not be. They are excluded here rather than typed
+  // in, because pulling `@types/node` into a browser project would let a real
+  // component import `node:fs` and still type-check.
+  "exclude": ["src/**/*.test.ts"]
   // Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias
   // except $lib which is handled by https://svelte.dev/docs/kit/configuration#files
   //

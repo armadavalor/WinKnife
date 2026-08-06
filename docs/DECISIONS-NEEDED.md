@@ -386,3 +386,35 @@ found late and blamed on something else.
       — was not taken because it undoes the L5 optimisation on precisely the
       case that motivated it (`%TEMP%` in 8.3 form against a long-form
       `%LOCALAPPDATA%\Temp`, which is the stock layout on this machine).
+
+---
+
+## Open items raised during phase 3
+
+- [ ] 2026-08-06 (phase 3): module spec 04 asks for a "parallel walk" and the
+      phase brief for "parallel bottom-up size aggregation". Measured on the
+      100 000-file synthetic tree (`src-tauri/tests/treemap_perf.rs`, release,
+      warm cache): `jwalk`'s parallel enumeration alone was **64 ms**, the same
+      enumeration plus the `fs::symlink_metadata` its `DirEntry::metadata()`
+      performs was **3 924 ms**, and a plain sequential `read_dir` walk using the
+      directory listing's own metadata was **143 ms**. On Windows
+      `symlink_metadata` opens the file; `DirEntry::metadata` answers from the
+      `WIN32_FIND_DATA` the listing already returned. So parallelism was worth
+      80 ms and the syscall was worth 3 800 ms. `core::scanner` is now a sorted
+      depth-first `read_dir` walk — sequential, streaming, deterministic — and
+      `jwalk` has been dropped. First paint on the 100k tree went from 8 678 ms
+      to **798 ms** against a 3 000 ms budget, and every module that walks
+      anything got the same speedup. The aggregation *is* still bottom-up, as one
+      linear depth-ordered sweep. If a future phase points this at a spinning
+      disk where concurrency pays for itself, the place to add it back is one
+      function, and the benchmark to prove it is already committed.
+- [ ] 2026-08-06 (phase 3): module spec 04's cross-links say the actions route
+      "with path pre-filled". That works for **Find duplicates here**
+      (`/duplicates?root=…` narrows the scan to that folder) and for **Open in
+      Explorer**. It does not map onto the cleaner: the cleaner scans the
+      locations its rule packs name, not a folder the user picks, so there is no
+      path parameter to pre-fill. Rather than pretend, `/cleaner?from=…` shows a
+      line saying where the user came from and that the cleaner looks at known
+      junk locations — so the link goes somewhere useful and does not imply a
+      filter that is not there. Giving the cleaner an arbitrary-path mode would
+      widen its blast radius and is a product decision, not a UI one.
