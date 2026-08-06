@@ -166,8 +166,11 @@ pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) ->
                 // Rules sharing a root are tried in declaration order and the
                 // first one to claim an entry wins, which is what the walk-per-
                 // rule loop plus `dedupe_by_path` used to add up to.
-                for rule in &group.rules {
-                    if let Some(finding) = finding_for(entry, rule, pack, ctx.now) {
+                for held in &group.rules {
+                    let match_path = held.match_path(&entry.path, &group.root);
+                    if let Some(finding) =
+                        finding_for(entry, &match_path, held.rule, pack, ctx.now)
+                    {
                         output.findings.push(finding);
                         break;
                     }
@@ -189,13 +192,57 @@ pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) ->
 
 /// One directory to walk and the rules that asked for it.
 struct WalkGroup<'a> {
-    /// The root exactly as the rule spelled it. The canonical form decides
-    /// *whether* to walk; the spelled form decides *what* to walk, because the
-    /// globs were compiled against that spelling and would stop matching if a
-    /// junction rewrote it.
+    /// The root exactly as the *first* rule spelled it. The canonical form
+    /// decides *whether* to walk; the spelled form decides *what* to walk,
+    /// because the globs were compiled against that spelling and would stop
+    /// matching if a junction rewrote it.
     root: PathBuf,
     /// Rules whose roots resolve to this same directory, in declaration order.
-    rules: Vec<&'a CompiledRule>,
+    rules: Vec<GroupRule<'a>>,
+}
+
+/// One rule inside a [`WalkGroup`], plus how to spell a walked path so that
+/// rule's globs recognise it.
+struct GroupRule<'a> {
+    /// The rule.
+    rule: &'a CompiledRule,
+    /// This rule's own spelling of the walk root, when it differs from the
+    /// group's.
+    ///
+    /// The fold in [`plan_walks`] keys on canonical identity but keeps the first
+    /// rule's spelling, while [`CompiledRule::matches_path`] is a text glob
+    /// anchored to *each rule's own* spelling. So two rules in one pack sharing
+    /// a canonical root spelled differently — which is `%TEMP%` (8.3 on any
+    /// account whose name does not fit) against `%LOCALAPPDATA%\Temp` (never
+    /// 8.3) on a stock machine — left every rule but the first unable to claim a
+    /// single entry, silently (review M14).
+    ///
+    /// Rather than give up the fold and walk the tree twice, the walked path is
+    /// re-spelled into this rule's anchor before its globs are asked.
+    own_root: Option<PathBuf>,
+}
+
+impl GroupRule<'_> {
+    /// The path to test this rule's globs against, given an entry the walk
+    /// produced under `walked_root`.
+    ///
+    /// Falls back to the walked path when there is nothing to re-spell, which
+    /// is both the common case and the safe one: a rule that cannot be
+    /// re-anchored is no worse off than it was.
+    fn match_path<'p>(&self, entry: &'p Path, walked_root: &Path) -> std::borrow::Cow<'p, Path> {
+        let Some(own_root) = &self.own_root else {
+            return std::borrow::Cow::Borrowed(entry);
+        };
+        // Lexical on purpose, and it is the same reason `matches_path` is
+        // lexical: this is string surgery on a glob anchor, not a question about
+        // where two paths point. `scanner::walk` builds every entry by joining
+        // `walked_root`, so the prefix is there verbatim — and where it somehow
+        // is not, the rule keeps the behaviour it had before this fix.
+        match entry.strip_prefix(walked_root) {
+            Ok(tail) => std::borrow::Cow::Owned(own_root.join(tail)),
+            Err(_) => std::borrow::Cow::Borrowed(entry),
+        }
+    }
 }
 
 /// What resolving a walk root concluded.
@@ -232,15 +279,64 @@ fn plan_walks<'a>(pack: &'a RulePack, protected: &ProtectedPaths) -> (Vec<WalkGr
             };
 
             match by_identity.get(&identity) {
-                Some(&index) => groups[index].rules.push(rule),
+                Some(&index) => {
+                    // The surviving group is walked under the *first* rule's
+                    // spelling, so a rule joining it with a different spelling
+                    // needs its anchor carried along or its globs will never
+                    // see a path they recognise (review M14).
+                    //
+                    // `CanonicalPath::lexical` and not `resolved`: the question
+                    // is whether the two are the same *text* once case and
+                    // separators are normalised, because that is all a glob can
+                    // tell apart. Whether they are the same *place* was already
+                    // answered — it is the fold key that put them here.
+                    let spelled_alike = CanonicalPath::lexical(&groups[index].root)
+                        == CanonicalPath::lexical(root);
+                    let own_root = (!spelled_alike).then(|| root.clone());
+                    if let Some(own) = &own_root {
+                        tracing::debug!(
+                            pack = pack.id(),
+                            rule = rule.spec.id.as_str(),
+                            walked = %groups[index].root.display(),
+                            anchored_at = %own.display(),
+                            "walk root folded; re-anchoring this rule's globs"
+                        );
+                    }
+                    groups[index].rules.push(GroupRule { rule, own_root });
+                }
                 None => {
                     by_identity.insert(identity, groups.len());
                     groups.push(WalkGroup {
                         root: root.clone(),
-                        rules: vec![rule],
+                        rules: vec![GroupRule {
+                            rule,
+                            own_root: None,
+                        }],
                     });
                 }
             }
+        }
+    }
+
+    // A rule that reached no group at all claims nothing, and a cleaner that
+    // silently stops cleaning is the failure mode this whole file is written
+    // against. Every rule that got here with roots must appear in one.
+    for rule in &pack.rules {
+        if rule.roots().is_empty() {
+            continue;
+        }
+        let placed = groups
+            .iter()
+            .any(|group| group.rules.iter().any(|held| held.rule.spec.id == rule.spec.id));
+        let already_reported = refused
+            .iter()
+            .any(|line| line.starts_with(&format!("{}/{}: ", pack.id(), rule.spec.id)));
+        if !placed && !already_reported {
+            refused.push(format!(
+                "{}/{}: it was not walked because none of its locations could be reached",
+                pack.id(),
+                rule.spec.id
+            ));
         }
     }
 
@@ -287,8 +383,15 @@ fn resolve_root(root: &Path, protected: &ProtectedPaths) -> RootVerdict {
 }
 
 /// Decide whether one walked entry becomes a finding for one rule.
+///
+/// `match_path` is the spelling the rule's globs are tested against, which is
+/// `entry.path` unless the walk-root fold re-anchored this rule (see
+/// [`GroupRule::match_path`]). Everything else — the finding's path, its size,
+/// its timestamps — comes from the entry as the walk really found it, because
+/// that is the file the executor will be asked to move.
 fn finding_for(
     entry: &WalkEntry,
+    match_path: &Path,
     rule: &CompiledRule,
     pack: &RulePack,
     now: DateTime<Utc>,
@@ -297,7 +400,7 @@ fn finding_for(
     if entry.is_dir {
         return None;
     }
-    if !rule.matches_path(&entry.path) {
+    if !rule.matches_path(match_path) {
         return None;
     }
 
@@ -1725,6 +1828,11 @@ mod tests {
     /// Security review L5: `%TEMP%` and `%LOCALAPPDATA%\Temp` are the same
     /// folder on a stock install, and walking it twice doubles the scan. Both
     /// rules still get to see every entry.
+    ///
+    /// The last clause is the one review M14 caught this test not checking: it
+    /// asserted both rules were *in* the group, which is not the same as either
+    /// of them being able to claim anything once they are. See
+    /// `a_folded_rule_can_still_claim_entries_under_the_surviving_spelling`.
     #[test]
     fn two_rules_naming_the_same_folder_share_one_walk() {
         let fixture = Fixture::new();
@@ -1747,6 +1855,204 @@ mod tests {
             groups[0].rules.len(),
             2,
             "both rules must still be tried against every entry"
+        );
+
+        // …and "tried" has to mean a glob that can actually match. Every rule in
+        // the group must recognise a path the walk of this group will produce.
+        let entry = groups[0].root.join("probe.tmp");
+        for held in &groups[0].rules {
+            let candidate = held.match_path(&entry, &groups[0].root);
+            assert!(
+                held.rule.matches_path(&candidate),
+                "`{}` cannot claim `{}`, which is the only kind of path this walk \
+                 will ever hand it (it is anchored at `{:?}`)",
+                held.rule.spec.id,
+                entry.display(),
+                held.own_root,
+            );
+        }
+    }
+
+    /// **Review M14.** `plan_walks` folds walk roots on canonical identity but
+    /// keeps the *first* rule's spelling, while `matches_path` is a text glob
+    /// anchored to each rule's *own* spelling. Two rules sharing a canonical
+    /// root spelled differently therefore left every rule but the first unable
+    /// to claim a single entry — silently, because nothing reported it.
+    ///
+    /// On a stock machine the two spellings are `%TEMP%` (8.3 on any account
+    /// whose name does not fit) against `%LOCALAPPDATA%\Temp` (never 8.3). A
+    /// junction reproduces the same shape on any machine and needs no privilege.
+    ///
+    /// The rules are separated by extension rather than by glob shape, so what
+    /// is under test is the *path anchor* and nothing else.
+    #[cfg(windows)]
+    #[test]
+    fn a_folded_rule_can_still_claim_entries_under_the_surviving_spelling() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let profile = dir.path().to_path_buf();
+        let real_temp = profile.join("real/Temp");
+        fs::create_dir_all(&real_temp).expect("fixture dirs");
+
+        // The second spelling of the same directory.
+        let alias = profile.join("alias");
+        assert!(
+            crate::core::test_support::make_junction(&alias, &profile.join("real")),
+            "`mklink /J` needs no privilege, so a failure here is a real one"
+        );
+        let alias_temp = alias.join("Temp");
+
+        aged(&real_temp.join("first.aaa"), b"claimed by rule a", 48);
+        aged(&real_temp.join("second.bbb"), b"claimed by rule b", 48);
+
+        let pack_json = r#"{
+            "id": "folded",
+            "name": "Folded Roots",
+            "version": 1,
+            "module": "cleaner",
+            "enabled_by_default": true,
+            "description": "Two rules, one directory, two spellings.",
+            "rules": [
+                {
+                    "id": "spelled-directly",
+                    "paths": ["%REALTEMP%\\**"],
+                    "match": { "min_age_hours": 24, "extensions": ["aaa"] },
+                    "score": { "base": 90, "max_bucket": "safe" },
+                    "action": "quarantine",
+                    "reason": "Anchored at the spelling that wins the fold."
+                },
+                {
+                    "id": "spelled-through-the-junction",
+                    "paths": ["%ALIASTEMP%\\**"],
+                    "match": { "min_age_hours": 24, "extensions": ["bbb"] },
+                    "score": { "base": 90, "max_bucket": "safe" },
+                    "action": "quarantine",
+                    "reason": "Anchored at the spelling the fold discards."
+                }
+            ]
+        }"#;
+
+        let env = MapEnv::new()
+            .with("USERPROFILE", profile.to_string_lossy())
+            .with("REALTEMP", real_temp.to_string_lossy())
+            .with("ALIASTEMP", alias_temp.to_string_lossy());
+        let pack = rules::compile_pack("folded", pack_json, &env).expect("the fixture pack");
+        let protected = ProtectedPaths::empty();
+
+        let (groups, refused) = plan_walks(&pack, &protected);
+        assert!(refused.is_empty(), "nothing here is refused: {refused:?}");
+        assert_eq!(
+            groups.len(),
+            1,
+            "the two spellings name one directory, so one walk: {:?}",
+            groups.iter().map(|g| g.root.display().to_string()).collect::<Vec<_>>()
+        );
+        println!("plan_walks walks: {}", groups[0].root.display());
+        for held in &groups[0].rules {
+            println!(
+                "  rule {:<28} anchored at {}",
+                held.rule.spec.id,
+                held.own_root
+                    .as_deref()
+                    .unwrap_or(&groups[0].root)
+                    .display()
+            );
+        }
+
+        let bin = StubRecycleBin::default();
+        let cancel = CancellationToken::new();
+        let settings = CleanerSettings::default();
+        let output = scan(
+            &CleanerContext {
+                packs: std::slice::from_ref(&pack),
+                settings: &settings,
+                protected: &protected,
+                recycle_bin: &bin,
+                now: Utc::now(),
+                cancel: &cancel,
+            },
+            None,
+        );
+
+        let claimed_by = |rule_id: &str| {
+            output
+                .findings
+                .iter()
+                .filter(|f| {
+                    f.meta.get("ruleId").and_then(|v| v.as_str()) == Some(rule_id)
+                })
+                .map(|f| f.path.file_name().unwrap_or_default().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            claimed_by("spelled-directly"),
+            vec!["first.aaa"],
+            "the surviving spelling still works: {:?}",
+            names(&output.findings)
+        );
+        assert_eq!(
+            claimed_by("spelled-through-the-junction"),
+            vec!["second.bbb"],
+            "the absorbed rule was made unreachable by the fold: {:?}",
+            names(&output.findings)
+        );
+        assert!(
+            output.skipped_rules.is_empty(),
+            "no rule was skipped, so nothing should be reported: {:?}",
+            output.skipped_rules
+        );
+    }
+
+    /// The other half of M14: a rule that ends up unable to claim anything must
+    /// **say so**. The dead rule in the original report was not in
+    /// `skipped_rules`, which is how it stayed invisible.
+    ///
+    /// Asserted as an invariant over every shipped pack rather than over one
+    /// fixture: any rule with walk roots is either in a group or named in
+    /// `skipped_rules`, never neither.
+    #[test]
+    fn a_rule_that_cannot_be_walked_is_always_reported() {
+        let fixture = Fixture::new();
+
+        // A protected walk root is the reachable way to make a rule unwalkable:
+        // `%WINDIR%` is a protected tree, so `windows-update-leftovers` cannot
+        // be walked at all.
+        let protected = fixture.protected();
+        for pack in fixture.packs() {
+            let (groups, refused) = plan_walks(&pack, &protected);
+            for rule in &pack.rules {
+                if rule.roots().is_empty() {
+                    continue;
+                }
+                let placed = groups
+                    .iter()
+                    .any(|g| g.rules.iter().any(|h| h.rule.spec.id == rule.spec.id));
+                let reported = refused
+                    .iter()
+                    .any(|line| line.contains(&format!("{}/{}", pack.id(), rule.spec.id)));
+                assert!(
+                    placed || reported,
+                    "`{}/{}` is neither walked nor reported — exactly the silent \
+                     disappearance review M14 is about",
+                    pack.id(),
+                    rule.spec.id
+                );
+            }
+        }
+
+        // And the reporting really does fire for the pack whose root is refused.
+        let update_pack = fixture
+            .packs()
+            .into_iter()
+            .find(|pack| pack.id() == "windows-update-leftovers")
+            .expect("the pack ships");
+        let (groups, refused) = plan_walks(&update_pack, &protected);
+        assert!(groups.is_empty(), "%WINDIR% is protected, so nothing is walked");
+        assert!(
+            refused
+                .iter()
+                .any(|line| line.contains("software-distribution-download")),
+            "got {refused:?}"
         );
     }
 
