@@ -888,3 +888,89 @@ rule reasons are static data shipped verbatim and placeholders would be a
 rule-pack format change. All recorded in `docs/DECISIONS-NEEDED.md`.
 
 **Deferred.** Nothing new. The phase-3 deferrals above still stand.
+
+---
+
+## 2026-08-06 — Phase 3: disk map, startup manager, real dashboard
+
+**Treemap** (`docs/modules/04-treemap.md`). `scan` walks a drive once and rolls
+every directory's size up bottom-up, keeping directory rows only — a drive with
+two million files has perhaps fifty thousand folders, so the model fits in
+memory and in SQLite. `children` then serves one folder at a time: it re-reads
+that single directory so names are current and takes subfolder totals from the
+aggregate. Spec 04 offers streaming events *or* `get_children` and says to pick
+one; this is `get_children`, with no streaming path, because two ways to build
+one picture is two pictures that can disagree.
+
+Four refusals to round off: a junction is drawn hollow and never counted, so its
+target's bytes appear once where they live; a folder that cannot be read is
+hatched and marked, never drawn as empty; sizes are logical and the level says
+how many files below it are compressed or sparse; and a cached picture states
+when it was taken. Canvas renderer, hand-rolled squarify in TypeScript with
+geometry tests under `node --test`. Cross-links ship: Open in Explorer, Scan
+with Cleaner, Find duplicates here with the folder pre-filled.
+
+**Startup manager** (`docs/modules/05-startup-manager.md`). Registry
+`Run`/`RunOnce` in both hives plus `WOW6432Node`, both Startup folders, and
+logon-triggered scheduled tasks through COM `ITaskService`. Disabling mirrors
+Windows: a `Run` value is never touched and a 12-byte `StartupApproved` record
+is written whose first byte's **low bit** is the disabled bit (the low bit, not
+the whole byte — `06`/`07` is a real variant, and comparing bytes would silently
+re-enable something the user turned off); a Startup-folder shortcut is moved
+into a module-managed folder through `core::quarantine`'s move primitive and
+recorded in the ledger; a task gets `Enabled = false` and the wrapper has no
+delete method at all. Impact tiers come from the program's size and
+`rules/startup/startup-known.json`, and every place they appear says "estimated".
+
+**Architect addition A — the justification is in the contract.** `Recommendation`
+carries a `Justification`, and `validate()` refuses a mutating action whose
+justification is `Informational`. Gate 1 runs that validation on every unit, so
+a hand-forged struct is *failed* rather than quietly acted on, and gate 4
+dispatches on the enum instead of sniffing a finding's `meta`. The old test that
+pinned the gap as a deliberate decision is replaced by one proving it is closed
+at both the constructor and the executor.
+
+**Architect addition B — the honest failures are shown.**
+`QuarantineStats.unreadableRows` and `PurgeReport.affectedBatches` have been
+produced since phase 1 and displayed nowhere. The drawer states both, factually.
+
+**Dashboard.** `core::history` writes one line per run to the `scans` table —
+in the schema since phase 0, never written to until now. A module that has never
+run says so rather than showing a zero.
+
+**Performance — measured, not asserted.** The first run of the 100 000-file
+synthetic tree took **8 678 ms** against a 3 000 ms budget. Profiling said the
+cost was not the traversal: `jwalk::DirEntry::metadata()` calls
+`fs::symlink_metadata`, which opens the file on Windows, once per entry.
+
+```
+jwalk enumeration alone                      64 ms
+jwalk + fs::symlink_metadata per entry     3924 ms
+read_dir + DirEntry::metadata()             143 ms
+```
+
+`core::scanner` is now a sorted depth-first `read_dir` walk and `jwalk` is
+dropped. First paint: **868 ms** (walk 855, cache 10, first level 3), cancel
+lands in **41 ms**, zoom is **0 ms**, and the 400-rectangle layout is 0.247 ms.
+Run it with `cargo test --release --test treemap_perf -- --ignored --nocapture`.
+
+**Decisions.** "Parallel walk" was measured and rejected: parallelism was worth
+80 ms, the syscall 3 800 ms. That fast path has one caveat, found by a test that
+started failing intermittently — NTFS updates the copy of a timestamp held in a
+parent directory's index lazily, so the listing can report a modification time
+*older* than the truth, and the cleaner decides what is old enough to remove
+from exactly that number. `WalkOptions::accurate_timestamps` therefore defaults
+to on and only the treemap opts out, so the cleaner and the duplicate finder
+behave exactly as before. The cleaner cross-link carries `?from=` and says
+plainly that the cleaner scans known junk locations rather than a folder you
+pick, because a pre-filled path it would not honour is worse than no path. All
+in `docs/DECISIONS-NEEDED.md`.
+
+**Deferred.** Disk-type (SSD vs spinning) is not an input to the impact
+estimate — the spec lists it, and the tier is labelled an estimate everywhere,
+so adding it is a refinement rather than a correction. Startup-folder shortcuts
+are identified by their `.lnk` path rather than the program inside them, so the
+signature badge on a folder entry reports on the shortcut; resolving it needs
+`IShellLink`, which is a fourth COM surface and was not worth adding to close
+this phase. Long scans still run on the async runtime rather than
+`spawn_blocking`, matching the shape phases 1 and 2 shipped.

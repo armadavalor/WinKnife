@@ -432,3 +432,27 @@ found late and blamed on something else.
       junk locations — so the link goes somewhere useful and does not imply a
       filter that is not there. Giving the cleaner an arbitrary-path mode would
       widen its blast radius and is a product decision, not a UI one.
+- [ ] 2026-08-06 (phase 3): module spec 05 lists "disk vs SSD" as an input to
+      the impact estimate. It is not implemented: detecting whether a volume is
+      solid-state means another Win32 surface
+      (`IOCTL_STORAGE_QUERY_PROPERTY`), and the tier is derived from the
+      program's size and the known-app list instead. Every place the tier appears
+      says "estimated" and `impact_reason` names exactly what it was derived
+      from, so this is a refinement rather than a correction — but the spec's
+      third input is missing and this is the record of it.
+- [ ] 2026-08-06 (phase 3): a Startup-folder entry's signature badge reports on
+      the `.lnk` file, not on the program the shortcut points at, because
+      resolving a shortcut needs `IShellLink` — a fourth COM surface. The badge
+      is therefore usually "signature could not be checked" for folder entries,
+      which is honest but less useful than it should be. `executable_of` already
+      does the work for registry and task entries; a shortcut resolver would slot
+      in at the same place.
+- [ ] 2026-08-06 (phase 3): long scans run on the async runtime rather than
+      `tauri::async_runtime::spawn_blocking`, which ARCHITECTURE section 3 names.
+      This matches the shape phases 1 and 2 shipped for the cleaner and the
+      duplicate finder, so the treemap follows it rather than introducing a
+      second pattern late in a phase. It is defensible on the numbers — a
+      100 000-file walk is 0.87 s and cancellation lands in 41 ms — but a
+      whole-drive walk on a slow disk is minutes, and it blocks one tokio worker
+      for that time. Worth doing properly for all three modules at once rather
+      than for one of them now.
