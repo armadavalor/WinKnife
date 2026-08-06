@@ -152,3 +152,68 @@ Open items awaiting the producer (not blocking implementation):
       on one run, long-form on another), that guard fails closed — it refuses to
       purge rather than purging the wrong thing — so it is safe as it stands.
       Worth revisiting when retention is exercised in anger.
+
+---
+
+## Architect resolutions — 2026-08-06, before phase 2
+
+Every open item above is answered here. Items marked **ACCEPTED** need no further
+work: the interpretation taken is the one we want, and the note stays as the
+record of why. Nothing above is left for the implementer to re-decide.
+
+**Phase 0**
+
+- LICENSE holder and CI badge slug — **CLOSED by the producer**: the name is
+  WinKnife, the repo is `armadavalor/WinKnife`, and CI has now run green there.
+
+**Phase 1**
+
+- Purge deletes the ledger row, `tracing` keeps the audit trail — **ACCEPTED.**
+  A `purged_at` column would only serve a purge-history UI nobody has asked for;
+  add the migration if and when the drawer needs it.
+- Recycle bin as a pack with the `shell:RecycleBinFolder` sentinel — **ACCEPTED.**
+  It keeps one code path for "things the cleaner offers" without pretending a
+  shell object is a file. A second shell-namespace root would need an explicit
+  non-filesystem branch; note that in the module spec when it happens.
+- Cleaner walks directories but never proposes one — **ACCEPTED for V1.** Empty
+  leftover folders are the `empty-folder-hunter` backlog module's job, not a
+  quiet widening of the cleaner's blast radius.
+- `score.base` parsed but ignored — **THIS IS PHASE 2's TASK 1.** Packs written
+  during phase 1 stay valid; the scoring pipeline now activates the field. Bucket
+  thresholds 85/40 and `max_bucket` ceilings per ARCHITECTURE §4.
+- Notifications carry no cancel button on Windows 10 — **ACCEPTED.** Tray and
+  route are the cancel paths; revisit only if the plugin gains action support.
+- Unset `%VAR%` reported in `skipped_rules` rather than dropped — **ACCEPTED,**
+  and it is the pattern to follow: a partial scan must say it was partial.
+
+**Phase 1 remediation**
+
+- A directory containing a link is refused for a cross-volume move — **ACCEPTED.**
+  Refusing beats a "skip" that deletes the source behind it. Reversibility wins
+  over convenience every time.
+- Profile-containment check skipped when `%USERPROFILE%` is unset — **ACCEPTED**
+  (shape checks still apply; the variable is always set on a real install).
+- The zero-byte size-cap note is **SUPERSEDED** by the r2 fix: the cap now skips
+  zero-byte items instead of stopping at them, so it can no longer be wedged.
+- `QuarantineStats.unreadableRows` / `PurgeReport.affectedBatches` produced but
+  not displayed — **DEFERRED TO PHASE 3** (UI polish owns the quarantine drawer).
+  Both must surface then: a corrupt ledger row and a partially-evicted batch are
+  exactly the things an honest tool admits to. Do not surface them in phase 2.
+- `gate_path` accepts local drive letters only — **ACCEPTED AS A PRODUCT
+  DECISION.** V1 cleans local drives. Mapped and remote shares are refused as
+  unjudgeable, and any future phase that wants them must widen the gate on
+  purpose, with its own review.
+- `WINKNIFE_ALLOW_SKIP_LINK_TESTS` — **CONFIRMED.** CI run 31098182451 executed
+  all six link tests for real and passed; `ci.yml` fails if the opt-out is set.
+- Junction-based companions for the five symlink tests — **ACCEPTED, do it in
+  phase 2.** `mklink /J` needs no privilege, so these safety tests would assert
+  on every developer's machine instead of only in CI. Shelling out to `cmd.exe`
+  from a test helper is acceptable for this; keep it in `core/test_support.rs`.
+  This is worth real effort: a junction probe is what proved the last two bugs.
+- `destroy`/`take` raw-text root guard — **CLOSED by round 4.** Both now compare
+  through `core::path_compare` and reject `Component::ParentDir` outright.
+
+**Standing rule from this phase, binding on phase 2 and after:** any new
+path-against-path comparison goes through `core::path_compare`. Three separate
+bugs in this phase were the same defect — two spellings of one path compared as
+raw text. If a comparison must stay lexical, say why in a comment at the site.

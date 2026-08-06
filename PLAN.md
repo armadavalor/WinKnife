@@ -147,6 +147,6 @@ Sağ-tık menüsü temizleyici, "bu dosyayı hangi program kilitledi?" çözüc�
 
 ## 8. İlk Adım (onayınla)
 
-1. `T:\Claude\Cleanify` içinde Tauri v2 iskeletini kur (Rust + Svelte/React)
+1. `T:\Claude\WinKnife` içinde Tauri v2 iskeletini kur (Rust + Svelte/React)
 2. Modül trait'i + registry + UI shell
 3. Kapatma zamanlayıcıyı uçtan uca çalışır hale getir → ilk çalışan demo
