@@ -1126,3 +1126,27 @@ returned real payloads, and the app's own log recorded `timer armed`,
 **Deferred.** The probe table's arguments are chosen to be refused early and
 cheaply; the test proves dispatch and state resolution, not command behaviour.
 Behaviour stays the job of the unit tests.
+
+---
+
+## 2026-08-07 — App icon, and the folder finally matches the name
+
+**Built.** No code change — assets and housekeeping.
+
+- The final logo (folded pocket knife with a Windows-flag inlay, flat blue
+  circle) landed as `assets/logo.png`, with the GitHub/social variant kept
+  beside it as `assets/logo-gh.png`. `tauri icon assets/logo.png` regenerated
+  every icon in `src-tauri/icons/` (`icon.ico`, `icon.icns`, `icon.png`, the
+  `Square*`/`StoreLogo` set, 32/64/128 px); the iOS/Android outputs it also
+  emits were deleted — this project has no mobile target. `static/favicon.png`
+  is the 128 px render of the same logo. `tauri.conf.json`'s `icon` list was
+  already correct and is untouched.
+- The working directory was renamed `T:\Claude\Cleanify` → `T:\Claude\WinKnife`
+  (done outside a session; the session lock had blocked it earlier). Verified
+  after the move: the repo itself contains no absolute-path references to the
+  old location, the git remote already points at `armadavalor/WinKnife`, and
+  the only remaining `cleanify` mentions in the tree are the historical rename
+  entries in this changelog, which stay.
+
+**Deferred.** `npm run tauri build` was not run for the icon swap; the embedded
+`.ico` will be picked up by the next bundle build.
