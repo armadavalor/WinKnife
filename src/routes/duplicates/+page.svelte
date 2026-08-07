@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import { page } from "$app/state";
+  import { onMount } from "svelte";
 
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
@@ -33,9 +34,12 @@
     settingsStore.settings?.quarantine.retentionDays ?? 7,
   );
 
-  $effect(() => {
+  // Run-once mounting, deliberately not reactive: as an effect this subscribed
+  // to the settings store's `status` and reloaded on every transition.
+  onMount(() => {
     void settingsStore.load();
   });
+
   let expanded = $state<Set<string>>(new Set());
 
   // `?root=` is the treemap's "Find duplicates here" cross-link arriving with a

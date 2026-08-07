@@ -14,6 +14,8 @@
     the size of the program and the known-app list, not a boot-time measurement.
 -->
 <script lang="ts">
+  import { onMount } from "svelte";
+
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { formatBytes, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
@@ -27,7 +29,9 @@
 
   let pending = $state<StartupEntry | null>(null);
 
-  $effect(() => {
+  // Run-once mounting, deliberately not reactive: as an effect this subscribed
+  // to the store's own `status` and re-enumerated on every transition.
+  onMount(() => {
     void store.load();
   });
 

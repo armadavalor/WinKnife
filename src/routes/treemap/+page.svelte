@@ -16,6 +16,7 @@
 -->
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { onMount, untrack } from "svelte";
 
   import { revealInExplorer } from "$lib/api";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
@@ -49,12 +50,17 @@
   let focused = $state(0);
   let placed: Placed<TreeChild>[] = [];
 
-  $effect(() => {
+  // Run-once mounting, deliberately not reactive: as an effect this subscribed
+  // to the store's own `status`, which is why the page sat on "Looking for
+  // drives…" while the drive list was already loaded.
+  onMount(() => {
     void store.loadDrives();
   });
 
   $effect(() => {
-    const listening = store.listen();
+    // `untrack` so nothing the subscription touches on the way in can become a
+    // dependency of this effect; the teardown is the only reason it is one.
+    const listening = untrack(() => store.listen());
     return () => {
       void listening.then((unlisten) => unlisten());
     };

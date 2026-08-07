@@ -23,11 +23,25 @@ class DashboardStore {
   /** Message of the last failure. */
   error = $state<string | null>(null);
 
+  /**
+   * The fetch currently running, if one is.
+   *
+   * Plain field, never `$state`: the guard this replaced read `status`, so a
+   * page calling `load()` from an effect subscribed to `status` and every
+   * transition re-entered the load. A non-reactive handle keeps the guard
+   * invisible to the effect graph.
+   */
+  #inflight: Promise<void> | null = null;
+
   /** Fetch unless it is already in flight. */
-  async load(): Promise<void> {
-    if (this.status === "loading") {
-      return;
-    }
+  load(): Promise<void> {
+    this.#inflight ??= this.#doLoad().finally(() => {
+      this.#inflight = null;
+    });
+    return this.#inflight;
+  }
+
+  async #doLoad(): Promise<void> {
     this.status = "loading";
     this.error = null;
     try {

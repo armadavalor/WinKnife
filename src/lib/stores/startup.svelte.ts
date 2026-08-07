@@ -46,12 +46,25 @@ class StartupStore {
     return this.entries.filter((entry) => entry.enabled).length;
   }
 
+  /**
+   * Non-reactive mirrors of "an enumeration succeeded" and "one is running".
+   *
+   * `load()` used to answer both questions by reading `status`, which subscribed
+   * the calling effect to `status` and made every transition re-enter the scan.
+   * Plain fields say the same thing without being observable.
+   */
+  #loaded = false;
+  #inflight: Promise<void> | null = null;
+
   /** Enumerate, unless it has already been done. */
-  async load(): Promise<void> {
-    if (this.status === "loading" || this.status === "ready") {
-      return;
+  load(): Promise<void> {
+    if (this.#loaded) {
+      return Promise.resolve();
     }
-    await this.reload();
+    this.#inflight ??= this.reload().finally(() => {
+      this.#inflight = null;
+    });
+    return this.#inflight;
   }
 
   /** Enumerate again, whatever the current state. */
@@ -61,10 +74,12 @@ class StartupStore {
     try {
       this.apply(await startupScan());
       this.status = "ready";
+      this.#loaded = true;
     } catch (error: unknown) {
       this.entries = [];
       this.error = message(error);
       this.status = "error";
+      this.#loaded = false;
     }
   }
 

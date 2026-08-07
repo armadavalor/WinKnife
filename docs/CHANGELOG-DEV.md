@@ -1150,3 +1150,60 @@ Behaviour stays the job of the unit tests.
 
 **Deferred.** `npm run tauri build` was not run for the icon swap; the embedded
 `.ico` will be picked up by the next bundle build.
+
+---
+
+## 2026-08-07 — The mount effect that never stopped mounting
+
+**Built.** A UI-only fix for a loop that made three screens look permanently
+broken. Nothing under `src-tauri/` was touched.
+
+**The failure.** Every page mounted its data with `$effect(() => { void
+store.load(); })`, and every load-like store method opened with `if (this.status
+=== "loading") return;`. That guard is a *tracked read* performed synchronously
+inside the effect, so the effect subscribed to `status` — and the very next line
+wrote `status`, which re-ran the effect, which called `load()` again. A
+self-feeding loop that ran for as long as the page was mounted.
+
+Visible symptoms: Settings sat on "Loading settings…" forever with the settings
+already fetched; Disk map sat on "Looking for drives…" with two drives and a
+selection already in the store; the Dashboard's "Could be reclaimed" tile showed
+an em dash because `status === "ready"` was essentially never observable; and
+the whole thing hammered the Tauri IPC channel in the background for the life of
+the window.
+
+**The fix, two layers.**
+
+- *Stores* — the re-entry guard is now a plain (non-`$state`) in-flight promise
+  field, so it cannot be observed by the effect graph. `settings.load`,
+  `dashboard.load` and `treemap.loadDrives` wrap an unchanged private
+  `#doLoad`/`#doLoadDrives`; `modules.load` and `startup.load` additionally keep
+  a plain `#loaded` flag to preserve their "already fetched, don't refetch"
+  semantics, cleared when a fetch fails. Every `status` transition, error path
+  and public signature is unchanged. `quarantine.reload`, `scan.scan`,
+  `duplicates.scan` and `shutdown.refresh` were audited and left alone — they
+  never had a state-reading re-entry guard. `treemap.scan`/`treemap.open` guard
+  on `scanning`/`zooming` (also `$state`) but are reachable only from click and
+  key handlers, never from an effect, so they were left as they are.
+- *Call sites* — run-once mounting is no longer reactive at all. `+layout`,
+  dashboard, settings, cleaner, duplicates, startup, treemap and shutdown-timer
+  now mount their data in `onMount`. The three effects that exist to install a
+  backend listener with a teardown stay effects, but their setup call is wrapped
+  in `untrack(...)` so nothing read on the way in can re-trigger them. The
+  duplicates `?root=` effect, ConfirmDialog's focus effect and treemap's
+  ResizeObserver/repaint effects are intentionally reactive and untouched.
+
+**Verified.** `npm run check` (176 files, 0 errors, 0 warnings), `npm run build`
+and `npm run test:ui` (12/12) all pass. The live-app probe — Settings and Disk
+map reaching a settled state, the Dashboard tile showing a figure, and IPC
+traffic going quiet after mount — is the reviewer's, not the implementer's.
+
+**Review + probe (architect).** Adversarial review of the diff found no
+CRITICAL/HIGH issues. Live probe against the running dev app confirms the fix:
+Settings renders the pack list, Disk map settles into the drive picker, the
+Dashboard tile shows a real figure and stays there. One MEDIUM, pre-existing
+and deferred: the Startup page's Refresh button is not disabled while a toggle
+is in flight, so `reload()` can run concurrently with the `reload()` a
+`disable()`/`enable()` issues internally — two enumerations race and the last
+response to land wins. Fix belongs with a small sequencing pass over
+`startup.reload()`, not in this diff.

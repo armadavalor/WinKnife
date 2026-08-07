@@ -18,12 +18,25 @@ class ModuleStore {
   /** Message of the last failure, if any. */
   error = $state<string | null>(null);
 
+  /**
+   * Non-reactive mirrors of "a fetch succeeded" and "a fetch is running".
+   *
+   * `load()` used to answer both questions by reading `status`, which subscribed
+   * the caller's effect to `status` and made every transition re-enter the
+   * fetch. Plain fields say the same thing without being observable.
+   */
+  #loaded = false;
+  #inflight: Promise<void> | null = null;
+
   /** Fetch the registry unless it is already loaded or in flight. */
-  async load(): Promise<void> {
-    if (this.status === "loading" || this.status === "ready") {
-      return;
+  load(): Promise<void> {
+    if (this.#loaded) {
+      return Promise.resolve();
     }
-    await this.reload();
+    this.#inflight ??= this.reload().finally(() => {
+      this.#inflight = null;
+    });
+    return this.#inflight;
   }
 
   /** Fetch the registry again, whatever the current state. */
@@ -33,10 +46,12 @@ class ModuleStore {
     try {
       this.modules = await listModules();
       this.status = "ready";
+      this.#loaded = true;
     } catch (error: unknown) {
       this.modules = [];
       this.error = isApiError(error) ? error.message : String(error);
       this.status = "error";
+      this.#loaded = false;
     }
   }
 

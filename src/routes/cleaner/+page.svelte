@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import { page } from "$app/state";
+  import { onMount } from "svelte";
 
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import FindingList from "$lib/components/FindingList.svelte";
@@ -34,7 +35,9 @@
     settingsStore.settings?.quarantine.retentionDays ?? 7,
   );
 
-  $effect(() => {
+  // Run-once mounting, deliberately not reactive: as an effect this subscribed
+  // to the settings store's `status` and reloaded on every transition.
+  onMount(() => {
     void settingsStore.load();
   });
 

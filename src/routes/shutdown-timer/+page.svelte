@@ -6,6 +6,8 @@
   (module spec 01).
 -->
 <script lang="ts">
+  import { onMount, untrack } from "svelte";
+
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { formatDateTime, formatRemaining } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
@@ -35,9 +37,15 @@
     { value: "sleep", label: t("shutdown.actionSleep") },
   ];
 
-  $effect(() => {
+  // The first fetch is a one-shot and belongs on mount; only the subscription
+  // needs an effect, and that one is untracked so nothing it reads on the way in
+  // can re-run it.
+  onMount(() => {
     void store.refresh();
-    const unlisten = store.listen();
+  });
+
+  $effect(() => {
+    const unlisten = untrack(() => store.listen());
     return () => {
       void unlisten.then((stop) => stop());
     };

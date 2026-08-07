@@ -9,6 +9,8 @@
 <script lang="ts">
   import "../app.css";
 
+  import { onMount, untrack } from "svelte";
+
   import QuarantineDrawer from "$lib/components/QuarantineDrawer.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import { t } from "$lib/i18n";
@@ -17,13 +19,18 @@
 
   let { children } = $props();
 
-  $effect(() => {
+  // Mounting is a one-shot, so it is not an effect: an effect subscribes to
+  // whatever its body reads, and a store that reports its own progress would
+  // then re-trigger the very call that moved it.
+  onMount(() => {
     void moduleStore.load();
     void quarantineStore.reload();
   });
 
   $effect(() => {
-    const listening = quarantineStore.listen();
+    // `untrack` so nothing the subscription touches on the way in can become a
+    // dependency of this effect; the teardown is the only reason it is one.
+    const listening = untrack(() => quarantineStore.listen());
     return () => {
       void listening.then((unlisten) => unlisten());
     };

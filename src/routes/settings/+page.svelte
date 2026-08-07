@@ -7,6 +7,8 @@
   Rust clamps retention and the duplicate size floor, and the page says so.
 -->
 <script lang="ts">
+  import { onMount } from "svelte";
+
   import { formatBytes } from "$lib/format";
   import { t } from "$lib/i18n";
   import { settingsStore } from "$lib/stores/settings.svelte";
@@ -34,7 +36,9 @@
     { value: 64 * 1024 * 1024 * 1024, label: "64 GB" },
   ];
 
-  $effect(() => {
+  // Run-once mounting, deliberately not reactive: as an effect this subscribed
+  // to the store's own `status` and reloaded on every transition it caused.
+  onMount(() => {
     void store.load();
   });
 </script>

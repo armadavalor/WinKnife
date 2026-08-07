@@ -66,11 +66,24 @@ class TreemapStore {
     return this.drives.find((d) => d.root === this.selected) ?? null;
   }
 
+  /**
+   * The drive-list fetch currently running, if one is.
+   *
+   * Plain field, never `$state`: the guard it replaced read `status`, which
+   * subscribed any effect that called `loadDrives()` to `status` and turned the
+   * guard itself into a re-entry loop.
+   */
+  #inflight: Promise<void> | null = null;
+
   /** Load the drive list and pick a sensible default. */
-  async loadDrives(): Promise<void> {
-    if (this.status === "loading") {
-      return;
-    }
+  loadDrives(): Promise<void> {
+    this.#inflight ??= this.#doLoadDrives().finally(() => {
+      this.#inflight = null;
+    });
+    return this.#inflight;
+  }
+
+  async #doLoadDrives(): Promise<void> {
     this.status = "loading";
     this.error = null;
     try {

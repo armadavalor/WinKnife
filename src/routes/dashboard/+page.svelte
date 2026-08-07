@@ -7,6 +7,8 @@
   as "nothing to find" rather than "nobody has looked".
 -->
 <script lang="ts">
+  import { onMount } from "svelte";
+
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
   import { formatBytes, formatDateTime, formatRemaining } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
@@ -17,7 +19,10 @@
 
   const store = dashboardStore;
 
-  $effect(() => {
+  // Run-once mounting, deliberately not reactive: as an effect this subscribed
+  // to the store's own `status`, so "ready" was never observable and the
+  // reclaimable figure below stayed an em dash.
+  onMount(() => {
     void store.load();
   });
 

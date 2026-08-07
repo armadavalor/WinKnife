@@ -31,11 +31,26 @@ class SettingsStore {
   /** True after a save that went through unchanged. */
   saved = $state(false);
 
-  /** Load the settings. Safe to call repeatedly. */
-  async load(): Promise<void> {
-    if (this.status === "loading") {
-      return;
-    }
+  /**
+   * The load currently running, if one is.
+   *
+   * Deliberately a plain field rather than `$state`: the re-entry guard used to
+   * read `status`, and a page that calls `load()` from an effect then subscribes
+   * to `status` — every transition re-ran the effect, which called `load()`
+   * again, which moved `status` again. A non-reactive handle is unobservable to
+   * the effect graph, so the guard cannot become the loop.
+   */
+  #inflight: Promise<void> | null = null;
+
+  /** Load the settings. Safe to call repeatedly; one fetch at a time. */
+  load(): Promise<void> {
+    this.#inflight ??= this.#doLoad().finally(() => {
+      this.#inflight = null;
+    });
+    return this.#inflight;
+  }
+
+  async #doLoad(): Promise<void> {
     this.status = "loading";
     this.error = null;
     try {
