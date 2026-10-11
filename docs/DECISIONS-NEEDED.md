@@ -485,3 +485,102 @@ found late and blamed on something else.
       somewhere else, that assumption is the one to re-check.
 
 - [ ] 2026-09-13 (phase 4): User prioritizes polish, release, then Graphify. Release engineering is prepared first; optional LLM adapters, keyring and privacy UI remain unimplemented. No claim of Phase 4 acceptance until its full scope and fresh-VM checks are satisfied.
+
+## Phase 4 release audit — 2026-10-03
+
+A read-only audit of the hard rules before the first release (raw deletes,
+network, read-only scans, protected paths, reasons) found two violations and
+three items needing review. The fixes are logged in CHANGELOG-DEV; what is
+recorded here is the decisions they rest on, and the one decision that is
+not ours to take.
+
+- [x] 2026-10-03 (phase 4, ESCALATED — destructive; resolved 2026-10-11 by
+      the owner, option a): **emptying the recycle bin is the one documented
+      exception to the first hard rule.** `SHEmptyRecycleBinW`
+      (`core/platform/recycle_bin.rs`) deletes permanently and does not go
+      through quarantine. The phase 1 resolution accepted it and spec 02 calls
+      it "the one non-quarantine action", but CLAUDE.md was never amended, so
+      the audit flagged it. Before the fix the rule (`rules/recycle-bin.json`,
+      score 95, `max_bucket: safe`) made the row green and the cleaner
+      pre-selected every green row, so **the recycle bin started ticked**; the
+      confirm dialog added a danger warning and the backend refused unless
+      `confirm_empty_recycle_bin` came from that dialog. Options were (a) a
+      narrow carve-out and the row never starts ticked, (b) a carve-out as the
+      code stood, (c) drop the action. Taken: (a). CLAUDE.md and CONTRIBUTING
+      now name the exception; `initialSelection` (`stores/selection.ts`, with
+      tests) keeps the row unticked after a scan, so emptying it takes a tick
+      the user makes plus the separate warning. The row stays green: the
+      rating says the contents are safe to lose, the selection says WinKnife
+      will not choose it for you.
+- [x] 2026-10-03 (phase 4): **the LLM layer is deferred to v0.2.0.**
+      v0.1.0 ships with no network client at all. Its opt-in, the
+      exact-payload preview and the keyring move together to the next minor
+      version, so the first release can make the simplest privacy promise
+      there is. The README must not mention LLM features until then, and phase
+      4 acceptance is claimed against this narrowed scope only.
+- [x] 2026-10-03 (phase 4): **log retention is the newest 14 daily files.**
+      Logs carry the local paths of cleaned items, and nothing ever removed
+      them. `core/logging.rs` now asks tracing-appender for `max_log_files(14)`.
+      It counts files, not days: when the log opens and at each daily rotation
+      it deletes the oldest `winknife.log*` files in the app's own log
+      directory. Two consequences worth knowing: (1) the phase 1 resolution
+      "purge deletes the ledger row, `tracing` keeps the audit trail" now has
+      a horizon: a purge line lives about 14 days of use after the purge,
+      which still outlives the 7-day default quarantine retention; (2) the old
+      `rolling::daily` panicked when the log file could not be opened; the
+      builder hands the error back, and the app starts without a file log.
+      The deletion happens inside the dependency, on app-owned files, so it is
+      outside the hard rule; recorded here so nobody has to rediscover that.
+- [x] 2026-10-03 (phase 4): **a startup entry is rated Safe only when its
+      program clears the cleaner's protected-path gate.** The known-app list
+      (`startup-known.json`) matches on the command line alone, so an entry
+      running `C:\Program Files (x86)\Steam\steam.exe` came out green.
+      `startup_rating` (`commands.rs`) now asks `Brain::path_refusal`, the
+      same gate the cleaner uses. Safe needs three things: a safe-to-disable
+      verdict, a resolved program, and no refusal. Anything else is
+      NeedsReview, and the reason says why ("It is not rated safe: …").
+      Consequence worth knowing: most third-party programs live under
+      `Program Files`, so few startup entries are green any more; programs
+      installed per user under `AppData` still can be. Turning an entry off
+      is unchanged: still offered, still reversible, nothing removed. Notes
+      from the fix, none blocking:
+      (1) a `target` naming a missing file passes the gate unless the lexical
+      list refuses it. Only hand-built entries can carry one, because
+      `executable_of` returns existing files only;
+      (2) the gate's wording ("protected location, not cleanable: … use the
+      app's own uninstaller instead") was written for the cleaner and reads
+      oddly inside a startup reason. Reword when the startup reason reaches
+      the UI;
+      (3) the startup page still shows the known-app label "Safe to turn off"
+      (grey, from `entry.verdict`) beside the known-app note, never the
+      rating or its reason. That is no green rating, and the note explains
+      the label, so it is not a hard-rule breach; but for a protected program
+      the page and the backend now disagree. Open for polish: show the rating
+      and reason, or soften the label;
+      (4) QA exercised the gate only through unit tests: the protected
+      entries on the QA machine (Epic, Spotify) were already disabled, so no
+      live entry flipped from green to review.
+- [x] 2026-10-03 (phase 4): **the webview has a content security policy, and
+      the unused opener plugin is gone.** `tauri.conf.json` shipped
+      `"csp": null`, and the opener plugin was registered with
+      `opener:default` although nothing used it. The policy now is
+      `default-src 'self'; script-src 'self'; style-src 'self'
+      'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src ipc:
+      http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action
+      'none'; frame-src 'none'`. The choices behind it:
+      `style-src` keeps `'unsafe-inline'` because Svelte writes `style=`
+      attributes (treemap tiles, bars); Tauri adds hashes only for inline
+      `<script>`/`<style>` elements and the built HTML has no `<style>`
+      element, so nothing switches `'unsafe-inline'` off. Scripts get no such
+      allowance: Tauri hashes the one inline SvelteKit bootstrap at build
+      time. `img-src` drops `data:`, which nothing uses today; add it back
+      deliberately if icons ever arrive as data URLs. `connect-src` is
+      Tauri's IPC only, which matches "no network". No `devCsp`: in Tauri
+      2.11.5 the Windows dev page gets no CSP at all, so CSP checks mean
+      something only in a release or QA build. The opener left Rust
+      (`lib.rs`, `Cargo.toml`), the capability file and npm; `Cargo.lock`
+      lost `tauri-plugin-opener`, `open`, `is-wsl` and `is-docker` and
+      nothing else. QA (release build, `com.winknife.qa` identity): 7 routes,
+      35 IPC calls answered, 0 console errors, 0 CSP violations; an image and
+      a fetch to an outside host were both blocked. `release-ipc.json` has no
+      command list, so `list_modules` stood in as the IPC probe.

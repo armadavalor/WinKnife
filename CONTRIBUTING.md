@@ -7,7 +7,9 @@ that promise before anything else.
 ## Ground rules
 
 - **No permanent deletion of user files.** Destructive actions go through the
-  quarantine service (`docs/ARCHITECTURE.md` §6).
+  quarantine service (`docs/ARCHITECTURE.md` §6). The only exception is
+  emptying the Windows recycle bin, which the user must tick and confirm
+  separately.
 - **Protected paths are absolute.** `C:\Windows`, `C:\Program Files*`, user
   profile roots and `brain::protected_paths()` never get a Safe rating or a
   delete action. Enforce it in code, not only in rule data.

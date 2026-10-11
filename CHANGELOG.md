@@ -13,7 +13,8 @@ First public release.
 ### Added
 - **Disk Cleaner** — read-only scan with a reason and risk bucket for every
   finding; selected items move to quarantine; the previous scan is shown as an
-  estimate until you scan again.
+  estimate until you scan again. Emptying the Windows recycle bin is the one
+  permanent action: it is never pre-selected and needs its own confirmation.
 - **Duplicate Finder** — byte-identical duplicate detection with review before
   quarantining selected copies.
 - **Disk map** — folder sizes, drill-down and a treemap.
