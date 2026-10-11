@@ -1207,3 +1207,14 @@ is in flight, so `reload()` can run concurrently with the `reload()` a
 `disable()`/`enable()` issues internally — two enumerations race and the last
 response to land wins. Fix belongs with a small sequencing pass over
 `startup.reload()`, not in this diff.
+
+## 2026-09-13 — Startup race, cleaner history and release preparation
+
+- Fixed overlapping startup enumeration/mutation requests and added a deferred-response regression harness to test:ui.
+- Cleaner now shows the saved previous scan estimate without restoring stale actionable findings; returning to idle reloads the summary.
+- Production IPC fallback and narrow-window overflow were not reproduced; no speculative workaround. See POLISH-QA.md for coverage and remaining cases.
+- Updated English/Turkish README, added release checklist, portable ZIP/NSIS/checksum packaging and a draft-release workflow. Optional LLM work, demo GIF, external uploads/publication and fresh-VM acceptance remain pending.
+- Type check, UI tests and Clippy pass. Rust: 481 unit tests passed without opt-outs; 5 link safety tests require Windows symlink privileges. Remaining suites completed with the explicit local link-test opt-out; those five are not counted as verified.
+
+- Local release artifacts built: NSIS installer and portable ZIP containing exe + 11 rules resources + license/readmes, with SHA-256 file. No GitHub publication.
+- Graphify snapshot created: 107 code/config files + 26 documents, 2181 nodes / 6374 edges / 79 communities. Health caveat: 276 unresolved AST endpoints plus duplicate relationships; source verification remains mandatory. No new paid API, watcher or Git hook. See DEVELOPMENT-TOOLS.md.

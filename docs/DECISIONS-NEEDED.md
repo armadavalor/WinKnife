@@ -483,3 +483,5 @@ found late and blamed on something else.
       the arena resolves, justified by the walk's own guarantee that it never
       leaves its root; if a future caller feeds `treemap::scan` paths from
       somewhere else, that assumption is the one to re-check.
+
+- [ ] 2026-09-13 (phase 4): User prioritizes polish, release, then Graphify. Release engineering is prepared first; optional LLM adapters, keyring and privacy UI remain unimplemented. No claim of Phase 4 acceptance until its full scope and fresh-VM checks are satisfied.
