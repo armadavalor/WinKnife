@@ -23,6 +23,7 @@ pub(crate) mod explorer;
 pub(crate) mod file_id;
 pub(crate) mod guard;
 pub(crate) mod lock;
+pub(crate) mod pinned;
 pub(crate) mod power;
 pub(crate) mod process;
 pub(crate) mod recycle_bin;

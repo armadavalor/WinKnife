@@ -584,3 +584,31 @@ not ours to take.
       35 IPC calls answered, 0 console errors, 0 CSP violations; an image and
       a fetch to an outside host were both blocked. `release-ipc.json` has no
       command list, so `list_modules` stood in as the IPC probe.
+- [x] 2026-10-03 (phase 4), revised 2026-10-11 after two adversarial
+      reviews: **a cross-volume move pins the source and deletes through
+      the pins.** Every folder, the top one included, is opened as itself
+      (links are never followed) and held without sharing delete until its
+      own delete, so it cannot be swapped for a junction mid-move. A folder
+      that is a link or reparse point is refused, and every file and folder
+      must resolve inside the top folder's real path (whole components,
+      case-insensitive). Each file is pinned against writes. Its main data
+      stream and its Zone.Identifier stream are copied and checked byte for
+      byte, and so is its list of named streams; a file or folder with any
+      other alternate data stream is refused before anything is created.
+      Read-only, hidden, system, archive and not-indexed attributes come
+      across and are checked. Deletes go through the pins: after each
+      delete is marked, the streams are listed again, and if they changed
+      the delete is taken back and the file stays at the source (if it is
+      the first file, the whole move is undone). A probe on NTFS confirmed
+      the take-back clears the pending delete and that a marked file cannot
+      be reopened or gain a stream. Once any source file is gone the move
+      counts as done and keeps its ledger row; leftovers are logged. Paths
+      over MAX_PATH work. Before this patch the copy already lost alternate
+      streams and hidden/system attributes; that loss was not introduced
+      here. Known limits: streams other than Zone.Identifier are refused,
+      not carried. Creation time, folder times and ACLs are not kept. Two
+      hard links to one file inside the tree refuse the move with a
+      sharing error. For a lone file, an ancestor junction retargeted
+      between pin and move is not detected (the moved file is still copied
+      and verified). Read-only files on FAT stay behind. The destination is
+      not pinned between verification and the source delete.

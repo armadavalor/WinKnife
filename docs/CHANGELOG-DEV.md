@@ -1218,3 +1218,60 @@ response to land wins. Fix belongs with a small sequencing pass over
 
 - Local release artifacts built: NSIS installer and portable ZIP containing exe + 11 rules resources + license/readmes, with SHA-256 file. No GitHub publication.
 - Graphify snapshot created: 107 code/config files + 26 documents, 2181 nodes / 6374 edges / 79 communities. Health caveat: 276 unresolved AST endpoints plus duplicate relationships; source verification remains mandatory. No new paid API, watcher or Git hook. See DEVELOPMENT-TOOLS.md.
+
+## 2026-10-03 / 2026-10-11 — Phase 4 release audit fixes
+
+Before the first release, a read-only audit checked the hard rules: raw
+deletes, network, read-only scans, protected paths and reasons. It found two
+violations and three items that needed review. Startup ratings, the content
+security policy and log retention landed as separate commits (`93fc13b`,
+`a2057ec`, `8bccbae`). The recycle bin was escalated and the owner chose the
+narrow exception on 2026-10-11 (`97d464f`). The LLM layer moves to v0.2.0,
+so v0.1.0 ships with no network client. Decisions are in DECISIONS-NEEDED,
+"Phase 4 release audit — 2026-10-03".
+
+**Built (this entry's commit): quarantine cross-volume moves no longer
+remove the source by path after verification** (security review C, C2, D).
+- Every source file is pinned with a read-and-delete handle that lets others
+  only read; every folder is opened as itself, never through a link, and
+  held without delete sharing. A top folder swapped for a junction mid-move
+  is refused, and everything must resolve inside the top folder's real path.
+- The copy reads through the pins and is checked byte for byte, including
+  Zone.Identifier, the named-stream list and the attribute mask (read-only,
+  hidden, system, archive, not-indexed). Any other alternate data stream is
+  refused before anything is created.
+- Exactly the pinned files are deleted through their handles; streams are
+  re-listed after the delete is marked and the delete is taken back if they
+  changed. Folders go deepest first and only when empty, so anything that
+  arrived during the move stays and is logged.
+- Once any source file is gone the move reports success and keeps its
+  ledger row. If nothing was deleted, the destination is cleaned only by
+  file identity and empty-folder removal, never `remove_dir_all`.
+- `rename_no_replace` takes `\?\` paths, so moves past MAX_PATH work.
+- The handle code lives in `core/platform/pinned.rs`. Attribute setters stay
+  in `quarantine.rs` so the `no_other_module_removes_user_data` guard holds.
+- 11 new tests (zone identifier, other streams refused, late stream keeps
+  its file, attributes, junction swap, containment, long path, read-only
+  cleanup, stream listing, final path).
+
+**Also.** CI's stable Rust moved to 1.99, whose clippy flags `chunks_exact(2)`;
+`registry.rs` and `pinned.rs` decode UTF-16 with `as_chunks` (`3a1e007`).
+
+**Review.** Opus adversarial review of the first patch: SHIP-WITH-FIXES
+(stale probe tests, named streams lost, junction swap of the top folder,
+attributes, long paths). All fixed. Second Opus review: SHIP. An NTFS probe
+confirmed the delete take-back and that a marked file cannot be reopened.
+Open LOW items: confirm DeletePending after a take-back, refuse EFS files
+(encryption is dropped across volumes, pre-existing), tighten the
+`no_other_module_removes_user_data` guard, and give hard links inside a
+tree a clearer error.
+
+**Verified (Rust 1.99, 2026-10-11).** `cargo fmt --check` clean; `cargo
+clippy --all-targets -- -D warnings` clean; `cargo test`: `512 passed; 5
+failed` in the library, and the 5 are the symlink tests that need Developer
+Mode or elevation (they run on CI); integration suites 8 + 3 + 3 + 1 passed,
+3 ignored.
+
+**Deferred.** The startup page still shows the known-app label rather than
+the rating (DECISIONS-NEEDED, note 3). Clean-VM acceptance before the v0.1.0
+tag.
