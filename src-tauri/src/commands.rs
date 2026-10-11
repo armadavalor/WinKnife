@@ -740,7 +740,7 @@ pub async fn startup_scan<R: Runtime>(
     let mut findings = Vec::with_capacity(scan.entries.len());
     let mut recommendations = Vec::with_capacity(scan.entries.len());
     for entry in &scan.entries {
-        let (finding, recommendation) = startup_recommendation(entry);
+        let (finding, recommendation) = startup_recommendation(entry, &services.brain);
         findings.push(finding);
         if let Some(recommendation) = recommendation {
             recommendations.push(recommendation);
@@ -787,15 +787,74 @@ pub async fn startup_scan<R: Runtime>(
     })
 }
 
+/// How every note explaining a withheld green rating opens.
+const STARTUP_NOT_RATED_SAFE: &str = "It is not rated safe:";
+
+/// Said when the program a safe-to-disable entry runs could not be found, so
+/// the protected-path gate has nothing to judge.
+const STARTUP_UNRESOLVED_PROGRAM: &str = "the program it runs could not be worked out from its \
+     command line, so WinKnife cannot check that it lives outside a protected location.";
+
+/// Why an entry the known-app list calls safe to disable still may not be rated
+/// green, or `None` when it may. This is the cleaner's gate
+/// (`Brain::path_refusal`), so "protected" means one thing everywhere and no
+/// startup entry whose program lives in `C:\Windows` or `C:\Program Files*`
+/// comes out Safe (CLAUDE.md hard rule).
+fn startup_safe_refusal(entry: &startup::StartupEntry, brain: &Brain) -> Option<String> {
+    let Some(program) = entry.target.as_deref() else {
+        return Some(STARTUP_UNRESOLVED_PROGRAM.to_owned());
+    };
+    let refusal = brain.path_refusal(program)?;
+    // Set only when the spelling hid the place (an 8.3 alias, a junction).
+    let named = match &refusal.canonical {
+        Some(canonical) => format!("`{}` (really `{}`)", program.display(), canonical.display()),
+        None => format!("`{}`", program.display()),
+    };
+    Some(format!(
+        "the program it runs, {named}, is treated as a protected location ({}), and WinKnife \
+         never rates anything there as safe.",
+        refusal.reason
+    ))
+}
+
+/// The bucket and the reason for an enabled third-party entry. The known-app
+/// list only nominates an entry for green; the program it runs still has to
+/// clear the protected-path gate before it gets there.
+fn startup_rating(
+    entry: &startup::StartupEntry,
+    brain: &Brain,
+) -> (crate::core::types::RiskBucket, String) {
+    use crate::core::types::RiskBucket;
+
+    let withheld = match entry.verdict {
+        startup::Verdict::SafeToDisable => startup_safe_refusal(entry, brain),
+        _ => None,
+    };
+    let reason = format!(
+        "{} Turning this off stops it starting at logon; it can be turned back on here at \
+         any time, and nothing is removed. Estimated impact: {:?}. {}",
+        entry.note, entry.impact, entry.impact_reason
+    );
+    match (entry.verdict, withheld) {
+        (startup::Verdict::SafeToDisable, None) => (RiskBucket::Safe, reason),
+        (_, None) => (RiskBucket::NeedsReview, reason),
+        (_, Some(withheld)) => (
+            RiskBucket::NeedsReview,
+            format!("{reason} {STARTUP_NOT_RATED_SAFE} {withheld}"),
+        ),
+    }
+}
+
 /// Build the finding and, when the entry can be toggled, the recommendation the
 /// executor will re-verify.
 fn startup_recommendation(
     entry: &startup::StartupEntry,
+    brain: &Brain,
 ) -> (
     crate::core::types::Finding,
     Option<crate::core::types::Recommendation>,
 ) {
-    use crate::core::types::{Action, Finding, FindingKind, Justification, RiskBucket};
+    use crate::core::types::{Action, Finding, FindingKind, Justification};
 
     let kind = match entry.source {
         crate::core::types::StartupSource::ScheduledTask => FindingKind::ScheduledTask,
@@ -816,16 +875,7 @@ fn startup_recommendation(
         return (finding, None);
     }
 
-    let risk = match entry.verdict {
-        startup::Verdict::SafeToDisable => RiskBucket::Safe,
-        _ => RiskBucket::NeedsReview,
-    };
-    let reason = format!(
-        "{} Turning this off stops it starting at logon; it can be turned back on here at \
-         any time, and nothing is removed. Estimated impact: {:?}. {}",
-        entry.note, entry.impact, entry.impact_reason
-    );
-
+    let (risk, reason) = startup_rating(entry, brain);
     let recommendation = crate::core::types::Recommendation::new(
         vec![finding.id],
         risk,
@@ -1273,6 +1323,9 @@ pub fn shutdown_status(timer: State<'_, Arc<ShutdownTimer>>) -> Result<TimerStat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::brain::ProtectedPaths;
+    use crate::core::platform::{EnvResolver, SystemEnv};
+    use crate::core::types::{Action, RiskBucket, StartupSource};
     use crate::modules;
 
     /* --- the treemap zoom gate (security review M17) -------------------- */
@@ -1407,5 +1460,203 @@ mod tests {
                 .is_some(),
             "got {json}"
         );
+    }
+
+    /* --- startup ratings pass the protected-path gate (CLAUDE.md) ------- */
+
+    /// The gate the app itself builds (`lib.rs`), from the real environment,
+    /// with its own storage pointed into a scratch folder.
+    fn app_brain(scratch: &Path) -> Brain {
+        Brain::builder()
+            .protected_paths(ProtectedPaths::from_env(
+                &SystemEnv,
+                &scratch.join("app-data"),
+                &scratch.join("quarantine"),
+            ))
+            .build()
+    }
+
+    /// An enabled, signed, third-party `Run` entry.
+    fn startup_entry(target: Option<PathBuf>, verdict: startup::Verdict) -> startup::StartupEntry {
+        let command = target.as_deref().map_or_else(
+            || "launcher --quiet".to_owned(),
+            |program| format!("\"{}\" --quiet", program.display()),
+        );
+        startup::StartupEntry {
+            id: "hkcu-run:Launcher".to_owned(),
+            name: "Launcher".to_owned(),
+            source: StartupSource::CurrentUserRun,
+            key: "Launcher".to_owned(),
+            location: r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run".to_owned(),
+            command,
+            target,
+            enabled: true,
+            os_owned: false,
+            os_reason: None,
+            publisher: Some("Example Ltd".to_owned()),
+            signed: true,
+            signature_note: "Signed by Example Ltd".to_owned(),
+            impact: startup::Impact::High,
+            impact_reason: "Estimated from WinKnife's known-app list for this program.".to_owned(),
+            verdict,
+            category: Some("Games".to_owned()),
+            note: "Starts itself when you open it.".to_owned(),
+        }
+    }
+
+    /// A real program file somewhere the gate clears.
+    fn harmless_program(scratch: &Path) -> PathBuf {
+        let folder = scratch.join("programs");
+        std::fs::create_dir_all(&folder).expect("dirs");
+        let program = folder.join("launcher.exe");
+        std::fs::write(&program, b"MZ").expect("write");
+        program
+    }
+
+    /// A location that exists under `%ProgramFiles%` on every Windows install.
+    fn existing_program_files_location() -> PathBuf {
+        let root = PathBuf::from(
+            SystemEnv
+                .var("ProgramFiles")
+                .unwrap_or_else(|| r"C:\Program Files".to_owned()),
+        );
+        let common = root.join("Common Files");
+        let location = if common.is_dir() { common } else { root };
+        assert!(
+            location.is_dir(),
+            "`{}` has to exist for this test to mean anything",
+            location.display()
+        );
+        location
+    }
+
+    /// The reproduction: `startup-known.json` calls anything whose command
+    /// contains "Steam" safe to disable, and `C:\Program Files (x86)\Steam`
+    /// used to come out green. A protected program is never rated Safe, and
+    /// the reason is the gate's own — not "the file is missing".
+    #[test]
+    fn a_safe_to_disable_entry_whose_program_is_protected_is_not_rated_safe() {
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let brain = app_brain(scratch.path());
+        let program = existing_program_files_location();
+        let refusal = brain
+            .path_refusal(&program)
+            .expect("the cleaner's gate refuses %ProgramFiles%");
+
+        let entry = startup_entry(Some(program.clone()), startup::Verdict::SafeToDisable);
+        let (_, recommendation) = startup_recommendation(&entry, &brain);
+        let recommendation = recommendation.expect("an enabled entry gets a recommendation");
+
+        assert_eq!(recommendation.risk, RiskBucket::NeedsReview);
+        assert!(
+            recommendation.reason.contains(&refusal.reason),
+            "the gate's reason has to reach the user: {}",
+            recommendation.reason
+        );
+        assert!(
+            recommendation
+                .reason
+                .contains(&program.display().to_string()),
+            "the reason names the protected program: {}",
+            recommendation.reason
+        );
+        assert!(
+            !recommendation.reason.contains(STARTUP_UNRESOLVED_PROGRAM),
+            "the program was found; it is protected, not missing: {}",
+            recommendation.reason
+        );
+        assert!(
+            recommendation.reason.starts_with(&entry.note),
+            "the known-app note still leads: {}",
+            recommendation.reason
+        );
+    }
+
+    #[test]
+    fn a_safe_to_disable_entry_whose_program_the_gate_clears_is_rated_safe() {
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let brain = app_brain(scratch.path());
+        let program = harmless_program(scratch.path());
+        assert!(
+            brain.path_refusal(&program).is_none(),
+            "a tempdir program is not protected"
+        );
+
+        let entry = startup_entry(Some(program), startup::Verdict::SafeToDisable);
+        let (finding, recommendation) = startup_recommendation(&entry, &brain);
+        let recommendation = recommendation.expect("an enabled entry gets a recommendation");
+
+        assert_eq!(recommendation.risk, RiskBucket::Safe);
+        assert_eq!(recommendation.confidence, 80, "signed entries keep 80");
+        assert_eq!(recommendation.action, Action::DisableStartupEntry);
+        assert_eq!(recommendation.finding_ids, vec![finding.id]);
+        assert!(
+            !recommendation.reason.contains(STARTUP_NOT_RATED_SAFE),
+            "nothing to explain when it is green: {}",
+            recommendation.reason
+        );
+    }
+
+    #[test]
+    fn a_safe_to_disable_entry_whose_program_is_unknown_is_not_rated_safe() {
+        let brain = app_brain(tempfile::tempdir().expect("tempdir").path());
+        let entry = startup_entry(None, startup::Verdict::SafeToDisable);
+
+        let (_, recommendation) = startup_recommendation(&entry, &brain);
+        let recommendation = recommendation.expect("an enabled entry gets a recommendation");
+
+        assert_eq!(recommendation.risk, RiskBucket::NeedsReview);
+        assert!(
+            recommendation.reason.contains(STARTUP_UNRESOLVED_PROGRAM),
+            "the reason says the program could not be worked out: {}",
+            recommendation.reason
+        );
+    }
+
+    #[test]
+    fn other_startup_verdicts_stay_needs_review_without_a_gate_note() {
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let brain = app_brain(scratch.path());
+        let program = harmless_program(scratch.path());
+
+        for verdict in [
+            startup::Verdict::Keep,
+            startup::Verdict::UserChoice,
+            startup::Verdict::Unknown,
+        ] {
+            let entry = startup_entry(Some(program.clone()), verdict);
+            let (_, recommendation) = startup_recommendation(&entry, &brain);
+            let recommendation = recommendation.expect("an enabled entry gets a recommendation");
+
+            assert_eq!(recommendation.risk, RiskBucket::NeedsReview, "{verdict:?}");
+            assert!(
+                !recommendation.reason.contains(STARTUP_NOT_RATED_SAFE),
+                "{verdict:?} never was a Safe candidate: {}",
+                recommendation.reason
+            );
+        }
+    }
+
+    #[test]
+    fn windows_own_and_disabled_startup_entries_still_get_no_recommendation() {
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let brain = app_brain(scratch.path());
+        let program = harmless_program(scratch.path());
+
+        let os_owned = startup::StartupEntry {
+            os_owned: true,
+            os_reason: Some("This is part of Windows.".to_owned()),
+            ..startup_entry(Some(program.clone()), startup::Verdict::SafeToDisable)
+        };
+        let disabled = startup::StartupEntry {
+            enabled: false,
+            ..startup_entry(Some(program), startup::Verdict::SafeToDisable)
+        };
+
+        for entry in [os_owned, disabled] {
+            let (finding, recommendation) = startup_recommendation(&entry, &brain);
+            assert!(recommendation.is_none(), "{}: no action offered", entry.id);
+            assert_eq!(finding.module, "startup");
+        }
     }
 }
