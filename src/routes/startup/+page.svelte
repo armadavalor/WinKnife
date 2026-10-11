@@ -49,7 +49,7 @@
   };
 
   function toggle(entry: StartupEntry): void {
-    if (entry.os_owned) {
+    if (entry.os_owned || store.busy !== null || store.status === "loading") {
       return;
     }
     if (entry.enabled) {
@@ -105,6 +105,7 @@
       <button
         type="button"
         class="rounded-lg bg-surface-3 px-3 py-1.5 text-sm transition-colors hover:bg-accent-soft"
+        disabled={store.busy !== null}
         onclick={() => store.reload()}
       >
         {t("dashboard.retry")}
@@ -120,6 +121,7 @@
       <button
         type="button"
         class="rounded-lg border border-surface-3 px-2.5 py-1 text-xs transition-colors hover:bg-surface-2 hover:text-ink"
+        disabled={store.busy !== null}
         onclick={() => store.reload()}
       >
         {t("startup.refresh")}
@@ -183,7 +185,7 @@
               role="switch"
               aria-checked={entry.enabled}
               aria-label={t("startup.toggleLabel", { name: entry.name })}
-              disabled={entry.os_owned || store.busy === entry.id}
+              disabled={entry.os_owned || store.busy !== null}
               class="rounded-lg px-3 py-1 text-xs font-medium transition-colors {entry.enabled
                 ? 'bg-accent-soft text-ink hover:bg-accent hover:text-surface-0'
                 : 'border border-surface-3 text-ink-muted hover:bg-surface-2'} disabled:cursor-not-allowed disabled:opacity-50"

@@ -61,14 +61,20 @@ class StartupStore {
     if (this.#loaded) {
       return Promise.resolve();
     }
-    this.#inflight ??= this.reload().finally(() => {
+    return this.reload();
+  }
+
+  /** Share refreshes; a mutation performs its own fresh enumeration. */
+  reload(): Promise<void> {
+    if (this.busy !== null) return Promise.resolve();
+    this.#inflight ??= this.#doReload().finally(() => {
       this.#inflight = null;
     });
     return this.#inflight;
   }
 
   /** Enumerate again, whatever the current state. */
-  async reload(): Promise<void> {
+  async #doReload(): Promise<void> {
     this.status = "loading";
     this.error = null;
     try {
@@ -107,6 +113,7 @@ class StartupStore {
 
   /** Turn an entry off, through the executor. */
   async disable(entry: StartupEntry): Promise<void> {
+    if (this.busy !== null || this.status === "loading") return;
     const recommendation = this.byEntry.get(entry.id);
     if (this.scanId === null || !recommendation) {
       this.error = "This entry can no longer be changed; refresh the list.";
@@ -127,7 +134,7 @@ class StartupStore {
       } else {
         this.lastReport = null;
       }
-      await this.reload();
+      await this.#doReload();
     } catch (error: unknown) {
       this.error = message(error);
     } finally {
@@ -137,12 +144,13 @@ class StartupStore {
 
   /** Turn an entry back on. */
   async enable(entry: StartupEntry): Promise<void> {
+    if (this.busy !== null || this.status === "loading") return;
     this.busy = entry.id;
     this.error = null;
     try {
       await startupEnable(entry.source, entry.key);
       this.lastReport = null;
-      await this.reload();
+      await this.#doReload();
     } catch (error: unknown) {
       this.error = message(error);
     } finally {
