@@ -53,7 +53,6 @@ Blocking before the tag:
 | Optional Windows features | Turn WSL, Windows Sandbox, Hyper-V and similar on or off through the supported DISM feature API. |
 | Power plan switch | List and switch power plans; show the active one. |
 | Settings profile export | Export / import WinKnife settings and the tweak state to a file. |
-| App install / upgrade via winget | Needs network access, so it would be opt-in like the LLM layer. Pending a project decision. |
 | Context-menu cleaner, big-file archiver, uninstaller+, hosts editor | See BACKLOG Tier A/B. |
 | Optional LLM explanations | Opt-in, off by default (ARCHITECTURE §4). Not before v0.2.0. |
 
@@ -64,4 +63,6 @@ Windows Update, removing Edge / OneDrive / built-in Appx packages, MicroWin ISO
 building, and service-disabling packs. They are hard to undo and can break
 updates. Also out: RAM booster, driver updater, registry "optimizer", scheduled
 auto-clean, force-closing handles or killing processes without consent, cloud
-sync, and a plugin marketplace (for now). See BACKLOG non-goals.
+sync, a plugin marketplace (for now), and installing or upgrading apps
+through winget before v1.0: it would make WinKnife a networked installer and
+break the simple "no network" promise of the 0.x releases. See BACKLOG non-goals.

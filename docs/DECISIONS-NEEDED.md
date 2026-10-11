@@ -29,7 +29,7 @@ Open scope questions and contradictions found while implementing. Format:
       **RESOLVED (architect, 2026-08-06): set approved; extend per phase as
       needed, never remove variants.**
 - [ ] 2026-08-06 (phase 0): the MIT `LICENSE` needs a copyright holder but no
-      name/entity has been chosen (see `PLAN.md` §7, the product name is still
+      name/entity has been chosen (see `docs/PLAN.md` §7, the product name is still
       a codename) — used "WinKnife contributors"; update when the project name
       and owner are final.
 - [ ] 2026-08-06 (phase 0): the CI badge in `README.md` needs a GitHub
@@ -284,7 +284,7 @@ raising it rather than improvising was the right call. The permanent answer:
   path list erodes: the mechanism outlives the justification, and the next
   contributor argues their directory is just as safe. This phase was bitten four
   times by protected-path defects; we are not adding a door.
-- **Informational is not a workaround, it is the design.** `PLAN.md` §3.1 defines
+- **Informational is not a workaround, it is the design.** `docs/PLAN.md` §3.1 defines
   the red bucket as "information only, no button — this is the honesty feature",
   and `windows-update-leftovers` is the first real case of it. Keep it shipping,
   keep it inert, but **make the `reason` earn its place**: it must name the size

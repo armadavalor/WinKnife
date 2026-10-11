@@ -24,3 +24,6 @@ vite.config.ts.timestamp-*
 
 # Generated local knowledge graph
 /graphify-out/
+
+# Internal orchestration notes stay local
+ORKESTRA.md
