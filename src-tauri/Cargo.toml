@@ -22,7 +22,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # `tray-icon` powers the shutdown timer's tray countdown and cancel menu.
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-opener = "2"
 # T-5 / T-1 minute warnings for the shutdown timer.
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
