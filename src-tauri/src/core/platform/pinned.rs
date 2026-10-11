@@ -53,8 +53,11 @@ pub(crate) fn open_pinned(path: &Path) -> io::Result<File> {
 ///
 /// Shares everything: it is for cleaning up a file this app created, and that
 /// must not fail just because something else is reading it.
+///
+/// Only `core::quarantine`, the one module allowed to remove user data, may
+/// call it (adversarial review, LOW 4).
 #[cfg(windows)]
-pub(crate) fn open_to_delete(path: &Path) -> io::Result<File> {
+pub(in crate::core) fn open_to_delete(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows::Win32::Storage::FileSystem::{
         DELETE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
@@ -120,6 +123,82 @@ pub(crate) fn handle_identity(file: &File) -> io::Result<FileId> {
     })
 }
 
+/// What the filesystem says about an open file beyond its metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StandardInfo {
+    /// How many names the file has: more than one means hard links.
+    pub(crate) links: u32,
+    /// Whether a delete is marked and will take effect when the last handle
+    /// closes.
+    pub(crate) delete_pending: bool,
+}
+
+/// The link count and delete-pending state of the open file, read through the
+/// handle itself.
+///
+/// Why (adversarial review, LOWs 1 and 3): taking back a marked delete can
+/// report success and still leave it pending, so the take-back is confirmed
+/// here; and a file with a second name cannot be pinned twice, so it is
+/// recognised here rather than reported as open in another program.
+#[cfg(windows)]
+pub(crate) fn standard_info(file: &File) -> io::Result<StandardInfo> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        FileStandardInfo, GetFileInformationByHandleEx, FILE_STANDARD_INFO,
+    };
+
+    let mut info = FILE_STANDARD_INFO::default();
+    let size = u32::try_from(std::mem::size_of::<FILE_STANDARD_INFO>())
+        .map_err(|_| io::Error::other("FILE_STANDARD_INFO does not fit a u32"))?;
+    // SAFETY: the handle is owned by `file` and outlives the call, and `info`
+    // is a live, writable FILE_STANDARD_INFO whose exact size is passed.
+    unsafe {
+        GetFileInformationByHandleEx(
+            HANDLE(file.as_raw_handle()),
+            FileStandardInfo,
+            std::ptr::from_mut(&mut info).cast(),
+            size,
+        )
+    }
+    .map_err(|_| io::Error::last_os_error())?;
+
+    Ok(StandardInfo {
+        links: info.NumberOfLinks,
+        delete_pending: info.DeletePending,
+    })
+}
+
+/// The link count from the metadata; nothing is ever marked for deletion
+/// through a handle elsewhere.
+#[cfg(not(windows))]
+pub(crate) fn standard_info(file: &File) -> io::Result<StandardInfo> {
+    use std::os::unix::fs::MetadataExt;
+
+    let links = u32::try_from(file.metadata()?.nlink()).unwrap_or(u32::MAX);
+    Ok(StandardInfo {
+        links,
+        delete_pending: false,
+    })
+}
+
+/// Whether the file is encrypted with Windows EFS. A copy to another volume
+/// is written in the clear, so the cross-volume move refuses one (adversarial
+/// review, LOW 2).
+#[cfg(windows)]
+pub(crate) fn is_encrypted(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_ENCRYPTED;
+
+    metadata.file_attributes() & FILE_ATTRIBUTE_ENCRYPTED.0 != 0
+}
+
+/// There is no EFS elsewhere.
+#[cfg(not(windows))]
+pub(crate) fn is_encrypted(_metadata: &std::fs::Metadata) -> bool {
+    false
+}
+
 /// Open the directory at `path` itself, never what a link there points to,
 /// so that nothing else can rename or delete it while the returned handle
 /// lives. Files inside can still be created and changed; each of those is
@@ -149,9 +228,9 @@ pub(crate) fn open_pinned_dir(path: &Path) -> io::Result<File> {
 
 /// Open a directory, never what a link there points to, only to check it and
 /// remove it through the same handle. Shares everything, like
-/// [`open_to_delete`].
+/// [`open_to_delete`], and like it only for `core::quarantine`.
 #[cfg(windows)]
-pub(crate) fn open_dir_to_delete(path: &Path) -> io::Result<File> {
+pub(in crate::core) fn open_dir_to_delete(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows::Win32::Storage::FileSystem::{
         DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,

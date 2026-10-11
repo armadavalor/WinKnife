@@ -1095,6 +1095,17 @@ fn injected_delete_failure(_index: usize) -> Option<std::io::Error> {
     None
 }
 
+/// Whether a test asked for taking back a delete to be silently ignored.
+#[cfg(all(windows, test))]
+fn revoke_skipped() -> bool {
+    seams::revoke_skipped()
+}
+
+#[cfg(all(windows, not(test)))]
+fn revoke_skipped() -> bool {
+    false
+}
+
 /// Test-only hooks into the cross-volume move, at the moments a race would
 /// strike: right after verification, right after a destination directory
 /// appears, and while source files are deleted.
@@ -1115,6 +1126,7 @@ mod seams {
         static BEFORE_WALK: RefCell<Option<Hook>> = const { RefCell::new(None) };
         static FAIL_DELETE_AT: Cell<Option<usize>> = const { Cell::new(None) };
         static FORCE_CROSS_VOLUME: Cell<bool> = const { Cell::new(false) };
+        static SKIP_REVOKE: Cell<bool> = const { Cell::new(false) };
     }
 
     /// Clears every seam on this thread when dropped.
@@ -1128,6 +1140,7 @@ mod seams {
             BEFORE_WALK.set(None);
             FAIL_DELETE_AT.set(None);
             FORCE_CROSS_VOLUME.set(false);
+            SKIP_REVOKE.set(false);
         }
     }
 
@@ -1161,6 +1174,18 @@ mod seams {
     pub(super) fn force_cross_volume() -> Reset {
         FORCE_CROSS_VOLUME.set(true);
         Reset
+    }
+
+    /// Make taking back a marked delete do nothing while reporting success,
+    /// as a filesystem that ignores the request would: the delete stays
+    /// pending and takes effect when the pin closes.
+    pub(super) fn skip_revoke() -> Reset {
+        SKIP_REVOKE.set(true);
+        Reset
+    }
+
+    pub(super) fn revoke_skipped() -> bool {
+        SKIP_REVOKE.get()
     }
 
     pub(super) fn run_after_verify(path: &Path) {
@@ -1597,6 +1622,9 @@ fn pin_dir(
             dir.display()
         )));
     }
+    if pinned::is_encrypted(&metadata) {
+        return Err(encrypted(dir));
+    }
     if !pinned::named_streams(&handle).map_err(cannot)?.is_empty() {
         return Err(failed(format!(
             "`{}` carries an alternate data stream, which cannot be copied to another \
@@ -1660,9 +1688,22 @@ fn pin_file(
             path.display()
         )));
     }
+    let metadata = handle.metadata().map_err(cannot)?;
+    if pinned::is_encrypted(&metadata) {
+        return Err(encrypted(path));
+    }
+    if pinned::standard_info(&handle).map_err(cannot)?.links > 1 {
+        // Its other name would keep the data in place while this one moved,
+        // and the copy would be a second, separate file (adversarial review,
+        // LOW 3). Refused for what it is rather than as a sharing failure.
+        return Err(failed(format!(
+            "`{}` has more than one name (hard link); WinKnife does not move \
+             hard-linked files across drives; it was left where it is",
+            path.display()
+        )));
+    }
     check_contained(path, &handle, root)?;
     let id = pinned::handle_identity(&handle).map_err(cannot)?;
-    let metadata = handle.metadata().map_err(cannot)?;
     let streams = pinned::named_streams(&handle).map_err(cannot)?;
     let mut zone = None;
     for stream in &streams {
@@ -1693,6 +1734,17 @@ fn pin_file(
         streams,
         zone,
     })
+}
+
+/// The refusal for an EFS-encrypted file or directory: a copy on another
+/// drive is written in the clear (adversarial review, LOW 2). A rename on one
+/// volume never gets here and keeps the encryption.
+fn encrypted(path: &Path) -> MoveFailure {
+    failed(format!(
+        "`{}` is encrypted with Windows EFS; moving it across drives would store \
+         it unencrypted; it was left where it is",
+        path.display()
+    ))
 }
 
 /// `path` with `suffix` added to its last component: `a.txt:Zone.Identifier`.
@@ -1961,6 +2013,20 @@ fn delete_source(
         match outcome {
             Ok(()) => report.deleted_files += 1,
             Err(err) if report.deleted_files == 0 => {
+                // Close the pin before touching the copy, then look: if the
+                // source went when it closed, the copy is all that is left and
+                // must stay (adversarial review, LOW 1).
+                let (path, id) = (file.path.clone(), file.id);
+                drop(file);
+                if platform::file_identity(&path) != Some(id) {
+                    tracing::error!(
+                        path = %path.display(),
+                        error = %err,
+                        "the source went although its delete was refused; keeping the copy"
+                    );
+                    report.deleted_files += 1;
+                    continue;
+                }
                 // Nothing has left the source, so nothing has moved: undo the
                 // copy and keep the original whole.
                 cleanup_created(created);
@@ -2016,7 +2082,7 @@ fn remove_pinned_dirs(dirs: Vec<PinnedDir>) -> Vec<PathBuf> {
 #[cfg(windows)]
 fn delete_pinned_dir(dir: &PinnedDir) -> std::io::Result<()> {
     delete_by_handle(&dir.handle)?;
-    keep_if_streams_changed(&dir.handle, &[])
+    keep_if_streams_changed(&dir.handle, &dir.path, &[])
 }
 
 /// Elsewhere there is no delete through a handle.
@@ -2109,7 +2175,13 @@ fn delete_by_handle(file: &fs::File) -> std::io::Result<()> {
     .map_err(|_| std::io::Error::last_os_error())
 }
 
-/// Take back a delete marked through `file`, before its handle closes.
+/// Take back a delete marked through `file`, before its handle closes, and
+/// confirm through the same handle that it is no longer pending.
+///
+/// Why (adversarial review, LOW 1): the call can report success and leave the
+/// delete in place. Believed, that made the move undo its copy as if the
+/// source were whole, and the source then went when its pin closed. An error
+/// here means the file goes, so the caller keeps the copy.
 #[cfg(windows)]
 fn undelete_by_handle(file: &fs::File) -> std::io::Result<()> {
     use std::os::windows::io::AsRawHandle;
@@ -2118,18 +2190,26 @@ fn undelete_by_handle(file: &fs::File) -> std::io::Result<()> {
         FileDispositionInfo, SetFileInformationByHandle, FILE_DISPOSITION_INFO,
     };
 
-    let keep = FILE_DISPOSITION_INFO { DeleteFile: false };
-    // SAFETY: the handle is owned by `file` and outlives the call, and the
-    // buffer is a live FILE_DISPOSITION_INFO whose exact size is passed.
-    unsafe {
-        SetFileInformationByHandle(
-            HANDLE(file.as_raw_handle()),
-            FileDispositionInfo,
-            std::ptr::from_ref(&keep).cast(),
-            std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
-        )
+    if !revoke_skipped() {
+        let keep = FILE_DISPOSITION_INFO { DeleteFile: false };
+        // SAFETY: the handle is owned by `file` and outlives the call, and the
+        // buffer is a live FILE_DISPOSITION_INFO whose exact size is passed.
+        unsafe {
+            SetFileInformationByHandle(
+                HANDLE(file.as_raw_handle()),
+                FileDispositionInfo,
+                std::ptr::from_ref(&keep).cast(),
+                std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+            )
+        }
+        .map_err(|_| std::io::Error::last_os_error())?;
     }
-    .map_err(|_| std::io::Error::last_os_error())
+    if pinned::standard_info(file)?.delete_pending {
+        return Err(std::io::Error::other(
+            "the delete was still pending after it was taken back",
+        ));
+    }
+    Ok(())
 }
 
 /// Once a delete is marked, check that the named streams are still exactly
@@ -2142,16 +2222,19 @@ fn undelete_by_handle(file: &fs::File) -> std::io::Result<()> {
 #[cfg(windows)]
 fn keep_if_streams_changed(
     handle: &fs::File,
+    path: &Path,
     copied: &[pinned::DataStream],
 ) -> std::io::Result<()> {
     if pinned::named_streams(handle).is_ok_and(|now| now == copied) {
         return Ok(());
     }
     if let Err(err) = undelete_by_handle(handle) {
-        // The source goes when its pin closes whatever is said here, so it
-        // counts as deleted: the verified copy must stay rather than be undone
-        // as if the original were still whole.
+        // The take-back failed or could not be confirmed, so the source goes
+        // when its pin closes whatever is said here: it counts as deleted, and
+        // the verified copy must stay rather than be undone as if the original
+        // were still whole.
         tracing::error!(
+            path = %path.display(),
             error = %err,
             "a source whose streams changed after it was copied could not be kept; \
              only the copy remains"
@@ -2166,7 +2249,7 @@ fn keep_if_streams_changed(
 #[cfg(windows)]
 fn delete_pinned(file: &PinnedFile) -> std::io::Result<()> {
     delete_by_handle(&file.handle)?;
-    keep_if_streams_changed(&file.handle, &file.streams)
+    keep_if_streams_changed(&file.handle, &file.path, &file.streams)
 }
 
 /// Elsewhere there is no delete through a handle: re-check the identity
@@ -3940,34 +4023,55 @@ mod tests {
             // removes a source file it has pinned.
             "FileDispositionInfo",
             "SetFileInformationByHandle",
+            "NtSetInformationFile",
+            // Delete when the last handle closes, by name and by value
+            // (adversarial review, LOW 4).
+            "FILE_FLAG_DELETE_ON_CLOSE",
+            "0x04000000",
+            "0x0400_0000",
+            // The ANSI spellings and the shell's own removal.
+            "DeleteFileA",
+            "RemoveDirectoryA",
+            "SHFileOperation",
+            "IFileOperation",
+            // A move that replaces whatever is at the destination destroys it.
+            "MOVEFILE_REPLACE_EXISTING",
         ];
+        /// The handle openers made for removing: only this module may call
+        /// them, and `core/platform/pinned.rs` defines them.
+        const DELETE_OPENERS: &[&str] = &["open_to_delete", "open_dir_to_delete"];
 
-        fn visit(path: &Path, offenders: &mut Vec<String>) {
+        fn visit(path: &Path, sanctioned: &[PathBuf], openers: &Path, offenders: &mut Vec<String>) {
             if path.is_dir() {
                 let Ok(entries) = fs::read_dir(path) else {
                     return;
                 };
                 for entry in entries.flatten() {
-                    visit(&entry.path(), offenders);
+                    visit(&entry.path(), sanctioned, openers, offenders);
                 }
                 return;
             }
             if path.extension().and_then(|e| e.to_str()) != Some("rs") {
                 return;
             }
-            // This file is the sanctioned exception.
-            if path.file_name().and_then(|n| n.to_str()) == Some("quarantine.rs") {
+            // This very file is the sanctioned exception, by its full path:
+            // any other file that happens to be called `quarantine.rs` is not.
+            if sanctioned.iter().any(|exempt| exempt == path) {
                 return;
             }
             let Ok(source) = fs::read_to_string(path) else {
                 return;
             };
+            let defines_openers = path == openers;
             for (number, line) in source.lines().enumerate() {
                 let trimmed = line.trim_start();
                 if trimmed.starts_with("//") {
                     continue;
                 }
-                if FORBIDDEN.iter().any(|needle| line.contains(needle)) {
+                let removes = FORBIDDEN.iter().any(|needle| line.contains(needle));
+                let opens_to_remove =
+                    !defines_openers && DELETE_OPENERS.iter().any(|needle| line.contains(needle));
+                if removes || opens_to_remove {
                     offenders.push(format!("{}:{}", path.display(), number + 1));
                 }
             }
@@ -3975,9 +4079,20 @@ mod tests {
 
         // Read-only, and bounded to this crate's own sources.
         let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let sanctioned = [crate_root.join("src").join("core").join("quarantine.rs")];
+        let openers = crate_root
+            .join("src")
+            .join("core")
+            .join("platform")
+            .join("pinned.rs");
         let mut offenders = Vec::new();
         for target in ["src", "tests", "build.rs"] {
-            visit(&crate_root.join(target), &mut offenders);
+            visit(
+                &crate_root.join(target),
+                &sanctioned,
+                &openers,
+                &mut offenders,
+            );
         }
 
         assert!(
@@ -4640,5 +4755,224 @@ mod tests {
             "the copy, read-only directory included, is cleaned up"
         );
         assert_eq!(fs::read(tree.join("sub/b.txt")).expect("source"), b"b");
+    }
+
+    /// Every file under `root`, at any depth.
+    fn files_under(root: &Path) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        let Ok(entries) = fs::read_dir(root) else {
+            return found;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                found.extend(files_under(&path));
+            } else {
+                found.push(path);
+            }
+        }
+        found
+    }
+
+    /// Adversarial review, LOW 1: a take-back that reports success while the
+    /// delete stays pending used to be believed. The copy was then cleaned up
+    /// as if the source were whole, and the source went when its pin closed:
+    /// both gone. An unconfirmed take-back must count as a delete, so the
+    /// verified copy stays.
+    #[cfg(windows)]
+    #[test]
+    fn a_take_back_that_does_not_hold_keeps_the_verified_copy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let single = write(dir.path(), "single.txt", b"on its own");
+        let target = dir.path().join("moved.txt");
+
+        let _hook = seams::on_after_verify({
+            let late = stream_of(&single, "late");
+            move |_| fs::write(&late, b"arrived after verification").expect("late stream")
+        });
+        let _skip = seams::skip_revoke();
+        let outcome = move_path_with(&single, &target, seams::forced_cross_volume);
+
+        assert_eq!(
+            fs::read(&target).expect("the verified copy must survive"),
+            b"on its own"
+        );
+        assert!(!single.exists(), "the delete could not be taken back");
+        assert!(
+            outcome.is_ok(),
+            "the source is gone and the copy is whole, so the move happened"
+        );
+    }
+
+    /// The same race through the real take-back and the ledger: the stream
+    /// recheck marks the delete, takes it back for real, and the take fails
+    /// cleanly: source and its late stream whole, no copy in the quarantine,
+    /// no ledger row.
+    #[cfg(windows)]
+    #[test]
+    fn a_late_stream_during_take_is_taken_back_for_real() {
+        let h = harness(RetentionPolicy::default());
+        let single = write(&h.work, "single.txt", b"on its own");
+
+        let _cross = seams::force_cross_volume();
+        let _hook = seams::on_after_verify({
+            let late = stream_of(&single, "late");
+            move |_| fs::write(&late, b"arrived after verification").expect("late stream")
+        });
+        let refused = h
+            .quarantine
+            .take(&h.conn, h.quarantine.start_batch(), &single);
+
+        assert!(refused.is_err(), "a file that changed must not be taken");
+        assert_eq!(fs::read(&single).expect("source"), b"on its own");
+        assert_eq!(
+            fs::read(stream_of(&single, "late")).expect("the late stream survives"),
+            b"arrived after verification"
+        );
+        let held = files_under(&h._dir.path().join("quarantine"));
+        assert!(held.is_empty(), "no copy may stay behind: {held:?}");
+        assert!(
+            h.quarantine.list_items(&h.conn).expect("list").is_empty(),
+            "no ledger row for a take that did not happen"
+        );
+    }
+
+    /// The primitive the take-back check rests on: a marked delete reads as
+    /// pending through the same handle, and a real take-back clears it.
+    #[cfg(windows)]
+    #[test]
+    fn a_marked_delete_reads_as_pending_until_taken_back() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write(dir.path(), "a.txt", b"payload");
+        let handle = pinned::open_pinned(&path).expect("pin");
+
+        assert!(!pinned::standard_info(&handle).expect("info").delete_pending);
+        delete_by_handle(&handle).expect("mark");
+        assert!(pinned::standard_info(&handle).expect("info").delete_pending);
+        undelete_by_handle(&handle).expect("take back");
+        assert!(!pinned::standard_info(&handle).expect("info").delete_pending);
+        drop(handle);
+        assert_eq!(fs::read(&path).expect("still there"), b"payload");
+    }
+
+    /// Encrypt `path` with Windows EFS, or say why this machine cannot.
+    #[cfg(windows)]
+    fn encrypt(path: &Path) -> std::result::Result<(), String> {
+        use std::os::windows::fs::MetadataExt;
+        use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_ENCRYPTED;
+
+        let output = std::process::Command::new("cipher")
+            .arg("/e")
+            .arg("/a")
+            .arg(path)
+            .output()
+            .map_err(|err| format!("cannot run cipher: {err}"))?;
+        let attributes = fs::metadata(path)
+            .map_err(|err| format!("cannot inspect {}: {err}", path.display()))?
+            .file_attributes();
+        if attributes & FILE_ATTRIBUTE_ENCRYPTED.0 == 0 {
+            return Err(format!(
+                "cipher /e did not encrypt {} ({}): {}",
+                path.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stdout).trim()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Adversarial review, LOW 2: a copy to another drive is written in the
+    /// clear, so an EFS-encrypted file or directory must not cross. A rename
+    /// on one volume keeps the encryption and still works.
+    ///
+    /// Needs a volume with EFS (NTFS on Windows Pro or above). The first run
+    /// on a machine makes Windows create the user's own EFS certificate.
+    /// `cipher` is only ever run on paths inside this test's temporary
+    /// directory.
+    #[cfg(windows)]
+    #[test]
+    fn encrypted_files_are_refused_across_volumes_but_renamed_on_one() {
+        const TEST: &str = "encrypted_files_are_refused_across_volumes_but_renamed_on_one";
+        let dir = tempfile::tempdir().expect("tempdir");
+        let single = write(dir.path(), "single.txt", b"secret");
+        let tree = dir.path().join("tree");
+        fs::create_dir_all(&tree).expect("tree");
+        if let Err(detail) = encrypt(&single).and_then(|()| encrypt(&tree)) {
+            crate::core::test_support::privileged_operation_unavailable(TEST, &detail);
+            return;
+        }
+        // Created inside an encrypted directory, so encrypted too.
+        write(&tree, "inner.txt", b"also secret");
+
+        for (source, target) in [
+            (&single, dir.path().join("moved.txt")),
+            (&tree, dir.path().join("moved")),
+        ] {
+            match move_path_with(source, &target, seams::forced_cross_volume) {
+                Err(MoveFailure::Failed(err)) => assert!(
+                    err.to_string().contains("encrypted with Windows EFS"),
+                    "the message must say why: {err}"
+                ),
+                Ok(()) => panic!("{} crossed volumes in the clear", source.display()),
+                Err(MoveFailure::Occupied) => panic!("nothing was in the way"),
+            }
+            assert!(
+                !target.exists(),
+                "nothing is created for {}",
+                target.display()
+            );
+        }
+        assert_eq!(fs::read(&single).expect("source"), b"secret");
+        assert_eq!(
+            fs::read(tree.join("inner.txt")).expect("source"),
+            b"also secret"
+        );
+
+        let renamed = dir.path().join("renamed.txt");
+        if let Err(failure) = move_path_with(&single, &renamed, rename_no_replace) {
+            panic!(
+                "a rename on one volume must still work: {}",
+                failure.into_error(&single, &renamed)
+            );
+        }
+        assert_eq!(fs::read(&renamed).expect("renamed"), b"secret");
+        // Everything `cipher` touched is inside this temporary directory;
+        // removing it is checked rather than left to a silent drop.
+        dir.close().expect("the encrypted test files are removed");
+    }
+
+    /// Adversarial review, LOW 3: a file with two names used to fail at its
+    /// second pin with a misleading "open in another program". It is refused
+    /// for what it is, before anything is created, inside a tree or alone.
+    #[test]
+    fn hard_linked_files_are_refused_across_volumes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tree = dir.path().join("tree");
+        let first = write(&tree, "a.txt", b"one file");
+        fs::hard_link(&first, tree.join("b.txt")).expect("hard link inside the tree");
+        let single = write(dir.path(), "single.txt", b"two names");
+        fs::hard_link(&single, dir.path().join("elsewhere.txt")).expect("hard link");
+
+        for (source, target) in [
+            (&tree, dir.path().join("moved")),
+            (&single, dir.path().join("moved.txt")),
+        ] {
+            match move_path_with(source, &target, seams::forced_cross_volume) {
+                Err(MoveFailure::Failed(err)) => assert!(
+                    err.to_string().contains("more than one name (hard link)"),
+                    "the message must say why: {err}"
+                ),
+                Ok(()) => panic!("{} was moved", source.display()),
+                Err(MoveFailure::Occupied) => panic!("nothing was in the way"),
+            }
+            assert!(
+                !target.exists(),
+                "nothing is created for {}",
+                target.display()
+            );
+        }
+        assert_eq!(fs::read(tree.join("a.txt")).expect("source"), b"one file");
+        assert_eq!(fs::read(tree.join("b.txt")).expect("source"), b"one file");
+        assert_eq!(fs::read(&single).expect("source"), b"two names");
     }
 }

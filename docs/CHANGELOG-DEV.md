@@ -1261,13 +1261,38 @@ remove the source by path after verification** (security review C, C2, D).
 (stale probe tests, named streams lost, junction swap of the top folder,
 attributes, long paths). All fixed. Second Opus review: SHIP. An NTFS probe
 confirmed the delete take-back and that a marked file cannot be reopened.
-Open LOW items: confirm DeletePending after a take-back, refuse EFS files
-(encryption is dropped across volumes, pre-existing), tighten the
-`no_other_module_removes_user_data` guard, and give hard links inside a
-tree a clearer error.
+The four LOW items it left are now closed:
+- A take-back is confirmed through the same handle (`DeletePending`). An
+  unconfirmed one counts as a delete, so the verified copy stays and the
+  path is logged. Before the copy is undone, the source pin is closed and the
+  source is checked to still be there. A test where the take-back is skipped
+  used to lose both the source and the copy.
+- EFS-encrypted files and folders are refused across drives: the copy would
+  be written in the clear. The encryption loss itself predates this work. A
+  same-volume rename still works.
+- Files with more than one name (hard links) are refused with that reason.
+  Before, a tree holding two names of one file was moved as two separate
+  copies.
+- The guard test also rejects delete-on-close (by name and by value),
+  `NtSetInformationFile`, `DeleteFileA`, `RemoveDirectoryA`,
+  `SHFileOperation`, `IFileOperation` and `MOVEFILE_REPLACE_EXISTING`. Its
+  exemption is now the exact path `src/core/quarantine.rs`, and
+  `open_to_delete` and `open_dir_to_delete` are `pub(in crate::core)` and
+  usable only from quarantine.
+- 5 new tests:
+  - an unconfirmed take-back keeps the copy;
+  - a real take-back during `take` leaves the source, quarantine and ledger
+    clean;
+  - the pending flag primitive;
+  - EFS refused but renamed;
+  - hard links refused.
+
+  The EFS test needs an EFS-capable volume. On first run it creates the
+  user's EFS certificate, and it runs `cipher` only inside its own temp
+  directory.
 
 **Verified (Rust 1.99, 2026-10-11).** `cargo fmt --check` clean; `cargo
-clippy --all-targets -- -D warnings` clean; `cargo test`: `512 passed; 5
+clippy --all-targets -- -D warnings` clean; `cargo test`: `517 passed; 5
 failed` in the library, and the 5 are the symlink tests that need Developer
 Mode or elevation (they run on CI); integration suites 8 + 3 + 3 + 1 passed,
 3 ignored.

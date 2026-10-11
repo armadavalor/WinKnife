@@ -601,14 +601,34 @@ not ours to take.
       the delete is taken back and the file stays at the source (if it is
       the first file, the whole move is undone). A probe on NTFS confirmed
       the take-back clears the pending delete and that a marked file cannot
-      be reopened or gain a stream. Once any source file is gone the move
-      counts as done and keeps its ledger row; leftovers are logged. Paths
-      over MAX_PATH work. Before this patch the copy already lost alternate
-      streams and hidden/system attributes; that loss was not introduced
-      here. Known limits: streams other than Zone.Identifier are refused,
-      not carried. Creation time, folder times and ACLs are not kept. Two
-      hard links to one file inside the tree refuse the move with a
-      sharing error. For a lone file, an ancestor junction retargeted
-      between pin and move is not detected (the moved file is still copied
-      and verified). Read-only files on FAT stay behind. The destination is
-      not pinned between verification and the source delete.
+      be reopened or gain a stream. The take-back is verified: the same
+      handle is asked whether the delete is still pending. If the take-back
+      fails or cannot be confirmed, the source is treated as gone: the
+      verified copy stays, the move counts as done, and the path is logged.
+      Before the copy is undone, the source's pin is closed and the source
+      is checked to still be there; if it went, the copy stays. Refused
+      before anything is created, with a reason: a file or folder encrypted
+      with Windows EFS ("moving it across drives would store it
+      unencrypted"; a rename on one volume still works and keeps the
+      encryption), and a file with more than one name ("hard link"; before
+      this, a tree holding two names of one file was moved as two separate
+      copies). `open_to_delete` and `open_dir_to_delete` are visible to
+      `core` only, and the guard test rejects them, delete-on-close,
+      `NtSetInformationFile`, the ANSI deletes, the shell's removal and
+      `MOVEFILE_REPLACE_EXISTING` outside `src/core/quarantine.rs` (by exact
+      path). Once any source file is gone the move counts as done and
+      keeps its ledger row; leftovers are logged. Paths over MAX_PATH work.
+      Before this patch the copy already lost alternate streams and
+      hidden/system attributes; that loss was not introduced here. Known
+      limits: streams other than Zone.Identifier are refused, not carried.
+      EFS-encrypted and hard-linked files are refused, not moved, across
+      drives. Creation time, folder times and ACLs are not kept. For a lone
+      file, an ancestor junction retargeted between pin and move is not
+      detected (the moved file is still copied and verified). Read-only
+      files on FAT stay behind. The destination is not pinned between
+      verification and the source delete. Test note: the EFS test needs an
+      EFS-capable volume (NTFS, Windows Pro or above; it reports itself
+      skipped otherwise). On first run it makes Windows create the user's
+      own EFS certificate, and Windows may offer to back up the key.
+      `cipher` only runs on paths inside the test's own temporary
+      directory, which the test removes.
