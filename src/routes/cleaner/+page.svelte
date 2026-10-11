@@ -14,8 +14,9 @@
   import FindingList from "$lib/components/FindingList.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import RiskBadge from "$lib/components/RiskBadge.svelte";
-  import { formatBytes, truncatePath } from "$lib/format";
+  import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { dashboardStore } from "$lib/stores/dashboard.svelte";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
@@ -25,6 +26,7 @@
 
   const manifest = $derived(moduleStore.find(MODULE_ID));
   const store = scanStore;
+  const lastScan = $derived(dashboardStore.lastScan(MODULE_ID));
 
   let confirming = $state(false);
 
@@ -39,6 +41,7 @@
   // to the settings store's `status` and reloaded on every transition.
   onMount(() => {
     void settingsStore.load();
+    void dashboardStore.load();
   });
 
   // The treemap's "Scan with Cleaner" cross-link arrives with `?from=`. The
@@ -56,6 +59,11 @@
   // flag Rust receives is that warning being on screen when the user confirmed
   // — not merely a recycle-bin row being ticked (spec 02, security review H6).
   const emptiesRecycleBin = $derived(store.selectionEmptiesRecycleBin);
+
+  function resetScan(): void {
+    store.reset();
+    void dashboardStore.load();
+  }
 
   async function confirmExecute(): Promise<void> {
     const confirmedRecycleBin = emptiesRecycleBin;
@@ -92,6 +100,17 @@
   {/if}
 
   {#if store.step === "idle"}
+    {#if lastScan}
+      <section class="rounded-xl border border-surface-2 bg-surface-1 p-6" aria-label={t("cleaner.previousScan")}>
+        <h2 class="text-sm font-medium">{t("cleaner.previousScan")}</h2>
+        <p class="mt-2 text-sm text-ink-muted">
+          {t("dashboard.lastScan", { when: formatDateTime(lastScan.startedAt), count: lastScan.findingCount })}
+          · {t("dashboard.couldFree", { size: formatBytes(lastScan.reclaimableBytes) })}
+          {#if lastScan.status === "cancelled"} · {t("dashboard.wasCancelled")}{/if}
+        </p>
+        <p class="mt-2 text-xs leading-relaxed text-ink-faint">{t("cleaner.historyNotice")}</p>
+      </section>
+    {/if}
     <section class="flex flex-col items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-6">
       <p class="max-w-xl text-sm leading-relaxed text-ink-muted">
         {t("cleaner.intro")}
@@ -153,7 +172,7 @@
         <button
           type="button"
           class="rounded-lg px-4 py-2 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-          onclick={() => store.reset()}
+          onclick={resetScan}
         >
           {t("cleaner.scanAgain")}
         </button>
@@ -170,7 +189,7 @@
       <button
         type="button"
         class="rounded-lg px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-        onclick={() => store.reset()}
+        onclick={resetScan}
       >
         {t("cleaner.scanAgain")}
       </button>

@@ -60,6 +60,8 @@ const en = {
   "cleaner.intro":
     "The scan is read-only: it looks at temporary files, Explorer's caches and your recycle bin, then shows you what it found before anything moves.",
   "cleaner.scan": "Scan for junk",
+  "cleaner.previousScan": "Previous scan",
+  "cleaner.historyNotice": "This is a past estimate. Scan again to review current files before making changes.",
   "cleaner.cameFrom":
     "You came here from {path} on the disk map. The cleaner does not scan a folder you pick — it looks at the known junk locations its rule packs describe. If that folder is one of them it will show up below; if it is not, nothing here will touch it.",
   "cleaner.scanAgain": "Scan again",
