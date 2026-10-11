@@ -1,0 +1,71 @@
+name: Release candidate
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Verify version and safety-test settings
+        shell: pwsh
+        run: |
+          if ($env:WINKNIFE_ALLOW_SKIP_LINK_TESTS) { throw 'Safety-test opt-outs are forbidden in releases.' }
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoVersion = (cargo metadata --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq winknife | Select-Object -ExpandProperty version
+          if ($version -ne $tauriVersion -or $version -ne $cargoVersion) { throw 'Package versions disagree.' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag and package versions disagree.' }
+          "WINKNIFE_VERSION=$version" >> $env:GITHUB_ENV
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: npm run check
+      - run: npm run test:ui
+      - run: npm run tauri build -- --bundles nsis
+      - name: Package portable app, installer and checksums
+        shell: pwsh
+        run: ./scripts/package-release.ps1 -Version $env:WINKNIFE_VERSION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winknife-release-candidate
+          path: release-artifacts/*
+          if-no-files-found: error
+      - name: Create draft release for tag
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          Release candidate. Read docs/RELEASING.md before publishing.
+
+          The portable ZIP includes the required rules directory. Windows WebView2 is required.
+          SHA-256 checksums are attached in SHA256SUMS.txt.
+          Fresh-VM acceptance and VirusTotal result links must be recorded before publication.
+          "@
+          $notes | Set-Content release-notes.md -Encoding utf8
+          $assets = Get-ChildItem release-artifacts -File | Select-Object -ExpandProperty FullName
+          gh release create $env:GITHUB_REF_NAME @assets --draft --verify-tag --title "WinKnife $env:GITHUB_REF_NAME" --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed; inspect the existing release before retrying.' }
