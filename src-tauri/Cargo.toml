@@ -84,5 +84,8 @@ windows = { version = "0.61", features = [
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Power",
     "Win32_UI_Shell",
+    # A native error box when the app cannot start, e.g. a database written by
+    # a newer build (core/platform/message.rs).
+    "Win32_UI_WindowsAndMessaging",
 ] }
 

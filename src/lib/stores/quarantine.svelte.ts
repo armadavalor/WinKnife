@@ -10,9 +10,11 @@ import {
   quarantineBatchItems,
   quarantineList,
   quarantinePurge,
+  quarantinePurgeItem,
   quarantineRestore,
   quarantineStats,
 } from "$lib/api";
+import { removalFailure, type RemovalFailure } from "$lib/stores/execNotes";
 import {
   isApiError,
   type QuarantineBatch,
@@ -33,7 +35,14 @@ class QuarantineStore {
   /** Batches still holding something, newest first. */
   batches = $state<QuarantineBatch[]>([]);
   /** Totals, used for the sidebar badge. */
-  stats = $state<QuarantineStats>({ itemCount: 0, totalBytes: 0, unreadableRows: 0 });
+  stats = $state<QuarantineStats>({
+    itemCount: 0,
+    totalBytes: 0,
+    unreadableRows: 0,
+    refusedItems: 0,
+    refusedBytes: 0,
+    capBytes: 0,
+  });
   /** Where the fetch is. */
   status = $state<LoadStatus>("idle");
   /** Message of the last failure. */
@@ -53,6 +62,12 @@ class QuarantineStore {
    * exactly the thing an honest tool admits to rather than quietly rounding off.
    */
   lastPurge = $state<PurgeReport | null>(null);
+  /**
+   * A refused item the user tried to remove by hand and could not. It has its
+   * own note: the purge's "retried on the next purge" is false for an item
+   * the automatic purge never touches (round 3).
+   */
+  removeFailed = $state<{ path: string; failure: RemovalFailure } | null>(null);
 
   /** Fetch batches and totals. */
   async reload(): Promise<void> {
@@ -84,6 +99,7 @@ class QuarantineStore {
     this.open = false;
     this.lastRestore = null;
     this.lastPurge = null;
+    this.removeFailed = null;
   }
 
   /** Load (or drop) the item list of one batch. */
@@ -123,6 +139,33 @@ class QuarantineStore {
   }
 
   /**
+   * Permanently remove one item whose encrypted restore was refused, after the
+   * user confirmed it. The automatic purge never removes such an item
+   * (decision b, 2026-10-12).
+   */
+  async purgeItem(item: QuarantineItem): Promise<void> {
+    this.error = null;
+    this.removeFailed = null;
+    let failure: RemovalFailure | null;
+    try {
+      const report = await quarantinePurgeItem(item.id);
+      failure = removalFailure(item.id, report);
+    } catch (error: unknown) {
+      failure = removalFailure(item.id, { error });
+    }
+    if (failure) {
+      this.removeFailed = { path: item.quarantinePath, failure };
+    }
+    try {
+      const remaining = await quarantineBatchItems(item.batchId);
+      this.items = { ...this.items, [item.batchId]: remaining };
+      await this.reload();
+    } catch (error: unknown) {
+      this.error = message(error);
+    }
+  }
+
+  /**
    * Keep the badge live. The backend emits `quarantine:changed` after every
    * clean, restore and purge, so the drawer never shows a stale total.
    */
@@ -130,10 +173,11 @@ class QuarantineStore {
     const unlisten = await onQuarantineChanged((payload) => {
       // The event carries the badge numbers only; the corrupt-row count comes
       // from `reload`, which asks the ledger directly.
+      // The refused bytes and the cap also come from `reload`.
       this.stats = {
+        ...this.stats,
         itemCount: payload.itemCount,
         totalBytes: payload.totalBytes,
-        unreadableRows: this.stats.unreadableRows,
       };
       if (this.open) {
         void this.reload();

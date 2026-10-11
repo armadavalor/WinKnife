@@ -908,6 +908,9 @@ fn startup_recommendation(
 /// found it, exactly as restoring from quarantine is not an executor action
 /// either. Turning something **off** goes through `execute`.
 ///
+/// Returns what the user should know about a shortcut that came back only in
+/// part (round-2 review); empty otherwise.
+///
 /// # Errors
 /// Returns an error when the entry is unknown, when Windows owns it, or when
 /// the change was refused (an `HKLM` entry needs elevation).
@@ -917,7 +920,7 @@ pub fn startup_enable(
     key: String,
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
-) -> Result<(), ApiError> {
+) -> Result<Vec<crate::core::types::MoveWarning>, ApiError> {
     Ok(db.with(|conn| {
         services
             .startup_service
@@ -1240,6 +1243,25 @@ pub fn quarantine_purge<R: Runtime>(
     db: State<'_, Arc<Database>>,
 ) -> Result<PurgeReport, ApiError> {
     let report = db.with(|conn| services.quarantine.purge(conn, Utc::now()))?;
+    notify_quarantine_changed(&app, &services, &db, None);
+    Ok(report)
+}
+
+/// Remove one item whose encrypted restore was refused, at the user's
+/// explicit request from the drawer. The automatic purge never removes such
+/// an item (decision b, 2026-10-12).
+///
+/// # Errors
+/// Returns [`CoreError::UnknownQuarantineItem`] for an id that is not held,
+/// and [`CoreError::Quarantine`] for an item whose restore was never refused.
+#[tauri::command]
+pub fn quarantine_purge_item<R: Runtime>(
+    app: AppHandle<R>,
+    item_id: Uuid,
+    services: State<'_, Services>,
+    db: State<'_, Arc<Database>>,
+) -> Result<PurgeReport, ApiError> {
+    let report = db.with(|conn| services.quarantine.purge_item(conn, item_id))?;
     notify_quarantine_changed(&app, &services, &db, None);
     Ok(report)
 }

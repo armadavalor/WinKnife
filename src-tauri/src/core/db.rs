@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
-use crate::core::error::Result;
+use crate::core::error::{CoreError, Result};
 
 /// Database file name inside the application data directory.
 pub const DB_FILE_NAME: &str = "winknife.sqlite3";
@@ -42,6 +42,11 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "scan_history",
         sql: include_str!("../../migrations/003_scan_history.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "quarantine_restore_refused",
+        sql: include_str!("../../migrations/004_quarantine_restore_refused.sql"),
     },
 ];
 
@@ -109,9 +114,19 @@ pub fn schema_version(conn: &Connection) -> Result<u32> {
 /// version the database is at afterwards.
 ///
 /// # Errors
-/// Returns an error if a migration's SQL fails.
+/// Returns [`CoreError::SchemaTooNew`] without touching the database if it
+/// was written by a newer build (round 3: an older build does not know the
+/// restore-refused marker and would purge what the newer one keeps), or an
+/// error if a migration's SQL fails.
 pub fn run_migrations(conn: &mut Connection) -> Result<u32> {
     let mut current = schema_version(conn)?;
+    let known = MIGRATIONS.last().map_or(0, |m| m.version);
+    if current > known {
+        return Err(CoreError::SchemaTooNew {
+            found: current,
+            known,
+        });
+    }
 
     for migration in MIGRATIONS {
         debug_assert_eq!(
@@ -288,6 +303,71 @@ mod tests {
         assert_eq!(original, "C:\\Temp\\a.log");
         assert_eq!(size, 42);
         assert_eq!(restored, None);
+    }
+
+    /// Decision b (2026-10-12): migration 4 adds a nullable column, so a
+    /// database written by an earlier build upgrades in place and its held
+    /// items load unmarked.
+    #[test]
+    fn a_version_3_database_gains_the_restore_refused_marker() {
+        let mut conn = Connection::open_in_memory().expect("open");
+        for migration in MIGRATIONS.iter().take_while(|m| m.version <= 3) {
+            conn.execute_batch(migration.sql).expect("old schema");
+        }
+        conn.pragma_update(None, "user_version", 3)
+            .expect("old version");
+        let id = uuid::Uuid::new_v4().to_string();
+        let batch = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO quarantine
+                (id, batch_id, original_path, quarantine_path, size_bytes,
+                 quarantined_at, purge_after)
+             VALUES (?1, ?2, 'a.log', 'q', 42,
+                     '2026-08-06T00:00:00.000Z', '2026-08-13T00:00:00.000Z')",
+            rusqlite::params![id, batch],
+        )
+        .expect("old row");
+
+        assert_eq!(run_migrations(&mut conn).expect("upgrade"), 4);
+
+        let quarantine = crate::core::quarantine::Quarantine::with_root(
+            std::env::temp_dir().join("winknife-unused"),
+            crate::core::quarantine::RetentionPolicy::default(),
+        );
+        let item = quarantine
+            .find_item(&conn, uuid::Uuid::parse_str(&id).expect("uuid"))
+            .expect("read")
+            .expect("the old row still loads");
+        assert_eq!(item.size_bytes, 42);
+        assert!(item.is_held());
+        assert_eq!(item.restore_refused_at, None);
+    }
+
+    /// Round 3: a database written by a newer build is refused, not opened.
+    /// An older build does not know the restore-refused marker, so it would
+    /// let the automatic purge remove items the newer one promised to keep.
+    #[test]
+    fn a_database_from_a_newer_build_is_refused() {
+        let mut conn = Connection::open_in_memory().expect("open");
+        let known = run_migrations(&mut conn).expect("current schema");
+        let newer = known + 1;
+        conn.pragma_update(None, "user_version", newer)
+            .expect("newer version");
+
+        let err = run_migrations(&mut conn).expect_err("a newer schema is refused");
+
+        assert!(
+            matches!(err, CoreError::SchemaTooNew { found, known: k } if found == newer && k == known),
+            "got {err}"
+        );
+        let text = err.to_string();
+        assert!(text.contains(&newer.to_string()), "{text}");
+        assert!(text.contains(&known.to_string()), "{text}");
+        assert_eq!(
+            schema_version(&conn).expect("version"),
+            newer,
+            "left untouched"
+        );
     }
 
     #[test]

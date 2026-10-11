@@ -239,6 +239,8 @@ const en = {
   "settings.retentionHint":
     "Between {min} and {max} days. A retention of zero would make everything purgeable on the next start, so it is not allowed.",
   "settings.maxBytes": "Stop the quarantine growing past",
+  "settings.maxBytesHint":
+    "Encrypted items kept after a refused restore are not counted against this limit; only you can remove them.",
   "settings.days": "days",
 
   "quarantine.title": "Quarantine",
@@ -262,6 +264,23 @@ const en = {
   "quarantine.purgeFailed":
     "{count} items could not be removed and will be retried on the next purge.",
   "quarantine.restored": "Restored {count} items.",
+  "quarantine.restoreRefused": "restore refused: encrypted; kept until you remove it",
+  "quarantine.removeItem": "Remove",
+  "quarantine.removeTitle": "Remove this item for good?",
+  "quarantine.removeBody":
+    "{path} could not be restored because it is encrypted, so the automatic purge keeps it.",
+  "quarantine.removeWarning": "Removing it deletes it permanently. This cannot be undone.",
+  "quarantine.removeNote":
+    "To keep it instead, decrypt it where it is held (the path below: Properties, Advanced, clear “Encrypt contents”) and restore it again.",
+  "quarantine.heldAt": "Held at",
+  "quarantine.removeFailed":
+    "{path} could not be removed: its file could not be deleted. It is still held, and the automatic purge never removes it; try again, or decrypt it there and restore it.",
+  "quarantine.removeRefused":
+    "{path} was not removed: it is no longer held here, or it is not an item you remove by hand. Refresh the list to see where it stands.",
+  "quarantine.removeError": "{path} could not be removed: {error}.",
+  "quarantine.refusedHeld":
+    "Encrypted items kept after a refused restore: {count}, using {used}. They are not counted against the {cap} size limit, and nothing removes them but you: remove them here, or decrypt them and restore them.",
+  "quarantine.removeAction": "Remove permanently",
   "quarantine.restoredAlongside":
     "Something already occupied the original path, so this was restored as {path}.",
 

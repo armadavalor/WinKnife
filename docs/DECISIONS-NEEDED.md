@@ -604,7 +604,8 @@ not ours to take.
       be reopened or gain a stream. The take-back is verified: the same
       handle is asked whether the delete is still pending. If the take-back
       fails or cannot be confirmed, the source is treated as gone: the
-      verified copy stays, the move counts as done, and the path is logged.
+      verified copy stays, the move goes ahead, and the user is told that
+      the stream which arrived could not be kept.
       Before the copy is undone, the source's pin is closed and the source
       is checked to still be there; if it went, the copy stays. Refused
       before anything is created, with a reason: a file or folder encrypted
@@ -617,7 +618,7 @@ not ours to take.
       `NtSetInformationFile`, the ANSI deletes, the shell's removal and
       `MOVEFILE_REPLACE_EXISTING` outside `src/core/quarantine.rs` (by exact
       path). Once any source file is gone the move counts as done and
-      keeps its ledger row; leftovers are logged. Paths over MAX_PATH work.
+      keeps its ledger row; leftovers are reported to the user. Paths over MAX_PATH work.
       Before this patch the copy already lost alternate streams and
       hidden/system attributes; that loss was not introduced here. Known
       limits: streams other than Zone.Identifier are refused, not carried.
@@ -632,3 +633,125 @@ not ours to take.
       own EFS certificate, and Windows may offer to back up the key.
       `cipher` only runs on paths inside the test's own temporary
       directory, which the test removes.
+
+      Follow-up review (2026-10-12). What a move that did happen left
+      undone now reaches the user: the take and restore results carry
+      warnings (path and plain-English reason) shown under the cleaner,
+      duplicates, startup and quarantine-drawer results. Covered: part of
+      a folder left at its old place, a source gone although its delete
+      was refused (only the moved copy remains), and a stream that arrived
+      during the move and could not be kept. The ledger schema is
+      unchanged; the warnings are optional fields on the result types. A
+      late stream whose take-back fails is no longer counted as moved. The
+      move still reports success with a warning, because the source is
+      already gone and an error would drop the ledger row of the only copy
+      (security review C2). After a refused delete, the source counts as
+      gone only when its name is not found or holds another file. When its
+      identity cannot be read, both are kept and the move succeeds with a
+      "both kept" warning naming the old place, so the ledger row of the
+      moved copy survives (round 2, 2026-10-12; it first failed, which
+      left a quarantined copy with no ledger row). That was chosen over
+      guessing.
+
+      Decided 2026-10-12 (user decision, option b): an EFS-encrypted item
+      whose restore is refused across drives stays held and is never
+      removed by the automatic purge. Implementation:
+      - Migration 004 adds a nullable `restore_refused_at` column to
+        `quarantine`. It is additive, so a version-3 database loads and its
+        rows read as unmarked.
+      - `restore_item` sets the marker when `move_out` fails with the
+        typed encrypted refusal, after the ledger has put the row back to
+        held. A failure to set it is logged, not returned.
+      - `purge_expired` skips marked items. `enforce_size_cap` never evicts
+        them. *(Superseded in round 4, below: it no longer counts them
+        towards the total either.)*
+      - The only removal path is the user's: `Quarantine::purge_item`,
+        exposed as the `quarantine_purge_item` command and the drawer's
+        Remove button behind a confirmation that says it is permanent.
+        The drawer labels such an item "restore refused: encrypted; kept
+        until you remove it".
+      Scope choice, open for review: `purge_item` refuses an item without
+      the marker, so it does not become a second delete button for
+      ordinary held items (those stay with their retention window). The
+      marker is not cleared by a later successful restore; once restored,
+      the row is no longer held and the marker has no effect.
+
+      Follow-up review, round 3 (2026-10-12):
+      - *(Superseded by round 4, below.)* Size cap. When the marked items
+        alone are at or over the cap,
+        `enforce_size_cap` removes nothing for size. Before this, it evicted
+        every unmarked item and still ended up over the cap, so each later
+        clean was made irreversible at the next start. The retention window
+        still applies to unmarked items. `QuarantineStats` now carries
+        `refused_bytes` and `cap_bytes`, and the drawer explains in plain
+        English why nothing is being removed for size. When the marked
+        items are under the cap, eviction works as before.
+      - When the marker cannot be written (a database error, or no held row
+        matched), the refusal message no longer promises to keep the item.
+        It says the automatic purge may still remove the item when its
+        retention ends (with the date) or when the quarantine is over its
+        size limit, and tells the user to decrypt and restore before then.
+        This option was chosen over returning a different error because
+        the restore is refused either way. The user needs to see the
+        refusal and how to act on it, not an internal database failure.
+      - Remove in the drawer shows the item's quarantine path, and the
+        confirmation does too. A Remove that fails has its own message.
+        The purge's "retried on the next purge" would be wrong here,
+        because the automatic purge never touches a marked item.
+
+      Follow-up review, round 4 (2026-10-12). **Needs architect review:
+      this narrows decision b as written ("counts toward the cap").**
+      - Marked items are now outside the size cap. `enforce_size_cap`
+        measures unmarked bytes only (`over_by = unmarked - cap`) and still
+        never evicts a marked item. Round 3's rule (remove nothing for size
+        once the marked items fill the cap) left a cliff just below it: with
+        marked items at 3.99 GiB of a 4 GiB cap, any clean bigger than the
+        last 10 MB evicted older unmarked items at the next start, and one
+        byte more stopped the cap altogether. Consequence to review: the
+        quarantine folder can now hold the cap plus whatever the marked
+        items hold, without limit, until the user removes them. The
+        retention window still applies to unmarked items.
+      - `QuarantineStats` also carries `refused_items`. The drawer explains
+        whenever any marked items are held, not only once they fill the
+        cap: how many, how much they use, that they are not counted against
+        the size limit, and that only the user removes them.
+      - The drawer's Remove failure message now says "still held, never
+        auto-purged" only when the file could not be deleted. When the
+        backend refuses (the item is no longer held, or it is not marked,
+        from a stale list), it says so and asks the user to refresh. Any
+        other error is shown as it came.
+
+## Open items raised in the follow-up review, round 3 (2026-10-12)
+
+- **Startup stash: the "both kept" (Unknown) arm leaves the original
+  shortcut in the Startup folder.** This happens on a cross-volume stash
+  whose source delete was refused and whose identity then cannot be read.
+  The move succeeds with a "both kept" warning, so the ledger row of the
+  stored copy survives. The original `.lnk` also stays in the Startup
+  folder, though, so it still runs at logon. Meanwhile the page shows the
+  entry as disabled, with the warning. Re-enable then tries to move the
+  stored copy back onto a name the original still occupies, and that fails
+  as Occupied: the move primitive never overwrites. Nothing is lost, and
+  the warning names the old place, so the user can delete the original by
+  hand. Still, "disabled" is not true until they do. Options:
+  (a) leave as is; the warning is the signal.
+  (b) show such an entry as "disabled, but its shortcut is still in the
+      Startup folder", and make re-enable drop the stored copy when the
+      original at that name has the same contents.
+  (c) refuse the stash in this arm instead. That was rejected in round 2
+      because it dropped the ledger row of a copy that may be the only one.
+  Not changed in round 3. Option (b) touches re-enable's delete rules, so
+  it needs an architect decision.
+- **A database from a newer build.** `run_migrations` now refuses a
+  database whose `user_version` is newer than the newest migration this
+  build knows (`CoreError::SchemaTooNew`, code `schema_too_new`). An older
+  build would otherwise run with a schema it does not understand and could,
+  for example, purge items that a newer build promised to keep. Startup
+  fails in setup, and a native error box (`MessageBoxW`, only in a build
+  armed for real OS effects) tells the user to install the newer version
+  again. Round 4: `manage_state` now logs the `db::open` error itself,
+  while the log file's appender guard is still alive, so the refusal
+  reaches the log file. The setup's own log line afterwards can still miss
+  it, because the guard is dropped when `manage_state` returns; it only
+  repeats what is already recorded. Downgrading a database is not
+  supported.

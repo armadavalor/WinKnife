@@ -54,7 +54,7 @@ use crate::core::platform::{
     EnvResolver, Hive, RegValue, Registry, Signature, SignatureProbe, TaskScheduler,
     REG_TYPE_BINARY,
 };
-use crate::core::types::StartupSource;
+use crate::core::types::{MoveWarning, StartupSource};
 
 /// `Run` keys, relative to a hive.
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -1124,6 +1124,9 @@ impl StartupService {
 
     /// Turn an entry on or off. Never deletes anything.
     ///
+    /// Returns what the user should know about a Startup-folder shortcut move
+    /// that happened only in part; empty for every other change.
+    ///
     /// # Errors
     /// Returns an error when the entry is unknown, when Windows owns it, or when
     /// the change was refused.
@@ -1134,7 +1137,7 @@ impl StartupService {
         key: &str,
         enabled: bool,
         now: DateTime<Utc>,
-    ) -> Result<()> {
+    ) -> Result<Vec<MoveWarning>> {
         let Some(live) = self.read_entry(conn, source, key)? else {
             return Err(CoreError::UnknownStartupEntry(key.to_owned()));
         };
@@ -1146,10 +1149,10 @@ impl StartupService {
             )));
         }
         if live.enabled == enabled {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
-        match source {
+        let warnings = match source {
             StartupSource::CurrentUserRun
             | StartupSource::LocalMachineRun
             | StartupSource::LocalMachineRun32 => {
@@ -1166,16 +1169,20 @@ impl StartupService {
                         bytes: payload,
                     },
                 )?;
+                Vec::new()
             }
             StartupSource::UserStartupFolder | StartupSource::CommonStartupFolder => {
                 if enabled {
-                    self.restore_link(conn, source, key)?;
+                    self.restore_link(conn, source, key)?
                 } else {
-                    self.stash_link(conn, source, key, now)?;
+                    self.stash_link(conn, source, key, now)?
                 }
             }
-            StartupSource::ScheduledTask => self.tasks.set_enabled(key, enabled)?,
-        }
+            StartupSource::ScheduledTask => {
+                self.tasks.set_enabled(key, enabled)?;
+                Vec::new()
+            }
+        };
 
         tracing::info!(
             source = source_slug(source),
@@ -1183,7 +1190,7 @@ impl StartupService {
             enabled,
             "autostart entry toggled"
         );
-        Ok(())
+        Ok(warnings)
     }
 
     /// Record where a shortcut came from, then move it into the module-managed
@@ -1205,7 +1212,7 @@ impl StartupService {
         source: StartupSource,
         file_name: &str,
         now: DateTime<Utc>,
-    ) -> Result<()> {
+    ) -> Result<Vec<MoveWarning>> {
         let folder = self
             .paths
             .folder(source)
@@ -1256,7 +1263,7 @@ impl StartupService {
         conn: &Connection,
         source: StartupSource,
         file_name: &str,
-    ) -> Result<()> {
+    ) -> Result<Vec<MoveWarning>> {
         let link = find_disabled_link(conn, source, file_name)?
             .ok_or_else(|| CoreError::UnknownStartupEntry(file_name.to_owned()))?;
 
@@ -1327,7 +1334,7 @@ impl StartupControl for StartupControlAdapter {
             .with(|conn| self.service.read_entry(conn, source, key))
     }
 
-    fn disable(&self, source: StartupSource, key: &str) -> Result<()> {
+    fn disable(&self, source: StartupSource, key: &str) -> Result<Vec<MoveWarning>> {
         self.db.with(|conn| {
             self.service
                 .set_enabled(conn, source, key, false, Utc::now())
@@ -1836,6 +1843,122 @@ mod tests {
             DisabledLinks::default(),
             "the row is gone and nothing was left unreadable behind it"
         );
+    }
+
+    /// Round-2 review, HIGH and MEDIUM: a stash whose source cannot be told
+    /// after its refused delete keeps the ledger row (the moved copy may be
+    /// the only one) and hands the warning back instead of dropping it.
+    #[test]
+    fn a_stash_whose_source_cannot_be_told_keeps_the_row_and_says_so() {
+        use crate::core::quarantine::seams;
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        let shortcut = world.user_startup.join("Vendor.lnk");
+        std::fs::write(&shortcut, b"link").expect("write");
+
+        let warnings = {
+            let _cross = seams::force_cross_volume();
+            let _fail = seams::fail_delete_at(0);
+            let _unreadable = seams::fail_identity_read();
+            world
+                .service
+                .set_enabled(
+                    &world.conn,
+                    StartupSource::UserStartupFolder,
+                    "Vendor.lnk",
+                    false,
+                    Utc::now(),
+                )
+                .expect("the copy exists and may be the only one, so the stash stands")
+        };
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].path, shortcut.display().to_string());
+        assert!(warnings[0].reason.contains("both kept"), "{warnings:?}");
+        assert!(shortcut.is_file(), "the original stays");
+        let stashed = disabled_links(&world.conn, StartupSource::UserStartupFolder)
+            .expect("ledger")
+            .links
+            .pop()
+            .expect("the ledger row survives");
+        assert!(Path::new(&stashed.stored_path).is_file(), "the copy stays");
+    }
+
+    /// Round-2 review, MEDIUM: a restore's warnings reach the caller too.
+    #[test]
+    fn a_restore_that_left_its_source_says_so() {
+        use crate::core::quarantine::seams;
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        let shortcut = world.user_startup.join("Vendor.lnk");
+        std::fs::write(&shortcut, b"link").expect("write");
+        let stash = world
+            .service
+            .set_enabled(
+                &world.conn,
+                StartupSource::UserStartupFolder,
+                "Vendor.lnk",
+                false,
+                Utc::now(),
+            )
+            .expect("disable");
+        assert!(stash.is_empty(), "{stash:?}");
+        let stored = disabled_links(&world.conn, StartupSource::UserStartupFolder)
+            .expect("ledger")
+            .links
+            .pop()
+            .expect("a recorded row")
+            .stored_path;
+
+        let warnings = {
+            let _cross = seams::force_cross_volume();
+            let _fail = seams::fail_delete_at(0);
+            let _unreadable = seams::fail_identity_read();
+            world
+                .service
+                .set_enabled(
+                    &world.conn,
+                    StartupSource::UserStartupFolder,
+                    "Vendor.lnk",
+                    true,
+                    Utc::now(),
+                )
+                .expect("re-enable")
+        };
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].path, Path::new(&stored).display().to_string());
+        assert!(shortcut.is_file(), "back where it was");
+    }
+
+    /// Round-2 review, MEDIUM: the executor's door hands the warnings on.
+    #[test]
+    fn the_executor_adapter_hands_back_a_stash_warning() {
+        use crate::core::quarantine::seams;
+        let World {
+            _dir: dir,
+            conn,
+            service,
+            user_startup,
+            ..
+        } = world(MapRegistry::new(), MapTaskScheduler::new());
+        let shortcut = user_startup.join("Vendor.lnk");
+        std::fs::write(&shortcut, b"link").expect("write");
+        let adapter = StartupControlAdapter::new(
+            Arc::new(service),
+            Arc::new(crate::core::db::Database::new(conn)),
+        );
+
+        let warnings = {
+            let _cross = seams::force_cross_volume();
+            let _fail = seams::fail_delete_at(0);
+            let _unreadable = seams::fail_identity_read();
+            adapter
+                .disable(StartupSource::UserStartupFolder, "Vendor.lnk")
+                .expect("disable")
+        };
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].path, shortcut.display().to_string());
+        drop(dir);
     }
 
     /// `read_entry` used to hardcode `os_owned: false` for Startup-folder

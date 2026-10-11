@@ -5,11 +5,25 @@
   is global — whatever removed something, this is where it comes back from.
 -->
 <script lang="ts">
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { formatBytes, formatDateTime, formatRelativeDays, truncatePath } from "$lib/format";
   import { t } from "$lib/i18n";
+  import { isRestoreRefused, refusedHeld, warningsOf } from "$lib/stores/execNotes";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
+  import type { QuarantineItem } from "$lib/types";
 
   const store = quarantineStore;
+
+  /** The item the user asked to remove, waiting for confirmation. */
+  let pendingRemoval = $state<QuarantineItem | null>(null);
+
+  async function confirmRemoval(): Promise<void> {
+    const item = pendingRemoval;
+    pendingRemoval = null;
+    if (item) {
+      await store.purgeItem(item);
+    }
+  }
 </script>
 
 {#if store.open}
@@ -63,6 +77,35 @@
         class="border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-ink-muted"
       >
         {t("quarantine.unreadableRows", { count: store.stats.unreadableRows })}
+      </p>
+    {/if}
+
+    {#if refusedHeld(store.stats)}
+      <p
+        class="border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-ink-muted"
+      >
+        {t("quarantine.refusedHeld", {
+          count: store.stats.refusedItems ?? 0,
+          used: formatBytes(store.stats.refusedBytes ?? 0),
+          cap: formatBytes(store.stats.capBytes ?? 0),
+        })}
+      </p>
+    {/if}
+
+    {#if store.removeFailed}
+      <p
+        class="select-text break-words border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-risk-danger"
+      >
+        {#if store.removeFailed.failure.kind === "stuck"}
+          {t("quarantine.removeFailed", { path: store.removeFailed.path })}
+        {:else if store.removeFailed.failure.kind === "notEligible"}
+          {t("quarantine.removeRefused", { path: store.removeFailed.path })}
+        {:else}
+          {t("quarantine.removeError", {
+            path: store.removeFailed.path,
+            error: store.removeFailed.failure.error,
+          })}
+        {/if}
       </p>
     {/if}
 
@@ -148,6 +191,25 @@
                       <p class="text-[0.7rem] text-ink-faint">
                         {formatBytes(item.sizeBytes)}
                       </p>
+                      {#if isRestoreRefused(item)}
+                        <div class="mt-1 flex items-center gap-2">
+                          <p class="flex-1 text-[0.7rem] text-risk-review">
+                            {t("quarantine.restoreRefused")}
+                          </p>
+                          <button
+                            type="button"
+                            class="rounded-lg px-2 py-0.5 text-[0.7rem] text-risk-danger transition-colors hover:bg-surface-2"
+                            onclick={() => (pendingRemoval = item)}
+                          >
+                            {t("quarantine.removeItem")}
+                          </button>
+                        </div>
+                        <p
+                          class="mt-0.5 select-text break-all font-mono text-[0.7rem] text-ink-faint"
+                        >
+                          {t("quarantine.heldAt")}: {item.quarantinePath}
+                        </p>
+                      {/if}
                     </li>
                   {/each}
                 </ul>
@@ -171,6 +233,14 @@
               })}
             </p>
           {/each}
+          {#each store.lastRestore.restored as outcome (outcome.itemId)}
+            {#each warningsOf(outcome) as warning, index (index)}
+              <p class="mt-1 text-xs text-risk-review">
+                <span class="font-mono">{truncatePath(warning.path, 48)}</span> —
+                {warning.reason}
+              </p>
+            {/each}
+          {/each}
           {#each store.lastRestore.failed as failure (failure.itemId)}
             <p class="mt-1 text-xs text-risk-danger">{failure.error}</p>
           {/each}
@@ -179,3 +249,17 @@
     </div>
   </aside>
 {/if}
+
+<ConfirmDialog
+  open={pendingRemoval !== null}
+  title={t("quarantine.removeTitle")}
+  message={t("quarantine.removeBody", {
+    path: truncatePath(pendingRemoval?.originalPath ?? "", 48),
+  })}
+  note={t("quarantine.removeNote")}
+  detail={pendingRemoval?.quarantinePath}
+  warning={t("quarantine.removeWarning")}
+  confirmLabel={t("quarantine.removeAction")}
+  onconfirm={confirmRemoval}
+  oncancel={() => (pendingRemoval = null)}
+/>

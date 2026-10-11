@@ -15,6 +15,8 @@ import {
   type StartupScanResult,
 } from "$lib/types";
 
+import { itemNote, warningsNote } from "./execNotes";
+
 /** Lifecycle of the enumeration. */
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -124,16 +126,10 @@ class StartupStore {
     try {
       const report = await execute(this.scanId, [recommendation.id], false);
       const item = report.items[0];
-      if (item && item.outcome.status !== "succeeded") {
-        // A skip carries the reason Rust refused; showing it beats a silent
-        // toggle that springs back.
-        this.lastReport =
-          item.outcome.status === "skipped"
-            ? item.outcome.reason
-            : item.outcome.error;
-      } else {
-        this.lastReport = null;
-      }
+      // A skip carries the reason Rust refused; showing it beats a silent
+      // toggle that springs back. A move that happened but left something
+      // undone says so too (adversarial review follow-up A).
+      this.lastReport = item ? itemNote(item) : null;
       await this.#doReload();
     } catch (error: unknown) {
       this.error = message(error);
@@ -148,8 +144,8 @@ class StartupStore {
     this.busy = entry.id;
     this.error = null;
     try {
-      await startupEnable(entry.source, entry.key);
-      this.lastReport = null;
+      // A shortcut that came back only in part says so (round-2 review).
+      this.lastReport = warningsNote(await startupEnable(entry.source, entry.key));
       await this.#doReload();
     } catch (error: unknown) {
       this.error = message(error);

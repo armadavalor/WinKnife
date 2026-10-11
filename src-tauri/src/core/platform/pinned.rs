@@ -26,6 +26,9 @@ use super::FileId;
 /// already has the file open for writing or deleting. A link is opened as
 /// itself rather than followed; the caller checks [`is_reparse_point`].
 #[cfg(windows)]
+// Flags are disallowed crate-wide (clippy.toml): this one only opens a link
+// as itself, never FILE_FLAG_DELETE_ON_CLOSE.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn open_pinned(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows::Win32::Foundation::GENERIC_READ;
@@ -55,8 +58,14 @@ pub(crate) fn open_pinned(path: &Path) -> io::Result<File> {
 /// must not fail just because something else is reading it.
 ///
 /// Only `core::quarantine`, the one module allowed to remove user data, may
-/// call it (adversarial review, LOW 4).
+/// call it (adversarial review, LOW 4). Two things hold it there: the
+/// compiler limits callers to `crate::core` (`pub(in crate::core)`), and the
+/// guard test `quarantine::tests::no_other_module_removes_user_data` limits
+/// them to `core/quarantine.rs`.
 #[cfg(windows)]
+// Flags are disallowed crate-wide (clippy.toml): this one only opens a link
+// as itself, never FILE_FLAG_DELETE_ON_CLOSE.
+#[allow(clippy::disallowed_methods)]
 pub(in crate::core) fn open_to_delete(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows::Win32::Storage::FileSystem::{
@@ -204,6 +213,9 @@ pub(crate) fn is_encrypted(_metadata: &std::fs::Metadata) -> bool {
 /// lives. Files inside can still be created and changed; each of those is
 /// pinned on its own.
 #[cfg(windows)]
+// Flags are disallowed crate-wide (clippy.toml): these only open a directory,
+// and a link as itself, never FILE_FLAG_DELETE_ON_CLOSE.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn open_pinned_dir(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows::Win32::Foundation::GENERIC_READ;
@@ -228,8 +240,14 @@ pub(crate) fn open_pinned_dir(path: &Path) -> io::Result<File> {
 
 /// Open a directory, never what a link there points to, only to check it and
 /// remove it through the same handle. Shares everything, like
-/// [`open_to_delete`], and like it only for `core::quarantine`.
+/// [`open_to_delete`], and like it only for `core::quarantine`: the compiler
+/// limits callers to `crate::core` (`pub(in crate::core)`), and the guard test
+/// `quarantine::tests::no_other_module_removes_user_data` limits them to
+/// `core/quarantine.rs`.
 #[cfg(windows)]
+// Flags are disallowed crate-wide (clippy.toml): these only open a directory,
+// and a link as itself, never FILE_FLAG_DELETE_ON_CLOSE.
+#[allow(clippy::disallowed_methods)]
 pub(in crate::core) fn open_dir_to_delete(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows::Win32::Storage::FileSystem::{
@@ -474,6 +492,9 @@ pub(crate) fn kept_attributes(metadata: &std::fs::Metadata) -> u32 {
 
 /// Open a directory as itself, to read and write its attributes.
 #[cfg(windows)]
+// Flags are disallowed crate-wide (clippy.toml): these only open a directory,
+// and a link as itself, never FILE_FLAG_DELETE_ON_CLOSE.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn open_dir_attributes(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows::Win32::Storage::FileSystem::{

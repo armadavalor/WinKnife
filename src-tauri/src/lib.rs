@@ -136,7 +136,12 @@ pub fn manage_state<R: tauri::Runtime>(
 
     // Logging first, so everything after it is on the record.
     let log_guard = core::logging::init(app_data_dir);
-    let connection = db::open(app_data_dir)?;
+    // Logged here, while `log_guard` is alive: the caller's own log of a
+    // setup error runs after this function returned and dropped the guard,
+    // so it can miss the file (round 4).
+    let connection = db::open(app_data_dir).inspect_err(|err| {
+        tracing::error!(error = %err, code = err.code(), "the database could not be opened");
+    })?;
 
     // Validated, not trusted: the settings table is a key/value store of
     // strings, and a stored `0` used to mean "purge everything on the next
@@ -248,6 +253,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::quarantine_restore,
         commands::quarantine_restore_item,
         commands::quarantine_purge,
+        commands::quarantine_purge_item,
         commands::shutdown_schedule,
         commands::shutdown_cancel,
         commands::shutdown_status,
@@ -305,12 +311,19 @@ pub fn run() {
                 .map_err(|err| CoreError::AppDataDir(format!("{err}")))?;
             let resource_dir = app.path().resource_dir().ok();
 
+            // Without a console a setup error used to end the process with
+            // nothing on screen; say why first (round 3: a database from a
+            // newer build is refused rather than opened).
             let timer = manage_state(
                 app.handle(),
                 &app_data_dir,
                 resource_dir.as_deref(),
                 dry_run,
-            )?;
+            )
+            .inspect_err(|err| {
+                tracing::error!(error = %err, code = err.code(), "WinKnife cannot start");
+                core::platform::show_fatal_error("WinKnife cannot start", &err.to_string());
+            })?;
 
             tray::install(app.handle())?;
             spawn_ticker(app.handle().clone(), timer);

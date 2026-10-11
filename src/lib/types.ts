@@ -139,6 +139,18 @@ export interface ExecItemResult {
   path: string;
   outcome: ExecOutcome;
   reclaimedBytes: number;
+  /** What a move that did happen left undone; absent when nothing was. */
+  warnings?: MoveWarning[];
+}
+
+/**
+ * Something a move that did happen could not do as planned, such as part of a
+ * folder staying where it was moved from. Shown under the result.
+ */
+export interface MoveWarning {
+  path: string;
+  /** Plain-English reason, written by Rust. */
+  reason: string;
 }
 
 /** What an execute run actually did. */
@@ -613,6 +625,12 @@ export interface QuarantineItem {
   quarantinedAt: string;
   purgeAfter: string;
   restoredAt: string | null;
+  /**
+   * When a restore was refused because the item is encrypted. Such an item
+   * is kept until the user removes it (decision b, 2026-10-12). Absent from
+   * older backends.
+   */
+  restoreRefusedAt?: string | null;
 }
 
 /** A batch as the drawer shows it. */
@@ -630,6 +648,18 @@ export interface QuarantineStats {
   totalBytes: number;
   /** Ledger rows that no longer parse and are therefore not counted above. */
   unreadableRows: number;
+  /**
+   * Items whose encrypted restore was refused, which only the user removes
+   * (round 4).
+   */
+  refusedItems?: number;
+  /**
+   * Bytes held by those items. They are not counted against the size cap and
+   * are never evicted for it (round 4).
+   */
+  refusedBytes?: number;
+  /** The size cap in force, on the other items' bytes only (round 3). */
+  capBytes?: number;
 }
 
 /** What restoring one item did. */
@@ -638,6 +668,8 @@ export interface RestoreOutcome {
   restoredTo: string;
   /** True when the original path was occupied and a suffix was added. */
   renamed: boolean;
+  /** What the restore's move left undone; absent when nothing was. */
+  warnings?: MoveWarning[];
 }
 
 /** One item that could not be restored. */

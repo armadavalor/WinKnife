@@ -424,6 +424,25 @@ pub struct ExecItemResult {
     pub outcome: ExecOutcome,
     /// Bytes reclaimed by this item (`0` unless it succeeded).
     pub reclaimed_bytes: u64,
+    /// What the user should know about a move that otherwise succeeded: part
+    /// of a folder stayed behind, or only the moved copy remains. Empty, and
+    /// left out of the JSON, for every ordinary item.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<MoveWarning>,
+}
+
+/// One thing a move did that the user should hear about although the move
+/// itself succeeded (adversarial review, follow-up A). Before, these only
+/// reached the log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveWarning {
+    /// The file or folder concerned, as displayed: lossy for a name that is
+    /// not valid Unicode, which a `PathBuf` would refuse to serialize
+    /// (round-2 review).
+    pub path: String,
+    /// What happened to it, in plain English.
+    pub reason: String,
 }
 
 /// What an `execute` run actually did. Failures never abort the batch — every
@@ -706,6 +725,7 @@ mod tests {
             path: PathBuf::from("C:\\Temp\\a.log"),
             outcome,
             reclaimed_bytes: bytes,
+            warnings: Vec::new(),
         };
         let report = ExecReport::from_items(
             Some(Uuid::nil()),
@@ -738,6 +758,34 @@ mod tests {
         })
         .expect("serialize");
         assert_eq!(json, r#"{"status":"skipped","reason":"locked"}"#);
+    }
+
+    /// Follow-up A: move warnings reach the UI as `warnings: [{path, reason}]`,
+    /// and an item without any keeps the JSON it always had.
+    #[test]
+    fn exec_item_warnings_are_sent_only_when_there_are_some() {
+        let mut item = ExecItemResult {
+            recommendation_id: Uuid::nil(),
+            finding_id: Uuid::nil(),
+            path: PathBuf::from("C:\\Temp\\tree"),
+            outcome: ExecOutcome::Succeeded,
+            reclaimed_bytes: 1,
+            warnings: Vec::new(),
+        };
+        let json = serde_json::to_value(&item).expect("serialize");
+        assert!(json.get("warnings").is_none(), "got {json}");
+
+        item.warnings.push(MoveWarning {
+            path: "C:\\Temp\\tree\\b.txt".to_owned(),
+            reason: "stayed".to_owned(),
+        });
+        let json = serde_json::to_value(&item).expect("serialize");
+        assert_eq!(
+            json["warnings"],
+            serde_json::json!([{ "path": "C:\\Temp\\tree\\b.txt", "reason": "stayed" }])
+        );
+        let back: ExecItemResult = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back, item);
     }
 
     /* --- deserialisation validates too (security review L15) ------------ */

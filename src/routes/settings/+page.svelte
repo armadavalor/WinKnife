@@ -170,6 +170,9 @@
             </option>
           {/if}
         </select>
+        <span class="text-xs leading-relaxed text-ink-faint">
+          {t("settings.maxBytesHint")}
+        </span>
       </label>
     </section>
 

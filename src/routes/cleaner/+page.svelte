@@ -17,6 +17,7 @@
   import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { dashboardStore } from "$lib/stores/dashboard.svelte";
+  import { itemsToReport, warningsOf } from "$lib/stores/execNotes";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
@@ -150,15 +151,21 @@
         })}
       </p>
 
-      {#each store.report.items.filter((item) => item.outcome.status !== "succeeded") as item (item.findingId)}
-        <p class="text-xs text-ink-faint">
-          <span class="font-mono">{truncatePath(item.path, 48)}</span> —
-          {item.outcome.status === "skipped"
-            ? item.outcome.reason
-            : item.outcome.status === "failed"
-              ? item.outcome.error
-              : ""}
-        </p>
+      {#each itemsToReport(store.report.items) as item (item.findingId)}
+        {#if item.outcome.status !== "succeeded"}
+          <p class="text-xs text-ink-faint">
+            <span class="font-mono">{truncatePath(item.path, 48)}</span> —
+            {item.outcome.status === "skipped"
+              ? item.outcome.reason
+              : item.outcome.error}
+          </p>
+        {/if}
+        {#each warningsOf(item) as warning, index (index)}
+          <p class="text-xs text-risk-review">
+            <span class="font-mono">{truncatePath(warning.path, 48)}</span> —
+            {warning.reason}
+          </p>
+        {/each}
       {/each}
 
       <div class="flex gap-2">

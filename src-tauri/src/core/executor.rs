@@ -53,7 +53,7 @@ use crate::core::platform::RecycleBin;
 use crate::core::quarantine::Quarantine;
 use crate::core::types::{
     Action, ExecItemResult, ExecOutcome, ExecReport, Finding, FindingKind, Justification,
-    Recommendation, StartupSource,
+    MoveWarning, Recommendation, StartupSource,
 };
 
 /// One unit of work: a recommendation paired with the finding it acts on.
@@ -100,8 +100,9 @@ pub trait StartupControl: Send + Sync {
     ///
     /// # Errors
     /// Returns an error when the change was refused (an `HKLM` entry needs
-    /// elevation) or the entry is unknown.
-    fn disable(&self, source: StartupSource, key: &str) -> Result<()>;
+    /// elevation) or the entry is unknown. On success, what the user should
+    /// know about a shortcut move that happened only in part.
+    fn disable(&self, source: StartupSource, key: &str) -> Result<Vec<MoveWarning>>;
 }
 
 /// A control that refuses everything, for the batches that contain no autostart
@@ -118,7 +119,7 @@ impl StartupControl for NoStartupControl {
         Ok(None)
     }
 
-    fn disable(&self, _source: StartupSource, key: &str) -> Result<()> {
+    fn disable(&self, _source: StartupSource, key: &str) -> Result<Vec<MoveWarning>> {
         Err(crate::core::error::CoreError::UnknownStartupEntry(
             key.to_owned(),
         ))
@@ -163,6 +164,9 @@ struct BatchState {
     /// Whether the recycle bin has already been emptied. Two recycle-bin items
     /// in one batch used to empty it twice and count the bytes twice.
     emptied_bin: bool,
+    /// What the move of the item being applied wants the user to know,
+    /// handed to that item's result and then cleared (follow-up A).
+    warnings: Vec<MoveWarning>,
 }
 
 /// Progress callback so the UI can show which item is being handled.
@@ -228,6 +232,7 @@ pub fn execute(
             path: unit.finding.path.clone(),
             outcome,
             reclaimed_bytes: reclaimed,
+            warnings: std::mem::take(&mut state.warnings),
         });
     }
 
@@ -282,7 +287,7 @@ fn apply_one(
     // What protects an autostart entry is that Windows may own it, and gate 4
     // re-reads exactly that below.
     if unit.recommendation.action == Action::DisableStartupEntry {
-        return disable_startup_entry(unit, env);
+        return disable_startup_entry(unit, env, state);
     }
 
     if unit.recommendation.action != Action::Quarantine {
@@ -340,10 +345,20 @@ fn apply_one(
         return skipped(reason);
     }
 
-    match env.quarantine.take(env.conn, batch, &unit.finding.path) {
-        Ok(item) => {
+    match env
+        .quarantine
+        .take_reporting(env.conn, batch, &unit.finding.path)
+    {
+        Ok(taken) => {
             state.moved_anything = true;
-            (ExecOutcome::Succeeded, item.size_bytes)
+            state.warnings = taken.warnings;
+            // What may still be at the source was not reclaimed (round-2
+            // review).
+            let reclaimed = taken
+                .item
+                .size_bytes
+                .saturating_sub(taken.left_behind_bytes);
+            (ExecOutcome::Succeeded, reclaimed)
         }
         Err(err) => failed(err.to_string()),
     }
@@ -577,7 +592,11 @@ fn rule_refusal(pack_id: &str, rule_id: &str, finding: &Finding, brain: &Brain) 
 /// source and refuses when it has gone, when Windows owns it, or when it now
 /// runs a different program than the one the user was shown. Only then is the
 /// flag flipped.
-fn disable_startup_entry(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> (ExecOutcome, u64) {
+fn disable_startup_entry(
+    unit: &ExecUnit<'_>,
+    env: &ExecEnvironment<'_>,
+    state: &mut BatchState,
+) -> (ExecOutcome, u64) {
     if let Some(reason) = justification_refusal(unit, env) {
         tracing::warn!(
             entry = %unit.finding.path.display(),
@@ -601,7 +620,12 @@ fn disable_startup_entry(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> (Exe
     match env.startup.disable(*source, key) {
         // No bytes are reclaimed by turning something off, and saying otherwise
         // would put an invented figure in the report.
-        Ok(()) => (ExecOutcome::Succeeded, 0),
+        // A shortcut moved only in part says so in the item's result
+        // (round-2 review).
+        Ok(warnings) => {
+            state.warnings = warnings;
+            (ExecOutcome::Succeeded, 0)
+        }
         Err(err) => (
             ExecOutcome::Failed {
                 error: err.to_string(),
@@ -965,6 +989,108 @@ mod tests {
         assert_eq!(report.succeeded(), 1);
         assert_eq!(report.reclaimed_bytes, 7);
         assert!(!good.exists(), "the healthy item still moved");
+    }
+
+    /// Round-2 review: a take whose source may still be there succeeds (its
+    /// copy is held) but reclaims nothing, and says why.
+    #[test]
+    fn a_take_that_left_its_source_reclaims_nothing_and_says_so() {
+        use crate::core::quarantine::seams;
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+        let file = write(&h.work, "kept.tmp", b"payload");
+        let finding = finding_at(&file, 7);
+        let rec = quarantine_rec(&finding);
+        let units = vec![ExecUnit {
+            recommendation: &rec,
+            finding: &finding,
+        }];
+
+        let _cross = seams::force_cross_volume();
+        let _fail = seams::fail_delete_at(0);
+        let _unreadable = seams::fail_identity_read();
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        assert_eq!(report.succeeded(), 1, "the copy is held: {report:?}");
+        assert_eq!(report.reclaimed_bytes, 0, "the source may still be there");
+        assert_eq!(report.items[0].reclaimed_bytes, 0);
+        assert_eq!(report.items[0].warnings.len(), 1, "{report:?}");
+        assert_eq!(report.items[0].warnings[0].path, file.display().to_string());
+        assert!(file.exists());
+    }
+
+    /// A startup control whose disable succeeds with one warning.
+    struct WarningStartup;
+
+    impl StartupControl for WarningStartup {
+        fn read(&self, _source: StartupSource, _key: &str) -> Result<Option<LiveStartupEntry>> {
+            Ok(Some(LiveStartupEntry {
+                command: r"C:\Vendor\vendor.exe".to_owned(),
+                enabled: true,
+                os_owned: false,
+            }))
+        }
+
+        fn disable(&self, _source: StartupSource, _key: &str) -> Result<Vec<MoveWarning>> {
+            Ok(vec![MoveWarning {
+                path: r"C:\Startup\Vendor.lnk".to_owned(),
+                reason: "both kept".to_owned(),
+            }])
+        }
+    }
+
+    /// Round-2 review, MEDIUM: a startup disable's move warnings reach the
+    /// item's result instead of being dropped.
+    #[test]
+    fn a_startup_disable_hands_its_warnings_to_the_report() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+        let finding = Finding::new(
+            "startup",
+            PathBuf::from(r"C:\Vendor\vendor.exe"),
+            FindingKind::File,
+        );
+        let rec = Recommendation::new(
+            vec![finding.id],
+            RiskBucket::Safe,
+            80,
+            Action::DisableStartupEntry,
+            "a known updater that does not need to run at logon",
+            0,
+            Justification::StartupEntry {
+                source: StartupSource::UserStartupFolder,
+                key: "Vendor.lnk".to_owned(),
+                command: r"C:\Vendor\vendor.exe".to_owned(),
+            },
+        )
+        .expect("valid recommendation");
+        let units = vec![ExecUnit {
+            recommendation: &rec,
+            finding: &finding,
+        }];
+        let env = ExecEnvironment {
+            startup: &WarningStartup,
+            ..env(&h, &brain, &bin)
+        };
+
+        let report = execute(&units, &env, &ExecOptions::default(), None).expect("execute");
+
+        assert_eq!(report.succeeded(), 1, "{report:?}");
+        assert_eq!(
+            report.items[0].warnings,
+            vec![MoveWarning {
+                path: r"C:\Startup\Vendor.lnk".to_owned(),
+                reason: "both kept".to_owned(),
+            }]
+        );
     }
 
     /// The phase-brief acceptance item: a locked file is skipped with a
