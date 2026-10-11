@@ -2,6 +2,8 @@
 
 Rule for admission: solves a real, recurring Windows annoyance; fits scan→review→execute or a single obvious screen; no settings jungle. Each entry below is a seed spec — promote to a full `NN-name.md` before implementation.
 
+> Scheduling now lives in [docs/ROADMAP.md](../ROADMAP.md); this file keeps seed specs and non-goals.
+
 ## Tier A — natural next (V1.x)
 - **empty-folder-hunter** — trivial on top of shared scanner; quarantine-safe; good first issue material.
 - **file-unlocker** ("who is locking this file?") — Restart Manager API (`RmGetList`) to name the process; offer close-handle guidance (not force-kill by default). High daily-pain value.
@@ -28,7 +30,7 @@ Rule for admission: solves a real, recurring Windows annoyance; fits scan→revi
 Registry "optimizer"/defrag (snake oil — undermines trust positioning), driver updater (risk), RAM "booster" (placebo), antivirus features (out of depth). README should proudly list these as non-goals; it's part of the honesty brand.
 
 ## Reviewed and rejected (from the PocketKnife draft, 2026-08-06 — do not re-add without new argument)
-- **Sticky notes / desktop widgets / quick notes** — resident desktop surfaces violate the lightweight promise and the toolbox identity; Windows + dedicated apps already cover this.
+- ~~**Sticky notes / desktop widgets / quick notes**~~ — rejection lifted for sticky notes on 2026-10-03 (owner request, three-model brainstorm): scheduled for v0.2.0 in [ROADMAP](../ROADMAP.md) as an optional tool with its own trash. Desktop widgets stay rejected.
 - **Git helpers / localhost utilities** — vague scope, no single-screen fit; IDE and CLI territory.
 - **Standalone kill-process** — covered inside port-inspector and file-unlocker.
 - Already covered elsewhere, no new entries needed: power timers (module 01), startup apps (module 05), temp/cache cleaning (module 02), large-file/disk-usage views (module 04 treemap), clipboard history (Tier B), Ollama/local-LLM support (ARCHITECTURE §4), portable exe + dark-first UI (PLAN).
