@@ -1342,6 +1342,26 @@ pub fn shutdown_status(timer: State<'_, Arc<ShutdownTimer>>) -> Result<TimerStat
     Ok(timer.status(Utc::now()))
 }
 
+/* -------------------------------------------------------------------------
+ * Launch: `--module <id>` (phase 5, task 1)
+ * ---------------------------------------------------------------------- */
+
+/// The route a launch asked for, if the UI has not opened it yet.
+///
+/// Called by the shell once on mount (the first launch's `--module`) and again
+/// on every `launch:navigate` (a forwarded one). Taking it clears it, so a
+/// route is opened once. Already validated against the registry: an unknown id
+/// arrives here as the dashboard.
+///
+/// # Errors
+/// Infallible today; keeps the shared `Result` shape.
+#[tauri::command]
+pub fn take_launch_route(
+    pending: State<'_, crate::PendingLaunchRoute>,
+) -> Result<Option<String>, ApiError> {
+    Ok(pending.take())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

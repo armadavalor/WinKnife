@@ -221,6 +221,10 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "shutdown_cancel",
             args: json!({}),
         },
+        Probe {
+            command: "take_launch_route",
+            args: json!({}),
+        },
     ]
 }
 

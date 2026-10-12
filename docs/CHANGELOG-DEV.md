@@ -1480,3 +1480,25 @@ tag.
 mitigation closed as won't-fix. Recorded in `DECISIONS-NEEDED.md`, plus a
 pre-existing camelCase/snake_case mismatch in the `StartupEntry` TS mirror,
 found in passing and not fixed.
+
+## 2026-10-12 — Phase 5 task 1: single instance and `--module`
+
+**Built.**
+- **`tauri-plugin-single-instance`**, registered first. A second launch
+  forwards its argv to the running app and exits before any `setup`, so it never
+  opens the database or re-arms the persisted timer. The running app's
+  `handle_second_instance` shows, un-minimises and focuses `main` (also out of
+  the tray), then opens the requested module.
+- **`--module <id>` / `--module=<id>`.** `parse_launch_args` (pure, next to
+  `is_dry_run`) and `launch_route` (registry-validated; unknown or empty id ->
+  warn log + `/dashboard`, no dialog). The route is parked in
+  `PendingLaunchRoute` and pulled by the shell with `take_launch_route` on mount
+  and on each `launch:navigate`, so the first launch's route is not lost before
+  the WebView listens, and a route opens once.
+- **Issue #3 regression** (`tests/single_instance.rs`): a timer persisted
+  before start is re-armed once by `manage_state`; repeated forwarded launches
+  leave the armed timer and the stored row untouched.
+
+**Not verifiable here.** The plugin's cross-process forwarding (a real second
+`winknife.exe`) needs a manual run; the tests drive `handle_second_instance`
+directly on a mock app.

@@ -24,6 +24,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 # T-5 / T-1 minute warnings for the shutdown timer.
 tauri-plugin-notification = "2"
+# One running WinKnife: a second launch forwards its argv (`--module <id>`) to
+# the first and exits, so two copies never share the database or re-arm the
+# same persisted shutdown timer (phase 5 task 1, issue #3).
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }

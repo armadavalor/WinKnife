@@ -44,6 +44,117 @@ pub fn is_dry_run(args: impl IntoIterator<Item = String>) -> bool {
     args.into_iter().any(|arg| arg == DRY_RUN_FLAG)
 }
 
+/// Command-line flag that opens a module's page: `--module <id>` or
+/// `--module=<id>` (phase 5, task 1).
+pub const MODULE_FLAG: &str = "--module";
+
+/// The route the shell opens when a launch names no module it knows.
+pub const DASHBOARD_ROUTE: &str = "/dashboard";
+
+/// What a launch's command line asks the running app to do.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LaunchArgs {
+    /// The module id after [`MODULE_FLAG`], unvalidated. `Some("")` when the
+    /// flag was given without a value, which is treated like an unknown id.
+    /// The last occurrence wins.
+    pub module: Option<String>,
+}
+
+/// Parse a launch's arguments: the first launch's, or the ones a second launch
+/// forwards to the running app. Pure; the program path in `argv[0]` is ignored
+/// because it can never equal the flag.
+pub fn parse_launch_args(args: impl IntoIterator<Item = String>) -> LaunchArgs {
+    let mut parsed = LaunchArgs::default();
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg == MODULE_FLAG {
+            parsed.module = Some(args.next().unwrap_or_default());
+        } else if let Some(value) = arg
+            .strip_prefix(MODULE_FLAG)
+            .and_then(|rest| rest.strip_prefix('='))
+        {
+            parsed.module = Some(value.to_owned());
+        }
+    }
+    parsed
+}
+
+/// The route a launch should open, or `None` to leave the window where it is.
+///
+/// A known module id opens `/<id>`. Anything else — a typo, a module from a
+/// newer build, an empty value — is logged at warn and opens the dashboard: a
+/// shortcut with a stale id should still open the app, never an error box.
+pub fn launch_route(args: &LaunchArgs, is_known: impl Fn(&str) -> bool) -> Option<String> {
+    let id = args.module.as_deref()?;
+    if is_known(id) {
+        return Some(format!("/{id}"));
+    }
+    tracing::warn!(module = id, "unknown module on the command line; opening the dashboard");
+    Some(DASHBOARD_ROUTE.to_owned())
+}
+
+/// The route a launch asked for and the UI has not opened yet.
+///
+/// Pull, not push: the first launch's route is set before the WebView has
+/// mounted anything that could listen, so the shell asks for it once on mount
+/// (`take_launch_route`). A forwarded launch sets it and then emits
+/// [`LAUNCH_NAVIGATE`] as a nudge to ask again; whichever read comes first
+/// takes it, so a route is opened at most once.
+#[derive(Debug, Default)]
+pub struct PendingLaunchRoute(std::sync::Mutex<Option<String>>);
+
+impl PendingLaunchRoute {
+    /// Replace the pending route.
+    pub fn set(&self, route: Option<String>) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = route;
+        }
+    }
+
+    /// Take the pending route, leaving none behind.
+    pub fn take(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|mut slot| slot.take())
+    }
+}
+
+/// Emitted to the UI when a forwarded launch left a route to open.
+pub const LAUNCH_NAVIGATE: &str = "launch:navigate";
+
+/// Record the route a launch asked for, validated against the registry.
+pub fn record_launch_route<R: tauri::Runtime>(app: &tauri::AppHandle<R>, args: &LaunchArgs) {
+    let Some(pending) = app.try_state::<PendingLaunchRoute>() else {
+        return;
+    };
+    let route = match app.try_state::<core::module::ModuleRegistry>() {
+        Some(registry) => launch_route(args, |id| registry.get(id).is_ok()),
+        None => launch_route(args, |_| false),
+    };
+    if route.is_some() {
+        pending.set(route);
+    }
+}
+
+/// What the running app does when a second launch forwards its arguments.
+///
+/// It brings the main window back — shown (from the tray), un-minimised,
+/// focused — and opens the requested module. Nothing else: in particular it
+/// never touches the shutdown timer, which the one running instance re-armed
+/// once at its own start (issue #3; `tests/single_instance.rs`).
+pub fn handle_second_instance<R: tauri::Runtime>(app: &tauri::AppHandle<R>, argv: Vec<String>) {
+    use tauri::Emitter;
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    let args = parse_launch_args(argv);
+    if args.module.is_some() {
+        record_launch_route(app, &args);
+        let _ = app.emit(LAUNCH_NAVIGATE, ());
+    }
+}
+
 /// Where the rule packs live.
 ///
 /// An installed build reads them from the bundled resource directory —
@@ -131,6 +242,7 @@ pub fn manage_state<R: tauri::Runtime>(
     dry_run: bool,
 ) -> Result<Arc<ShutdownTimer>> {
     app.manage(modules::registry()?);
+    app.manage(PendingLaunchRoute::default());
     app.manage(ScanStore::new());
     app.manage(CancelRegistry::new());
 
@@ -257,6 +369,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::shutdown_schedule,
         commands::shutdown_cancel,
         commands::shutdown_status,
+        commands::take_launch_route,
     ]
 }
 
@@ -301,8 +414,15 @@ pub fn run() {
     core::platform::arm_real_os_effects();
 
     let dry_run = is_dry_run(std::env::args());
+    let launch = parse_launch_args(std::env::args());
 
     tauri::Builder::default()
+        // First, so a second launch is turned away before any other plugin or
+        // `setup` runs in it: it forwards its argv here and exits, and never
+        // opens the database or re-arms a persisted timer (issue #3).
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            handle_second_instance(app, argv);
+        }))
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             let app_data_dir = app
@@ -325,6 +445,7 @@ pub fn run() {
                 core::platform::show_fatal_error("WinKnife cannot start", &err.to_string());
             })?;
 
+            record_launch_route(app.handle(), &launch);
             tray::install(app.handle())?;
             spawn_ticker(app.handle().clone(), timer);
             window::restore_and_track(app.handle());
@@ -600,6 +721,72 @@ mod tests {
         ]));
         assert!(!is_dry_run(["winknife.exe".to_owned()]));
         assert!(!is_dry_run(["winknife.exe".to_owned(), "--dry".to_owned()]));
+    }
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        std::iter::once("winknife.exe")
+            .chain(args.iter().copied())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn the_module_flag_is_parsed_in_both_spellings() {
+        let expected = Some("startup".to_owned());
+        assert_eq!(parse_launch_args(argv(&["--module", "startup"])).module, expected);
+        assert_eq!(parse_launch_args(argv(&["--module=startup"])).module, expected);
+        assert_eq!(
+            parse_launch_args(argv(&["--dry-run", "--module", "startup"])).module,
+            expected
+        );
+    }
+
+    #[test]
+    fn no_module_flag_means_no_module() {
+        assert_eq!(parse_launch_args(argv(&[])), LaunchArgs::default());
+        assert_eq!(parse_launch_args(argv(&["--dry-run"])).module, None);
+        // Only the exact flag counts.
+        assert_eq!(parse_launch_args(argv(&["--modules=startup"])).module, None);
+        assert_eq!(parse_launch_args(argv(&["startup"])).module, None);
+    }
+
+    #[test]
+    fn a_module_flag_without_a_value_is_an_empty_id() {
+        assert_eq!(parse_launch_args(argv(&["--module"])).module, Some(String::new()));
+        assert_eq!(parse_launch_args(argv(&["--module="])).module, Some(String::new()));
+    }
+
+    #[test]
+    fn the_last_module_flag_wins() {
+        assert_eq!(
+            parse_launch_args(argv(&["--module", "cleaner", "--module=startup"])).module,
+            Some("startup".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_known_module_opens_its_route_and_anything_else_the_dashboard() {
+        let known = |id: &str| id == "startup";
+        let route = |args: &[&str]| launch_route(&parse_launch_args(argv(args)), known);
+
+        assert_eq!(route(&[]), None, "no flag leaves the window where it is");
+        assert_eq!(route(&["--module", "startup"]).as_deref(), Some("/startup"));
+        assert_eq!(route(&["--module", "nope"]).as_deref(), Some(DASHBOARD_ROUTE));
+        assert_eq!(route(&["--module"]).as_deref(), Some(DASHBOARD_ROUTE));
+        // An id is a registry key, not a path: nothing else gets through.
+        assert_eq!(
+            route(&["--module=../settings"]).as_deref(),
+            Some(DASHBOARD_ROUTE)
+        );
+    }
+
+    #[test]
+    fn a_pending_route_is_taken_once() {
+        let pending = PendingLaunchRoute::default();
+        assert_eq!(pending.take(), None);
+        pending.set(Some("/startup".to_owned()));
+        assert_eq!(pending.take().as_deref(), Some("/startup"));
+        assert_eq!(pending.take(), None, "a route is opened at most once");
     }
 
     #[test]

@@ -47,6 +47,7 @@ export const EVENTS = {
   execProgress: "exec:progress",
   quarantineChanged: "quarantine:changed",
   shutdownTick: "shutdown:tick",
+  launchNavigate: "launch:navigate",
 } as const;
 
 /* -------------------------------------------------------------------------
@@ -289,6 +290,19 @@ export function shutdownStatus(): Promise<TimerStatus> {
 }
 
 /* -------------------------------------------------------------------------
+ * Commands — launch (`--module <id>`)
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The route a launch asked for and the UI has not opened yet, or `null`.
+ * Taking it clears it. Already validated: an unknown id arrives as the
+ * dashboard.
+ */
+export function takeLaunchRoute(): Promise<string | null> {
+  return invoke<string | null>("take_launch_route");
+}
+
+/* -------------------------------------------------------------------------
  * Events
  * ---------------------------------------------------------------------- */
 
@@ -332,4 +346,12 @@ export function onShutdownTick(
   handler: (payload: ShutdownTick) => void,
 ): Promise<UnlistenFn> {
   return subscribe(EVENTS.shutdownTick, handler);
+}
+
+/**
+ * A second launch forwarded a `--module`: call {@link takeLaunchRoute}.
+ * No payload; the route is pulled so it is opened once.
+ */
+export function onLaunchNavigate(handler: () => void): Promise<UnlistenFn> {
+  return subscribe<null>(EVENTS.launchNavigate, () => handler());
 }
