@@ -139,6 +139,10 @@ pub enum CoreError {
     #[error("could not show this in File Explorer: {0}")]
     Explorer(String),
 
+    /// A restore point could not be requested, or the settings window opened.
+    #[error("restore point error: {0}")]
+    RestorePoint(String),
+
     /// The database was written by a newer build. Opening it here could
     /// purge items the newer build promised to keep (round 3).
     #[error(
@@ -178,6 +182,7 @@ impl CoreError {
             Self::TaskSchedulerBlocked => "task_scheduler_blocked",
             Self::UnknownStartupEntry(_) => "unknown_startup_entry",
             Self::Explorer(_) => "explorer",
+            Self::RestorePoint(_) => "restore_point",
             Self::SchemaTooNew { .. } => "schema_too_new",
         }
     }

@@ -36,6 +36,7 @@ register_modules! {
     treemap => treemap::TreemapModule,
     duplicates => duplicates::DuplicatesModule,
     startup => startup::StartupModule,
+    restore_point => restore_point::RestorePointModule,
     shutdown_timer => shutdown_timer::ShutdownTimerModule,
 }
 
@@ -111,6 +112,7 @@ mod tests {
             "treemap",
             "duplicates",
             "startup",
+            "restore-point",
             "shutdown-timer",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);

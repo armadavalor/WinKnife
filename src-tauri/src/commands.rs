@@ -34,6 +34,7 @@ use crate::core::executor::{self, ExecEnvironment};
 use crate::core::history;
 use crate::core::module::{ModuleManifest, ModuleRegistry};
 use crate::core::platform::{PowerAction, RecycleBin};
+use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::core::quarantine::{
     PurgeReport, Quarantine, QuarantineBatch, QuarantineItem, QuarantineStats, RestoreOutcome,
     RetentionPolicy,
@@ -1360,6 +1361,49 @@ pub fn take_launch_route(
     pending: State<'_, crate::PendingLaunchRoute>,
 ) -> Result<Option<String>, ApiError> {
     Ok(pending.take())
+}
+
+/// Whether System Protection looks enabled. Read-only; `unknown` is a valid
+/// answer (module spec 09).
+///
+/// # Errors
+/// Infallible today; an unreadable registry is reported as `unknown`.
+#[tauri::command]
+pub fn restore_point_status(
+    service: State<'_, Arc<RestorePointService>>,
+) -> Result<RestorePointStatus, ApiError> {
+    Ok(service.status())
+}
+
+/// Ask Windows for a restore point through the elevated helper. Shows a UAC
+/// prompt and waits up to five minutes, off the UI thread.
+///
+/// # Errors
+/// Returns an error while another request is running, or when this build may
+/// not reach the OS. Every Windows answer, failure included, is an `Ok`
+/// outcome the page explains.
+#[tauri::command]
+pub async fn restore_point_create(
+    service: State<'_, Arc<RestorePointService>>,
+    description: String,
+) -> Result<CreateOutcome, ApiError> {
+    let service = Arc::clone(&service);
+    tauri::async_runtime::spawn_blocking(move || service.create(&description))
+        .await
+        .map_err(|err| CoreError::RestorePoint(format!("the request did not finish: {err}")))?
+        .map_err(ApiError::from)
+}
+
+/// Open Windows' System Protection settings. Only ever on a button click; it
+/// changes nothing by itself.
+///
+/// # Errors
+/// Returns an error when the window could not be opened.
+#[tauri::command]
+pub fn restore_point_open_settings(
+    service: State<'_, Arc<RestorePointService>>,
+) -> Result<(), ApiError> {
+    Ok(service.open_protection_settings()?)
 }
 
 #[cfg(test)]

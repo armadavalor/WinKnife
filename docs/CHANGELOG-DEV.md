@@ -1502,3 +1502,34 @@ found in passing and not fixed.
 **Not verifiable here.** The plugin's cross-process forwarding (a real second
 `winknife.exe`) needs a manual run; the tests drive `handle_second_instance`
 directly on a mock app.
+
+## 2026-10-12 — Phase 5 task 5: restore point module
+
+**Built.**
+- **Elevated helper** (`core/platform/restore_point.rs`). The app re-launches
+  its own exe through `ShellExecuteExW` (`runas`) with
+  `--create-restore-point "<desc>"` and waits up to 5 minutes for the exit
+  code. The helper is recognised at the top of `run()` (`launch_mode`), before
+  the database, logging-to-DB, the Tauri builder and the single-instance
+  plugin, so it never forwards to or blocks on the running app. It calls
+  `SRSetRestorePointW` (`BEGIN_SYSTEM_CHANGE` / `MODIFY_SETTINGS`, then
+  `END_SYSTEM_CHANGE`) and compares the newest WMI `SystemRestore` sequence
+  before and after to tell created / skipped (24h) / may-have-skipped. Exit
+  codes are shared constants. No PowerShell; System Protection and
+  `SystemRestorePointCreationFrequency` are never touched.
+- **Module** (`modules/restore_point.rs`, `has_scan: false`). Read-only
+  protection status (on / off / unknown, with a reason), description sanitising
+  (printable only, 64 chars, default "WinKnife — before changes"), exit-code to
+  outcome mapping, `RestorePointPlatform` trait with a fake; test processes can
+  never reach the real helper. Commands `restore_point_status`,
+  `restore_point_create`, `restore_point_open_settings`, all covered by
+  `tests/command_wiring.rs`.
+- **UI.** `/restore-point` page (status, description, UAC notice before the
+  button, one sentence per result, System Protection button only when it is
+  off), sidebar icon, EN + TR strings, and a plain "Create a restore point
+  first" link on the startup page.
+
+**Not verifiable here (manual, admin VM or local).** Create succeeds; a second
+create within 24h reports skipped; answering "No" to UAC reports declined. None
+of these has been run: the UAC prompt and `SRSetRestorePointW` cannot be
+exercised from the test suite.

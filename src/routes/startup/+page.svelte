@@ -89,6 +89,13 @@
     <p class="max-w-3xl text-sm leading-relaxed text-ink-muted">
       {t("startup.intro")}
     </p>
+    <!-- Module spec 09: a plain link above the toggles. No modal, no nagging. -->
+    <a
+      href="/restore-point"
+      class="self-start text-sm text-accent underline-offset-2 hover:underline"
+    >
+      {t("startup.restorePointLink")}
+    </a>
   </header>
 
   {#if store.error}

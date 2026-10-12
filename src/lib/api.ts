@@ -13,6 +13,7 @@ import type {
   AppSettings,
   CachedScan,
   CleanerSummary,
+  CreateOutcome,
   DashboardSummary,
   DriveInfo,
   DuplicateScanResult,
@@ -27,6 +28,7 @@ import type {
   QuarantineItem,
   QuarantineStats,
   RestoreOutcome,
+  RestorePointStatus,
   RestoreReport,
   ScanDone,
   ScanProgress,
@@ -287,6 +289,28 @@ export function shutdownCancel(): Promise<TimerStatus> {
 /** Current timer state. */
 export function shutdownStatus(): Promise<TimerStatus> {
   return invoke<TimerStatus>("shutdown_status");
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — restore point (module spec 09)
+ * ---------------------------------------------------------------------- */
+
+/** System Protection status. Read-only. */
+export function restorePointStatus(): Promise<RestorePointStatus> {
+  return invoke<RestorePointStatus>("restore_point_status");
+}
+
+/**
+ * Create a restore point through the elevated helper. Windows shows a UAC
+ * prompt; the promise settles when the helper exits (or after 5 minutes).
+ */
+export function restorePointCreate(description: string): Promise<CreateOutcome> {
+  return invoke<CreateOutcome>("restore_point_create", { description });
+}
+
+/** Open Windows' own System Protection dialog. Only on a button click. */
+export function restorePointOpenSettings(): Promise<void> {
+  return invoke<void>("restore_point_open_settings");
 }
 
 /* -------------------------------------------------------------------------

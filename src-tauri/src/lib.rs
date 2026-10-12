@@ -314,6 +314,13 @@ pub fn manage_state<R: tauri::Runtime>(
         quarantine.clone(),
     ));
 
+    // Restore points: the real platform refuses until `run()` has armed it, and
+    // the registry is only read (module spec 09).
+    app.manage(Arc::new(modules::restore_point::RestorePointService::new(
+        Arc::new(core::platform::SystemRestorePoints),
+        Arc::new(core::platform::SystemRegistry),
+    )));
+
     app.manage(commands::Services {
         quarantine,
         brain,
@@ -370,6 +377,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::shutdown_cancel,
         commands::shutdown_status,
         commands::take_launch_route,
+        commands::restore_point_status,
+        commands::restore_point_create,
+        commands::restore_point_open_settings,
     ]
 }
 
@@ -413,8 +423,18 @@ pub fn run() {
     #[cfg(not(test))]
     core::platform::arm_real_os_effects();
 
+    // The elevated restore-point helper (module spec 09) stops here: no log
+    // file, no database, no window and — above all — no single-instance
+    // plugin, which would forward this argv to the running app and exit with
+    // no restore point made. Its exit code is the whole answer.
+    let launch = match modules::restore_point::launch_mode(std::env::args()) {
+        modules::restore_point::LaunchMode::CreateRestorePoint { description } => {
+            let code = core::platform::create_in_helper(&description);
+            std::process::exit(i32::try_from(code).unwrap_or(i32::MAX));
+        }
+        modules::restore_point::LaunchMode::App(launch) => launch,
+    };
     let dry_run = is_dry_run(std::env::args());
-    let launch = parse_launch_args(std::env::args());
 
     tauri::Builder::default()
         // First, so a second launch is turned away before any other plugin or

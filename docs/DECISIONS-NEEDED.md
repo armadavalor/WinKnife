@@ -792,3 +792,21 @@ not ours to take.
   undefined (an OS-owned entry's toggle looks enabled; the backend still
   refuses it). The new `leftoverShortcut` field uses the real wire name —
   safest interpretation taken; the mirror needs a separate fix.
+- [ ] 2026-10-12 (phase 5): the restore-point spec lists two commands, but
+  "offer `SystemPropertiesProtection.exe`, opened only on button click" needs a
+  third. Added `restore_point_open_settings` (opens Windows' own dialog through
+  `ShellExecuteExW`, changes nothing) — safest interpretation taken.
+- [ ] 2026-10-12 (phase 5): "System Protection looks enabled for the system
+  drive" is read from HKLM registry only (policy `DisableSR`, then
+  `SystemRestore\RPSessionInterval`), not from per-volume shadow-storage
+  config, which needs admin/WMI. Missing values report "unknown" — safest
+  interpretation taken.
+- [ ] 2026-10-12 (phase 5): the helper's failure exit code carries only the
+  low 16 bits of the Win32/HRESULT code (`0x2000_0000 | code`), so it never
+  collides with the success codes or overflows `i32`. An HRESULT failure is
+  therefore shown truncated — safest interpretation taken.
+- [ ] 2026-10-12 (phase 5): two result states beyond the spec's five:
+  "may have skipped" (spec text, when WMI cannot confirm) and "timed out"
+  (helper still running after 5 minutes; it is left alone, never killed).
+  A second create while one is running is refused — safest interpretation
+  taken.

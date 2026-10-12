@@ -225,6 +225,22 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "take_launch_route",
             args: json!({}),
         },
+        // Read-only: the registry is only read.
+        Probe {
+            command: "restore_point_status",
+            args: json!({}),
+        },
+        // Refused: the real platform is not armed in a test process, so no UAC
+        // prompt and no elevated helper can ever come from this probe.
+        Probe {
+            command: "restore_point_create",
+            args: json!({ "description": "wiring probe" }),
+        },
+        // Refused for the same reason: no settings window opens.
+        Probe {
+            command: "restore_point_open_settings",
+            args: json!({}),
+        },
     ]
 }
 

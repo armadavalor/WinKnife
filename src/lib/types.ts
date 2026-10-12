@@ -731,3 +731,25 @@ export interface TimerStatus {
   /** True when this build logs power actions instead of performing them. */
   dryRun: boolean;
 }
+
+/** System Protection as far as WinKnife can read it, without changing it. */
+export type Protection = "on" | "off" | "unknown";
+
+/** `restore_point_status`: read-only, never touches System Protection. */
+export interface RestorePointStatus {
+  protection: Protection;
+  /** Why the status is what it is, in words. */
+  reason: string;
+  defaultDescription: string;
+  maxDescriptionChars: number;
+}
+
+/** What one `restore_point_create` came to. Each maps to one sentence. */
+export type CreateOutcome =
+  | { state: "created" }
+  | { state: "skipped" }
+  | { state: "maybeSkipped" }
+  | { state: "protectionOff" }
+  | { state: "declined" }
+  | { state: "timedOut" }
+  | { state: "failed"; code: number };

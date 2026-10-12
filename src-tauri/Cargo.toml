@@ -87,6 +87,12 @@ windows = { version = "0.61", features = [
     # cheapest read-only way to ask (core/platform/process.rs).
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Power",
+    # The restore-point helper: `SRSetRestorePointW`, the read-only WMI
+    # `SystemRestore` list for the 24-hour check, and waiting on the elevated
+    # helper's exit code (core/platform/restore_point.rs, module spec 09).
+    "Win32_System_Restore",
+    "Win32_System_Threading",
+    "Win32_System_Wmi",
     "Win32_UI_Shell",
     # A native error box when the app cannot start, e.g. a database written by
     # a newer build (core/platform/message.rs).
