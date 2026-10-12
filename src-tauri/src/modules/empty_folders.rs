@@ -855,6 +855,27 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_finding_from_another_module_is_refused() {
+        let p = Profile::new();
+        let brain = p.brain(ProtectedPaths::empty());
+        let base = p.root.join("AppData/Local/Temp");
+        mkdir(&base.join("old/x"));
+        backdate_dir(&base.join("old"), 24 * 10);
+        let out = p.scan(&base);
+        let recs = analyze(&out.findings, &brain);
+        let mut finding = out.findings[0].clone();
+        finding.module = "cleaner".to_owned();
+
+        let report = run_one(&rig(), &brain, &recs[0], &finding);
+
+        assert!(
+            matches!(report.items[0].outcome, ExecOutcome::Skipped { .. }),
+            "{report:?}"
+        );
+        assert!(base.join("old/x").is_dir(), "nothing was moved");
+    }
+
+    #[test]
     fn cancelling_stops_the_scan_with_no_findings() {
         let p = Profile::new();
         let base = p.root.join("work");

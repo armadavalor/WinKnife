@@ -331,7 +331,16 @@ fn apply_one(
     //    confirm. Skipped, reported, batch continues.
     //    A folder has no lock state of its own (the probe can only say
     //    `Inaccessible`); the owning module's emptiness re-check in gate 4
-    //    stands in for it.
+    //    stands in for it, so only that module may hand a folder through.
+    if unit.finding.kind == FindingKind::Directory
+        && unit.finding.module != empty_folders::MODULE_ID
+    {
+        return skipped(
+            "skipped: only the empty-folders module can move a whole folder, \
+             because only it re-checks the folder right before moving it"
+                .to_owned(),
+        );
+    }
     if unit.finding.kind != FindingKind::Directory {
         let lock = env.brain.lock_state(&unit.finding.path);
         if !lock.is_free() {
