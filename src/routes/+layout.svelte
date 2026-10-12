@@ -11,6 +11,9 @@
 
   import { onMount, untrack } from "svelte";
 
+  import { goto } from "$app/navigation";
+
+  import { onLaunchNavigate, takeLaunchRoute } from "$lib/api";
   import QuarantineDrawer from "$lib/components/QuarantineDrawer.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import { t } from "$lib/i18n";
@@ -25,6 +28,29 @@
   onMount(() => {
     void moduleStore.load();
     void quarantineStore.reload();
+    void openLaunchRoute();
+  });
+
+  /**
+   * Open the module a launch asked for (`--module <id>`): the first launch's
+   * on mount, a forwarded one's on `launch:navigate`. The route is taken, so
+   * it opens once whichever of the two reads it first.
+   */
+  async function openLaunchRoute(): Promise<void> {
+    try {
+      const route = await takeLaunchRoute();
+      if (route) await goto(route);
+    } catch (err) {
+      // Best-effort: the app is usable without it; leave the current page.
+      console.warn("the launch route could not be opened", err);
+    }
+  }
+
+  $effect(() => {
+    const listening = untrack(() => onLaunchNavigate(() => void openLaunchRoute()));
+    return () => {
+      void listening.then((unlisten) => unlisten());
+    };
   });
 
   $effect(() => {

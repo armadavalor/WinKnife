@@ -632,18 +632,17 @@ impl Quarantine {
     ///
     /// # Errors
     /// Returns [`CoreError::UnknownQuarantineItem`] when the id is not held,
-    /// and [`CoreError::Quarantine`] when its restore was never refused.
+    /// and [`CoreError::QuarantineItemNotMarked`] when its restore was never
+    /// refused.
     pub fn purge_item(&self, conn: &Connection, item_id: Uuid) -> Result<PurgeReport> {
         let item = self
             .find_item(conn, item_id)?
             .filter(QuarantineItem::is_held)
             .ok_or_else(|| CoreError::UnknownQuarantineItem(item_id.to_string()))?;
         if item.restore_refused_at.is_none() {
-            return Err(CoreError::Quarantine(format!(
-                "`{}` is removed by the retention window, not by hand; only an item \
-                 whose restore was refused can be removed this way",
-                item.original_path.display()
-            )));
+            return Err(CoreError::QuarantineItemNotMarked(
+                item.original_path.display().to_string(),
+            ));
         }
         self.destroy(conn, &[item], "removed by the user after a refused restore")
     }
@@ -4695,7 +4694,11 @@ mod tests {
             .quarantine
             .purge_item(&h.conn, item.id)
             .expect_err("an unmarked item is left to the retention window");
-        assert!(matches!(err, CoreError::Quarantine(_)), "got {err}");
+        assert!(
+            matches!(err, CoreError::QuarantineItemNotMarked(_)),
+            "got {err}"
+        );
+        assert_eq!(err.code(), "quarantine_item_not_marked");
         assert!(item.quarantine_path.exists());
 
         let unknown = h

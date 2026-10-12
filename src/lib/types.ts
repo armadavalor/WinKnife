@@ -523,6 +523,12 @@ export interface StartupEntry {
   verdict: StartupVerdict;
   category: string | null;
   note: string;
+  /**
+   * Set when WinKnife holds this shortcut as off while one by the same name is
+   * still in the Startup folder, so it still runs at logon (issue #21). The
+   * path of that shortcut.
+   */
+  leftoverShortcut?: string | null;
 }
 
 /** What one enumeration produced. */
@@ -725,3 +731,25 @@ export interface TimerStatus {
   /** True when this build logs power actions instead of performing them. */
   dryRun: boolean;
 }
+
+/** System Protection as far as WinKnife can read it, without changing it. */
+export type Protection = "on" | "off" | "unknown";
+
+/** `restore_point_status`: read-only, never touches System Protection. */
+export interface RestorePointStatus {
+  protection: Protection;
+  /** Why the status is what it is, in words. */
+  reason: string;
+  defaultDescription: string;
+  maxDescriptionChars: number;
+}
+
+/** What one `restore_point_create` came to. Each maps to one sentence. */
+export type CreateOutcome =
+  | { state: "created" }
+  | { state: "skipped" }
+  | { state: "maybeSkipped" }
+  | { state: "protectionOff" }
+  | { state: "declined" }
+  | { state: "timedOut" }
+  | { state: "failed"; code: number };

@@ -70,8 +70,10 @@ export function refusedHeld(stats: QuarantineStats): boolean {
   return (stats.refusedItems ?? 0) > 0 || (stats.refusedBytes ?? 0) > 0;
 }
 
-/** Error codes with which the backend refuses to remove an item by hand. */
-const NOT_ELIGIBLE_CODES: readonly string[] = ["unknown_quarantine_item", "quarantine"];
+/** The item is no longer held (a stale list). */
+const GONE_CODE = "unknown_quarantine_item";
+/** The item is held but its restore was never refused (issue #21). */
+const NOT_MARKED_CODE = "quarantine_item_not_marked";
 
 /**
  * The backend's `{ code, message }` error, or null. A value import of
@@ -89,13 +91,16 @@ function asApiError(error: unknown): Pick<ApiError, "code" | "message"> | null {
  *
  * - `stuck`: the backend ran but could not delete the file, so the item is
  *   still held and still marked.
- * - `notEligible`: the backend refused because the item is no longer held or
- *   is not marked (a stale list); nothing can be said about where it is.
+ * - `notEligible`: the backend refused because the item is no longer held
+ *   (a stale list); nothing can be said about where it is.
+ * - `notMarked`: the item is held, but its restore was never refused, so it
+ *   is left to the retention window (dedicated code, issue #21).
  * - `error`: anything else, shown as it came (round 4).
  */
 export type RemovalFailure =
   | { kind: "stuck" }
   | { kind: "notEligible" }
+  | { kind: "notMarked" }
   | { kind: "error"; error: string };
 
 export function removalFailure(
@@ -105,9 +110,9 @@ export function removalFailure(
   if ("error" in result) {
     const api = asApiError(result.error);
     if (api) {
-      return NOT_ELIGIBLE_CODES.includes(api.code)
-        ? { kind: "notEligible" }
-        : { kind: "error", error: api.message };
+      if (api.code === GONE_CODE) return { kind: "notEligible" };
+      if (api.code === NOT_MARKED_CODE) return { kind: "notMarked" };
+      return { kind: "error", error: api.message };
     }
     return { kind: "error", error: String(result.error) };
   }

@@ -9,7 +9,7 @@
 import { APP_NAME, APP_TAGLINE } from "$lib/branding";
 
 /** Locales the app knows about. */
-export type Locale = "en";
+export type Locale = "en" | "tr";
 
 /** Fallback locale, used whenever a key is missing from the active one. */
 export const DEFAULT_LOCALE: Locale = "en";
@@ -205,6 +205,9 @@ const en = {
   "startup.verdictUnknown": "Not recognised",
   "startup.on": "On",
   "startup.off": "Off",
+  "startup.offLeftover": "Off — but its shortcut is still in the Startup folder",
+  "startup.leftoverReason":
+    "WinKnife holds this shortcut as switched off, but a shortcut with the same name is back at {path}, so it still runs at logon. Turning it on keeps that shortcut and moves WinKnife's copy to the quarantine if the two are identical; if they differ, nothing is changed and you decide which to keep.",
   "startup.working": "Working…",
   "startup.toggleLabel": "Run {name} at logon",
   "startup.confirmTitle": "Stop {name} running at logon?",
@@ -276,7 +279,9 @@ const en = {
   "quarantine.removeFailed":
     "{path} could not be removed: its file could not be deleted. It is still held, and the automatic purge never removes it; try again, or decrypt it there and restore it.",
   "quarantine.removeRefused":
-    "{path} was not removed: it is no longer held here, or it is not an item you remove by hand. Refresh the list to see where it stands.",
+    "{path} was not removed: it is no longer held here. Refresh the list to see where it stands.",
+  "quarantine.removeNotMarked":
+    "{path} was not removed: its restore was never refused, so it is not an item you remove by hand. It stays held until its retention window ends, and you can still restore it.",
   "quarantine.removeError": "{path} could not be removed: {error}.",
   "quarantine.refusedHeld":
     "Encrypted items kept after a refused restore: {count}, using {used}. They are not counted against the {cap} size limit, and nothing removes them but you: remove them here, or decrypt them and restore them.",
@@ -309,13 +314,90 @@ const en = {
   "shutdown.dryRunBanner":
     "This build was started with --dry-run: the timer counts down and warns you, but nothing is actually shut down. The action is written to the log instead.",
 
+  "restorePoint.statusLabel": "System Protection",
+  "restorePoint.statusLoading": "Reading System Protection…",
+  "restorePoint.protection.on": "Looks on",
+  "restorePoint.protection.off": "Looks off",
+  "restorePoint.protection.unknown": "Unknown",
+  "restorePoint.descriptionLabel": "Description (optional)",
+  "restorePoint.descriptionHint":
+    "Up to {max} characters. Left empty, the default name is used.",
+  "restorePoint.uacNotice":
+    "Creating a restore point needs administrator rights, so Windows will ask for permission (UAC) after you click. WinKnife does not change your System Protection settings.",
+  "restorePoint.create": "Create restore point",
+  "restorePoint.creating": "Waiting for Windows…",
+  "restorePoint.outcome.created": "Restore point created.",
+  "restorePoint.outcome.skipped":
+    "Windows skipped it: it allows only one restore point every 24 hours, and one was made recently.",
+  "restorePoint.outcome.maybeSkipped":
+    "Windows accepted the request but WinKnife could not confirm a new restore point. Windows may have skipped it (24-hour limit).",
+  "restorePoint.outcome.protectionOff":
+    "System Protection is off, so Windows cannot create restore points.",
+  "restorePoint.outcome.declined":
+    "No restore point was created: the administrator prompt was declined.",
+  "restorePoint.outcome.timedOut":
+    "Windows did not finish within 5 minutes. It may still be working; check again later.",
+  "restorePoint.outcome.failed": "Creating the restore point failed (error code {code}).",
+  "restorePoint.settingsHint":
+    "You can turn System Protection on in Windows' own settings. WinKnife only opens the dialog.",
+  "restorePoint.openSettings": "Open System Protection settings",
+  "startup.restorePointLink": "Create a restore point first",
+  // Same text as the Rust manifest; listed so Turkish can override it.
+  "module.restore-point.name": "Restore Point",
+  "module.restore-point.description":
+    "Create a Windows restore point before you change system settings.",
+
   "status.phase": "Phase 3 — disk map + startup",
 } as const;
 
 /** Every key the dictionary knows. */
 export type TranslationKey = keyof typeof en;
 
-const dictionaries: Record<Locale, Partial<Record<string, string>>> = { en };
+/**
+ * Turkish. Partial on purpose: a key missing here falls back to English. It
+ * holds the strings phase 5 added; there is no locale switcher yet, so it is
+ * only reached through `setLocale("tr")`.
+ */
+const tr: Partial<Record<TranslationKey, string>> = {
+  "quarantine.removeNotMarked":
+    "{path} kaldırılmadı: geri yüklemesi hiç reddedilmedi, bu yüzden elle kaldırılan bir öğe değil. Saklama süresi bitene kadar karantinada kalır ve hâlâ geri yükleyebilirsiniz.",
+  "restorePoint.statusLabel": "Sistem Koruması",
+  "restorePoint.statusLoading": "Sistem Koruması okunuyor…",
+  "restorePoint.protection.on": "Açık görünüyor",
+  "restorePoint.protection.off": "Kapalı görünüyor",
+  "restorePoint.protection.unknown": "Bilinmiyor",
+  "restorePoint.descriptionLabel": "Açıklama (isteğe bağlı)",
+  "restorePoint.descriptionHint":
+    "En fazla {max} karakter. Boş bırakılırsa varsayılan ad kullanılır.",
+  "restorePoint.uacNotice":
+    "Geri yükleme noktası oluşturmak yönetici izni gerektirir; tıkladıktan sonra Windows izin isteyecek (UAC). WinKnife Sistem Koruması ayarlarınızı değiştirmez.",
+  "restorePoint.create": "Geri yükleme noktası oluştur",
+  "restorePoint.creating": "Windows bekleniyor…",
+  "restorePoint.outcome.created": "Geri yükleme noktası oluşturuldu.",
+  "restorePoint.outcome.skipped":
+    "Windows atladı: 24 saatte yalnızca bir geri yükleme noktasına izin veriyor ve yakın zamanda bir tane oluşturulmuş.",
+  "restorePoint.outcome.maybeSkipped":
+    "Windows isteği kabul etti ama WinKnife yeni bir geri yükleme noktasını doğrulayamadı. Windows atlamış olabilir (24 saat sınırı).",
+  "restorePoint.outcome.protectionOff":
+    "Sistem Koruması kapalı, bu yüzden Windows geri yükleme noktası oluşturamıyor.",
+  "restorePoint.outcome.declined":
+    "Geri yükleme noktası oluşturulmadı: yönetici izni reddedildi.",
+  "restorePoint.outcome.timedOut":
+    "Windows 5 dakika içinde bitirmedi. Hâlâ çalışıyor olabilir; daha sonra yeniden kontrol edin.",
+  "restorePoint.outcome.failed": "Geri yükleme noktası oluşturulamadı (hata kodu {code}).",
+  "restorePoint.settingsHint":
+    "Sistem Korumasını Windows'un kendi ayarlarından açabilirsiniz. WinKnife yalnızca pencereyi açar.",
+  "restorePoint.openSettings": "Sistem Koruması ayarlarını aç",
+  "startup.restorePointLink": "Önce bir geri yükleme noktası oluşturun",
+  "module.restore-point.name": "Geri Yükleme Noktası",
+  "module.restore-point.description":
+    "Sistem ayarlarını değiştirmeden önce bir Windows geri yükleme noktası oluşturun.",
+  "startup.offLeftover": "Kapalı — ama kısayolu hâlâ Başlangıç klasöründe",
+  "startup.leftoverReason":
+    "WinKnife bu kısayolu kapalı olarak tutuyor, ancak aynı adlı bir kısayol {path} konumuna geri gelmiş; bu yüzden oturum açılışında hâlâ çalışıyor. Açtığınızda o kısayol kalır; ikisi aynıysa WinKnife'ın kopyası karantinaya taşınır, farklıysa hiçbir şey değişmez ve hangisini tutacağınıza siz karar verirsiniz.",
+};
+
+const dictionaries: Record<Locale, Partial<Record<string, string>>> = { en, tr };
 
 let activeLocale: Locale = DEFAULT_LOCALE;
 

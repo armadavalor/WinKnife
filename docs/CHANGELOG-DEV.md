@@ -1453,3 +1453,83 @@ would make it robust. Setup errors after `db::open` still miss the log file.
 **Deferred.** The startup page still shows the known-app label rather than
 the rating (DECISIONS-NEEDED, note 3). Clean-VM acceptance before the v0.1.0
 tag.
+
+---
+
+## 2026-10-12 — Phase 5 task 0: issue #21 follow-ups
+
+**Built.**
+- **Startup "both kept" arm, option (b).** A held shortcut whose original name
+  is occupied again is listed once (no duplicate id), as off, with a new
+  `leftoverShortcut` field; the page labels it "Off — but its shortcut is still
+  in the Startup folder" with a reason naming the path (EN + TR). Re-enable
+  compares the two files with `content_hash::full_hash`: byte-equal → the held
+  copy goes to the quarantine and the row is forgotten, so the entry reads as
+  enabled; different or unreadable → the Occupied refusal, now saying which.
+  `StartupService` takes the `Quarantine` to do this. Tests for both arms and
+  for the single, flagged listing.
+- **`quarantine_item_not_marked`.** `purge_item` on an unmarked item has its own
+  error code; the drawer maps it to its own message.
+- **Log guard.** `manage_state` puts the appender guard into managed state
+  before `db::open`, so setup errors after it reach the log file
+  (`tests/log_guard_survives_setup_error.rs`).
+- **Turkish.** A partial `tr` dictionary for the phase 5 strings (fallback to
+  English, no switcher yet).
+
+**Decisions.** EFS cap (round 4) closed with no code change; downgrade
+mitigation closed as won't-fix. Recorded in `DECISIONS-NEEDED.md`, plus a
+pre-existing camelCase/snake_case mismatch in the `StartupEntry` TS mirror,
+found in passing and not fixed.
+
+## 2026-10-12 — Phase 5 task 1: single instance and `--module`
+
+**Built.**
+- **`tauri-plugin-single-instance`**, registered first. A second launch
+  forwards its argv to the running app and exits before any `setup`, so it never
+  opens the database or re-arms the persisted timer. The running app's
+  `handle_second_instance` shows, un-minimises and focuses `main` (also out of
+  the tray), then opens the requested module.
+- **`--module <id>` / `--module=<id>`.** `parse_launch_args` (pure, next to
+  `is_dry_run`) and `launch_route` (registry-validated; unknown or empty id ->
+  warn log + `/dashboard`, no dialog). The route is parked in
+  `PendingLaunchRoute` and pulled by the shell with `take_launch_route` on mount
+  and on each `launch:navigate`, so the first launch's route is not lost before
+  the WebView listens, and a route opens once.
+- **Issue #3 regression** (`tests/single_instance.rs`): a timer persisted
+  before start is re-armed once by `manage_state`; repeated forwarded launches
+  leave the armed timer and the stored row untouched.
+
+**Not verifiable here.** The plugin's cross-process forwarding (a real second
+`winknife.exe`) needs a manual run; the tests drive `handle_second_instance`
+directly on a mock app.
+
+## 2026-10-12 — Phase 5 task 5: restore point module
+
+**Built.**
+- **Elevated helper** (`core/platform/restore_point.rs`). The app re-launches
+  its own exe through `ShellExecuteExW` (`runas`) with
+  `--create-restore-point "<desc>"` and waits up to 5 minutes for the exit
+  code. The helper is recognised at the top of `run()` (`launch_mode`), before
+  the database, logging-to-DB, the Tauri builder and the single-instance
+  plugin, so it never forwards to or blocks on the running app. It calls
+  `SRSetRestorePointW` (`BEGIN_SYSTEM_CHANGE` / `MODIFY_SETTINGS`, then
+  `END_SYSTEM_CHANGE`) and compares the newest WMI `SystemRestore` sequence
+  before and after to tell created / skipped (24h) / may-have-skipped. Exit
+  codes are shared constants. No PowerShell; System Protection and
+  `SystemRestorePointCreationFrequency` are never touched.
+- **Module** (`modules/restore_point.rs`, `has_scan: false`). Read-only
+  protection status (on / off / unknown, with a reason), description sanitising
+  (printable only, 64 chars, default "WinKnife — before changes"), exit-code to
+  outcome mapping, `RestorePointPlatform` trait with a fake; test processes can
+  never reach the real helper. Commands `restore_point_status`,
+  `restore_point_create`, `restore_point_open_settings`, all covered by
+  `tests/command_wiring.rs`.
+- **UI.** `/restore-point` page (status, description, UAC notice before the
+  button, one sentence per result, System Protection button only when it is
+  off), sidebar icon, EN + TR strings, and a plain "Create a restore point
+  first" link on the startup page.
+
+**Not verifiable here (manual, admin VM or local).** Create succeeds; a second
+create within 24h reports skipped; answering "No" to UAC reports declined. None
+of these has been run: the UAC prompt and `SRSetRestorePointW` cannot be
+exercised from the test suite.

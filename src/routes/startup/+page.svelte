@@ -89,6 +89,13 @@
     <p class="max-w-3xl text-sm leading-relaxed text-ink-muted">
       {t("startup.intro")}
     </p>
+    <!-- Module spec 09: a plain link above the toggles. No modal, no nagging. -->
+    <a
+      href="/restore-point"
+      class="self-start text-sm text-accent underline-offset-2 hover:underline"
+    >
+      {t("startup.restorePointLink")}
+    </a>
   </header>
 
   {#if store.error}
@@ -170,6 +177,11 @@
               {entry.location} · {truncatePath(entry.command, 64)}
             </p>
             <p class="mt-1.5 text-xs leading-relaxed text-ink-muted">{entry.note}</p>
+            {#if entry.leftoverShortcut}
+              <p class="mt-1.5 text-xs leading-relaxed text-risk-warning">
+                {t("startup.leftoverReason", { path: entry.leftoverShortcut })}
+              </p>
+            {/if}
             {#if entry.os_owned && entry.os_reason}
               <p class="mt-1.5 text-xs leading-relaxed text-ink-faint">{entry.os_reason}</p>
             {/if}
@@ -196,7 +208,9 @@
                 ? t("startup.working")
                 : entry.enabled
                   ? t("startup.on")
-                  : t("startup.off")}
+                  : entry.leftoverShortcut
+                    ? t("startup.offLeftover")
+                    : t("startup.off")}
             </button>
           </div>
         </li>

@@ -699,8 +699,9 @@ not ours to take.
         The purge's "retried on the next purge" would be wrong here,
         because the automatic purge never touches a marked item.
 
-      Follow-up review, round 4 (2026-10-12). **Needs architect review:
-      this narrows decision b as written ("counts toward the cap").**
+      Follow-up review, round 4 (2026-10-12). *(Closed 2026-10-12, phase 5
+      task 0: accepted as built, no code change. Marked items stay outside
+      the size cap.)*
       - Marked items are now outside the size cap. `enforce_size_cap`
         measures unmarked bytes only (`over_by = unmarked - cap`) and still
         never evicts a marked item. Round 3's rule (remove nothing for size
@@ -723,7 +724,7 @@ not ours to take.
 
 ## Open items raised in the follow-up review, round 3 (2026-10-12)
 
-- **Startup stash: the "both kept" (Unknown) arm leaves the original
+- [x] **Startup stash: the "both kept" (Unknown) arm leaves the original
   shortcut in the Startup folder.** This happens on a cross-volume stash
   whose source delete was refused and whose identity then cannot be read.
   The move succeeds with a "both kept" warning, so the ledger row of the
@@ -742,7 +743,14 @@ not ours to take.
       because it dropped the ledger row of a copy that may be the only one.
   Not changed in round 3. Option (b) touches re-enable's delete rules, so
   it needs an architect decision.
-- **A database from a newer build.** `run_migrations` now refuses a
+  **Closed 2026-10-12 (phase 5 task 0): option (b).** The entry is listed
+  once, as off, with `leftoverShortcut` set and the label "Off — but its
+  shortcut is still in the Startup folder" plus a reason naming the path.
+  Re-enable compares the two files through `content_hash::full_hash`: equal
+  → the stored copy goes to the quarantine (never `fs::remove_*`) and the row
+  is forgotten; different, or unreadable → the Occupied refusal, saying which,
+  with both files kept.
+- [x] **A database from a newer build.** `run_migrations` now refuses a
   database whose `user_version` is newer than the newest migration this
   build knows (`CoreError::SchemaTooNew`, code `schema_too_new`). An older
   build would otherwise run with a schema it does not understand and could,
@@ -755,3 +763,50 @@ not ours to take.
   it, because the guard is dropped when `manage_state` returns; it only
   repeats what is already recorded. Downgrading a database is not
   supported.
+  **Closed 2026-10-12 (phase 5 task 0).** The appender guard now goes into
+  managed state right after `logging::init`, before `db::open`, so every
+  later setup error reaches the log file
+  (`tests/log_guard_survives_setup_error.rs`). Downgrade mitigation: won't
+  fix; the `schema_too_new` refusal stays the whole answer.
+
+## Open items raised during phase 5
+
+- [x] 2026-10-12 (phase 5): `quarantine_purge_item` on an unmarked item now
+  returns its own code, `quarantine_item_not_marked`, instead of sharing
+  `unknown_quarantine_item`; the drawer maps it to its own message ("its
+  restore was never refused … stays held until its retention window ends").
+- [ ] 2026-10-12 (phase 5): the brief asks for EN and TR strings, but the app
+  had no Turkish dictionary. A partial `tr` dictionary was added holding the
+  phase 5 keys only (missing keys fall back to English), with no locale
+  switcher — safest interpretation taken; a switcher and a full translation
+  are out of this phase's scope.
+- [ ] 2026-10-12 (phase 5): a held startup copy quarantined by re-enable
+  (issue #21) restores, if the user asks, to its old place in WinKnife's
+  `startup-disabled` folder with no ledger row, so it is not listed as a
+  startup entry. Nothing is lost and the original shortcut is untouched;
+  left as is — safest interpretation taken.
+- [ ] 2026-10-12 (phase 5): found in passing, not fixed (out of scope):
+  `StartupEntry` serializes camelCase (`osOwned`, `osReason`,
+  `signatureNote`, `impactReason`), but `src/lib/types.ts` and
+  `startup.svelte.ts` read the snake_case names, so the UI sees them as
+  undefined (an OS-owned entry's toggle looks enabled; the backend still
+  refuses it). The new `leftoverShortcut` field uses the real wire name —
+  safest interpretation taken; the mirror needs a separate fix.
+- [ ] 2026-10-12 (phase 5): the restore-point spec lists two commands, but
+  "offer `SystemPropertiesProtection.exe`, opened only on button click" needs a
+  third. Added `restore_point_open_settings` (opens Windows' own dialog through
+  `ShellExecuteExW`, changes nothing) — safest interpretation taken.
+- [ ] 2026-10-12 (phase 5): "System Protection looks enabled for the system
+  drive" is read from HKLM registry only (policy `DisableSR`, then
+  `SystemRestore\RPSessionInterval`), not from per-volume shadow-storage
+  config, which needs admin/WMI. Missing values report "unknown" — safest
+  interpretation taken.
+- [ ] 2026-10-12 (phase 5): the helper's failure exit code carries only the
+  low 16 bits of the Win32/HRESULT code (`0x2000_0000 | code`), so it never
+  collides with the success codes or overflows `i32`. An HRESULT failure is
+  therefore shown truncated — safest interpretation taken.
+- [ ] 2026-10-12 (phase 5): two result states beyond the spec's five:
+  "may have skipped" (spec text, when WMI cannot confirm) and "timed out"
+  (helper still running after 5 minutes; it is left alone, never killed).
+  A second create while one is running is refused — safest interpretation
+  taken.

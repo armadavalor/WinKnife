@@ -13,6 +13,7 @@ import type {
   AppSettings,
   CachedScan,
   CleanerSummary,
+  CreateOutcome,
   DashboardSummary,
   DriveInfo,
   DuplicateScanResult,
@@ -27,6 +28,7 @@ import type {
   QuarantineItem,
   QuarantineStats,
   RestoreOutcome,
+  RestorePointStatus,
   RestoreReport,
   ScanDone,
   ScanProgress,
@@ -47,6 +49,7 @@ export const EVENTS = {
   execProgress: "exec:progress",
   quarantineChanged: "quarantine:changed",
   shutdownTick: "shutdown:tick",
+  launchNavigate: "launch:navigate",
 } as const;
 
 /* -------------------------------------------------------------------------
@@ -289,6 +292,41 @@ export function shutdownStatus(): Promise<TimerStatus> {
 }
 
 /* -------------------------------------------------------------------------
+ * Commands — restore point (module spec 09)
+ * ---------------------------------------------------------------------- */
+
+/** System Protection status. Read-only. */
+export function restorePointStatus(): Promise<RestorePointStatus> {
+  return invoke<RestorePointStatus>("restore_point_status");
+}
+
+/**
+ * Create a restore point through the elevated helper. Windows shows a UAC
+ * prompt; the promise settles when the helper exits (or after 5 minutes).
+ */
+export function restorePointCreate(description: string): Promise<CreateOutcome> {
+  return invoke<CreateOutcome>("restore_point_create", { description });
+}
+
+/** Open Windows' own System Protection dialog. Only on a button click. */
+export function restorePointOpenSettings(): Promise<void> {
+  return invoke<void>("restore_point_open_settings");
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — launch (`--module <id>`)
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The route a launch asked for and the UI has not opened yet, or `null`.
+ * Taking it clears it. Already validated: an unknown id arrives as the
+ * dashboard.
+ */
+export function takeLaunchRoute(): Promise<string | null> {
+  return invoke<string | null>("take_launch_route");
+}
+
+/* -------------------------------------------------------------------------
  * Events
  * ---------------------------------------------------------------------- */
 
@@ -332,4 +370,12 @@ export function onShutdownTick(
   handler: (payload: ShutdownTick) => void,
 ): Promise<UnlistenFn> {
   return subscribe(EVENTS.shutdownTick, handler);
+}
+
+/**
+ * A second launch forwarded a `--module`: call {@link takeLaunchRoute}.
+ * No payload; the route is pulled so it is opened once.
+ */
+export function onLaunchNavigate(handler: () => void): Promise<UnlistenFn> {
+  return subscribe<null>(EVENTS.launchNavigate, () => handler());
 }
