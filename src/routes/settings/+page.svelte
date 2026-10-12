@@ -9,6 +9,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes } from "$lib/format";
   import { t } from "$lib/i18n";
   import { settingsStore } from "$lib/stores/settings.svelte";
@@ -43,13 +44,8 @@
   });
 </script>
 
-<div class="mx-auto flex max-w-3xl flex-col gap-8 px-8 py-10">
-  <header class="flex flex-col gap-2">
-    <h1 class="text-2xl font-semibold tracking-tight">{t("settings.title")}</h1>
-    <p class="max-w-2xl text-sm leading-relaxed text-ink-muted">
-      {t("settings.subtitle")}
-    </p>
-  </header>
+<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
+  <PageHeader title={t("settings.title")} info={t("settings.subtitle")} />
 
   {#if store.error}
     <p

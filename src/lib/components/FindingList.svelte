@@ -1,11 +1,13 @@
 <!--
   One risk bucket, grouped by the rule pack that produced it.
 
-  Every row shows its `reason` — no unexplained suggestions (CLAUDE.md). The
+  Every row carries its `reason` — no unexplained suggestions (CLAUDE.md). It
+  is shown as one truncated line (full text in the tooltip, and on click). The
   red bucket has no checkboxes at all: it is informational, and offering a
   disabled checkbox would only look like a bug.
 -->
 <script lang="ts">
+  import EmptyState from "$lib/components/EmptyState.svelte";
   import RiskBadge from "$lib/components/RiskBadge.svelte";
   import { formatBytes, truncatePath } from "$lib/format";
   import { t } from "$lib/i18n";
@@ -64,6 +66,19 @@
     collapsed = next;
   }
 
+  /** Rows whose reason is shown in full; the others show one truncated line. */
+  let expanded = $state<Set<string>>(new Set());
+
+  function toggleExpanded(id: string): void {
+    const next = new Set(expanded);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    expanded = next;
+  }
+
   const groups = $derived.by<Group[]>(() => {
     const byPack = new Map<string, Group>();
     for (const row of rows) {
@@ -95,9 +110,7 @@
 </script>
 
 {#if rows.length === 0}
-  <p class="rounded-xl border border-dashed border-surface-3 p-5 text-sm text-ink-faint">
-    {t("cleaner.bucketEmpty")}
-  </p>
+  <EmptyState message={t("cleaner.bucketEmpty")} />
 {:else}
   <div class="flex flex-col gap-4">
     {#each groups as group (group.packId)}
@@ -165,6 +178,7 @@
           class:hidden={!open}
         >
           {#each group.rows as row (row.recommendation.id)}
+            {@const isOpen = expanded.has(row.recommendation.id)}
             <li class="flex items-start gap-3 px-4 py-3">
               {#if selectable}
                 <input
@@ -182,17 +196,26 @@
                 <span class="mt-1 size-4 shrink-0" aria-hidden="true"></span>
               {/if}
 
-              <span class="min-w-0 flex-1">
+              <button
+                type="button"
+                class="min-w-0 flex-1 text-left"
+                aria-expanded={isOpen}
+                onclick={() => toggleExpanded(row.recommendation.id)}
+              >
                 <span
                   class="block truncate font-mono text-xs text-ink"
                   title={row.finding.path}
                 >
                   {truncatePath(row.finding.path)}
                 </span>
-                <span class="mt-1 block text-xs leading-relaxed text-ink-muted">
+                <span
+                  class="mt-1 block text-xs leading-relaxed text-ink-muted"
+                  class:truncate={!isOpen}
+                  title={row.recommendation.reason}
+                >
                   {row.recommendation.reason}
                 </span>
-              </span>
+              </button>
 
               <span class="shrink-0 text-xs tabular-nums text-ink-faint">
                 {formatBytes(row.finding.sizeBytes)}

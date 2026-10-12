@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
   import { formatBytes, formatDateTime, formatRelativeDays, truncatePath } from "$lib/format";
   import { t } from "$lib/i18n";
   import { isRestoreRefused, refusedHeld, warningsOf } from "$lib/stores/execNotes";
@@ -136,11 +137,7 @@
       {:else if store.status === "error"}
         <p class="text-sm text-risk-danger">{store.error}</p>
       {:else if store.batches.length === 0}
-        <p
-          class="rounded-xl border border-dashed border-surface-3 p-5 text-sm text-ink-faint"
-        >
-          {t("quarantine.empty")}
-        </p>
+        <EmptyState message={t("quarantine.empty")} />
       {:else}
         <ul class="flex flex-col gap-3">
           {#each store.batches as batch (batch.batchId)}

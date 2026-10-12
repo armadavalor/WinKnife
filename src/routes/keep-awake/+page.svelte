@@ -7,6 +7,8 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
 
+  import InfoTip from "$lib/components/InfoTip.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatDateTime, formatRemaining } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { keepAwakeStore } from "$lib/stores/keepAwake.svelte";
@@ -51,17 +53,11 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-3xl flex-col gap-8 px-8 py-10">
-  <header class="flex flex-col gap-2">
-    <h1 class="text-2xl font-semibold tracking-tight">
-      {manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
-    </h1>
-    {#if manifest}
-      <p class="max-w-2xl text-sm leading-relaxed text-ink-muted">
-        {tModuleDescription(manifest.id, manifest.description)}
-      </p>
-    {/if}
-  </header>
+<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
+  <PageHeader
+    title={manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
+    info={manifest ? tModuleDescription(manifest.id, manifest.description) : undefined}
+  />
 
   {#if shutdownStore.isArmed}
     <p
@@ -77,10 +73,10 @@
     </p>
   {/if}
 
-  <section
-    class="flex flex-col items-center gap-3 rounded-xl border border-surface-2 bg-surface-1 px-6 py-10"
-  >
-    {#if store.status.active && store.status.deadline}
+  {#if store.status.active && store.status.deadline}
+    <section
+      class="flex flex-col items-center gap-3 rounded-xl border border-surface-2 bg-surface-1 px-6 py-8"
+    >
       <p class="text-xs uppercase tracking-wider text-ink-faint">
         {t("keepAwake.activeFor")}
       </p>
@@ -93,22 +89,21 @@
       {#if store.status.display}
         <p class="text-sm text-ink-muted">{t("keepAwake.activeDisplay")}</p>
       {/if}
-    {:else}
-      <p class="text-5xl font-semibold tabular-nums tracking-tight text-ink-faint">
-        --:--
-      </p>
-      <p class="text-sm text-ink-muted">{t("keepAwake.idle")}</p>
-    {/if}
-
-    <button
-      type="button"
-      class="mt-2 rounded-lg px-4 py-2 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-      disabled={!store.status.active || store.busy}
-      onclick={() => store.stop()}
-    >
-      {t("keepAwake.stop")}
-    </button>
-  </section>
+      <button
+        type="button"
+        class="mt-2 rounded-lg bg-surface-2 px-4 py-2 text-sm text-ink transition-colors hover:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={store.busy}
+        onclick={() => store.stop()}
+      >
+        {t("keepAwake.stop")}
+      </button>
+    </section>
+  {:else}
+    <p class="flex items-center gap-2 text-sm text-ink-muted">
+      <span class="size-2 rounded-full bg-ink-faint" aria-hidden="true"></span>
+      {t("keepAwake.idle")}
+    </p>
+  {/if}
 
   <section class="flex flex-col gap-4 rounded-xl border border-surface-2 bg-surface-1 p-6">
     <label class="flex items-center gap-2 text-sm text-ink">
@@ -159,12 +154,11 @@
         >
           {t("keepAwake.start")}
         </button>
+        <InfoTip text={t("keepAwake.noPersist")} />
       </div>
       {#if customInvalid}
         <p class="text-xs text-risk-danger">{t("keepAwake.invalidMinutes")}</p>
       {/if}
     </div>
-
-    <p class="text-xs leading-relaxed text-ink-faint">{t("keepAwake.noPersist")}</p>
   </section>
 </div>

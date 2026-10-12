@@ -9,6 +9,8 @@
   import { onMount, untrack } from "svelte";
 
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import InfoTip from "$lib/components/InfoTip.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatDateTime, formatRemaining } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
@@ -78,17 +80,11 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-3xl flex-col gap-8 px-8 py-10">
-  <header class="flex flex-col gap-2">
-    <h1 class="text-2xl font-semibold tracking-tight">
-      {manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
-    </h1>
-    {#if manifest}
-      <p class="max-w-2xl text-sm leading-relaxed text-ink-muted">
-        {tModuleDescription(manifest.id, manifest.description)}
-      </p>
-    {/if}
-  </header>
+<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
+  <PageHeader
+    title={manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
+    info={manifest ? tModuleDescription(manifest.id, manifest.description) : undefined}
+  />
 
   {#if store.status.dryRun}
     <p
@@ -201,12 +197,9 @@
         >
           {t("shutdown.setTimer")}
         </button>
+        <InfoTip text={t("shutdown.trayHint")} />
       </div>
     </div>
-
-    <p class="text-xs leading-relaxed text-ink-faint">
-      {t("shutdown.trayHint")}
-    </p>
   </section>
 </div>
 

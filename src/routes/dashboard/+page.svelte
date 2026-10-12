@@ -9,7 +9,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import InfoTip from "$lib/components/InfoTip.svelte";
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
+  import StatCard from "$lib/components/StatCard.svelte";
   import { formatBytes, formatDateTime, formatRemaining } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { dashboardStore } from "$lib/stores/dashboard.svelte";
@@ -45,13 +48,8 @@
   const drives = $derived(store.summary?.drives ?? []);
 </script>
 
-<div class="mx-auto flex max-w-5xl flex-col gap-8 px-8 py-10">
-  <header class="flex flex-col gap-2">
-    <h1 class="text-2xl font-semibold tracking-tight">{t("dashboard.title")}</h1>
-    <p class="max-w-2xl text-sm leading-relaxed text-ink-muted">
-      {t("dashboard.subtitle")}
-    </p>
-  </header>
+<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
+  <PageHeader title={t("dashboard.title")} info={t("dashboard.subtitle")} />
 
   {#if store.status === "error"}
     <div class="flex flex-col items-start gap-3 rounded-xl border border-surface-3 bg-surface-1 p-5">
@@ -71,62 +69,44 @@
 
   <!-- The three things worth knowing at a glance -->
   <section class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-    <div class="rounded-xl border border-surface-2 bg-surface-1 p-4">
-      <p class="text-xs uppercase tracking-wider text-ink-faint">
-        {t("dashboard.reclaimable")}
-      </p>
-      <p class="mt-1 text-xl font-semibold tabular-nums">
-        {store.status === "ready" ? formatBytes(store.reclaimable) : "—"}
-      </p>
-      <p class="mt-1 text-xs leading-relaxed text-ink-muted">
-        {t("dashboard.reclaimableNote")}
-      </p>
-    </div>
+    <StatCard
+      label={t("dashboard.reclaimable")}
+      value={store.status === "ready" ? formatBytes(store.reclaimable) : "—"}
+      info={t("dashboard.reclaimableNote")}
+    />
 
-    <div class="rounded-xl border border-surface-2 bg-surface-1 p-4">
-      <p class="text-xs uppercase tracking-wider text-ink-faint">
-        {t("quarantine.title")}
-      </p>
-      <p class="mt-1 text-xl font-semibold tabular-nums">
-        {store.summary
-          ? formatBytes(store.summary.quarantine.totalBytes)
-          : "—"}
-      </p>
-      <button
-        type="button"
-        class="mt-1 text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
-        onclick={() => quarantineStore.show()}
-      >
-        {t("dashboard.quarantineNote", {
-          count: store.summary?.quarantine.itemCount ?? 0,
-        })}
-      </button>
-    </div>
+    <StatCard
+      label={t("quarantine.title")}
+      value={store.summary ? formatBytes(store.summary.quarantine.totalBytes) : "—"}
+    >
+      {#snippet footer()}
+        <button
+          type="button"
+          class="mt-1 text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+          onclick={() => quarantineStore.show()}
+        >
+          {t("dashboard.quarantineNote", {
+            count: store.summary?.quarantine.itemCount ?? 0,
+          })}
+        </button>
+      {/snippet}
+    </StatCard>
 
-    <div class="rounded-xl border border-surface-2 bg-surface-1 p-4">
-      <p class="text-xs uppercase tracking-wider text-ink-faint">
-        {t("dashboard.timer")}
-      </p>
-      {#if timer}
-        <p class="mt-1 text-xl font-semibold tabular-nums">
-          {formatRemaining(timer.remainingSecs)}
-        </p>
+    <StatCard
+      label={t("dashboard.timer")}
+      value={timer ? formatRemaining(timer.remainingSecs) : "—"}
+    >
+      {#snippet footer()}
         <a
           href="/shutdown-timer"
           class="mt-1 inline-block text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
         >
-          {t("dashboard.timerActive", { when: formatDateTime(timer.target) })}
+          {timer
+            ? t("dashboard.timerActive", { when: formatDateTime(timer.target) })
+            : t("shutdown.noTimer")}
         </a>
-      {:else}
-        <p class="mt-1 text-xl font-semibold text-ink-faint">—</p>
-        <a
-          href="/shutdown-timer"
-          class="mt-1 inline-block text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
-        >
-          {t("shutdown.noTimer")}
-        </a>
-      {/if}
-    </div>
+      {/snippet}
+    </StatCard>
   </section>
 
   {#if drives.length > 0}
@@ -149,25 +129,22 @@
   {:else if moduleStore.modules.length === 0}
     <p class="text-sm text-ink-faint">{t("dashboard.empty")}</p>
   {:else}
-    <ul class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {#each moduleStore.modules as module (module.id)}
         {@const last = store.lastScan(module.id)}
         <li>
           <div
-            class="flex h-full flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-5"
+            class="flex h-full flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-4"
           >
-            <span class="flex items-center gap-3">
-              <ModuleIcon name={module.icon} class="size-5 text-accent" />
-              <span class="font-medium">
+            <span class="flex items-center gap-2">
+              <ModuleIcon name={module.icon} class="size-5 shrink-0 text-accent" />
+              <a href="/{module.id}" class="font-medium hover:underline">
                 {tModuleName(module.id, module.name)}
-              </span>
+              </a>
+              <InfoTip text={tModuleDescription(module.id, module.description)} />
             </span>
 
-            <span class="text-sm leading-relaxed text-ink-muted">
-              {tModuleDescription(module.id, module.description)}
-            </span>
-
-            <span class="text-xs text-ink-faint">
+            <span class="text-xs text-ink-muted">
               {#if last}
                 {t("dashboard.lastScan", {
                   when: formatDateTime(last.startedAt),

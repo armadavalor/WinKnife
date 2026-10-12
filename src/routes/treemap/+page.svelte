@@ -20,6 +20,8 @@
 
   import { revealInExplorer } from "$lib/api";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
   import { t } from "$lib/i18n";
   import { treemapStore } from "$lib/stores/treemap.svelte";
@@ -308,12 +310,7 @@
 </script>
 
 <div class="mx-auto flex h-full max-w-6xl flex-col gap-5 px-8 py-8">
-  <header class="flex flex-col gap-2">
-    <h1 class="text-2xl font-semibold tracking-tight">{t("treemap.title")}</h1>
-    <p class="max-w-3xl text-sm leading-relaxed text-ink-muted">
-      {t("treemap.intro")}
-    </p>
-  </header>
+  <PageHeader title={t("treemap.title")} info={t("treemap.intro")} />
 
   {#if store.status === "loading" || store.status === "idle"}
     <p class="text-sm text-ink-faint">{t("treemap.loadingDrives")}</p>
@@ -334,9 +331,7 @@
       </button>
     </div>
   {:else if store.drives.length === 0}
-    <p class="rounded-xl border border-dashed border-surface-3 p-5 text-sm text-ink-faint">
-      {t("treemap.noDrives")}
-    </p>
+    <EmptyState message={t("treemap.noDrives")} />
   {:else}
     <!-- Drive selector + capacity bar -->
     <section class="flex flex-wrap items-center gap-3">
@@ -445,17 +440,18 @@
     <!-- The map -->
     <div bind:this={box} class="relative min-h-72 flex-1">
       {#if !store.level}
-        <div
-          class="flex h-full min-h-72 flex-col items-start justify-center gap-3 rounded-xl border border-dashed border-surface-3 p-8"
-        >
-          <p class="text-sm text-ink-muted">{t("treemap.empty")}</p>
-          <button
-            type="button"
-            class="rounded-lg bg-accent-soft px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent hover:text-surface-0"
-            onclick={() => store.scan()}
-          >
-            {t("treemap.scan")}
-          </button>
+        <div class="flex h-full min-h-72 flex-col justify-center">
+          <EmptyState message={t("treemap.empty")}>
+            {#snippet action()}
+              <button
+                type="button"
+                class="rounded-lg bg-accent-soft px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent hover:text-surface-0"
+                onclick={() => store.scan()}
+              >
+                {t("treemap.scan")}
+              </button>
+            {/snippet}
+          </EmptyState>
         </div>
       {:else if store.level.children.length === 0}
         <div

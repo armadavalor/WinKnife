@@ -9,6 +9,8 @@
   import { onMount } from "svelte";
 
   import { restorePointCreate, restorePointOpenSettings, restorePointStatus } from "$lib/api";
+  import InfoTip from "$lib/components/InfoTip.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { isApiError, type CreateOutcome, type RestorePointStatus } from "$lib/types";
@@ -89,17 +91,11 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-3xl flex-col gap-8 px-8 py-10">
-  <header class="flex flex-col gap-2">
-    <h1 class="text-2xl font-semibold tracking-tight">
-      {manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
-    </h1>
-    {#if manifest}
-      <p class="max-w-2xl text-sm leading-relaxed text-ink-muted">
-        {tModuleDescription(manifest.id, manifest.description)}
-      </p>
-    {/if}
-  </header>
+<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
+  <PageHeader
+    title={manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
+    info={manifest ? tModuleDescription(manifest.id, manifest.description) : undefined}
+  />
 
   {#if error}
     <p class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger">
@@ -141,9 +137,7 @@
       </p>
     </div>
 
-    <p class="text-xs leading-relaxed text-ink-muted">{t("restorePoint.uacNotice")}</p>
-
-    <div>
+    <div class="flex items-center gap-2">
       <button
         type="button"
         class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0 disabled:cursor-not-allowed disabled:opacity-40"
@@ -152,6 +146,7 @@
       >
         {creating ? t("restorePoint.creating") : t("restorePoint.create")}
       </button>
+      <InfoTip text={t("restorePoint.uacNotice")} />
     </div>
 
     {#if outcome}
