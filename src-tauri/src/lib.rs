@@ -135,10 +135,14 @@ pub fn manage_state<R: tauri::Runtime>(
     app.manage(CancelRegistry::new());
 
     // Logging first, so everything after it is on the record.
-    let log_guard = core::logging::init(app_data_dir);
-    // Logged here, while `log_guard` is alive: the caller's own log of a
-    // setup error runs after this function returned and dropped the guard,
-    // so it can miss the file (round 4).
+    // The appender guard goes into managed state at once, not at the end: a
+    // guard held in a local was dropped by any `?` below, so the caller's own
+    // "WinKnife cannot start" line (and anything else logged after a setup
+    // error) could miss the file (issue #21 follow-up). Managed state lives as
+    // long as the app, which also keeps buffered audit lines on exit.
+    if let Some(guard) = core::logging::init(app_data_dir) {
+        app.manage(guard);
+    }
     let connection = db::open(app_data_dir).inspect_err(|err| {
         tracing::error!(error = %err, code = err.code(), "the database could not be opened");
     })?;
@@ -195,6 +199,7 @@ pub fn manage_state<R: tauri::Runtime>(
         modules::startup::KnownApps::load(&rules_dir)?,
         modules::startup::StartupPaths::from_env(&SystemEnv, app_data_dir),
         SystemEnv.var("WINDIR").map(std::path::PathBuf::from),
+        quarantine.clone(),
     ));
 
     app.manage(commands::Services {
@@ -213,11 +218,6 @@ pub fn manage_state<R: tauri::Runtime>(
     // spell it the same way.
     app.manage(database);
     app.manage(Arc::clone(&timer));
-    if let Some(guard) = log_guard {
-        // The appender guard has to outlive the process, or buffered audit lines
-        // are lost on exit.
-        app.manage(guard);
-    }
 
     Ok(timer)
 }

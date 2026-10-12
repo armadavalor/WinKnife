@@ -1523,6 +1523,7 @@ mod tests {
             verdict,
             category: Some("Games".to_owned()),
             note: "Starts itself when you open it.".to_owned(),
+            leftover_shortcut: None,
         }
     }
 

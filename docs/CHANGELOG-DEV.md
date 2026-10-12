@@ -1453,3 +1453,30 @@ would make it robust. Setup errors after `db::open` still miss the log file.
 **Deferred.** The startup page still shows the known-app label rather than
 the rating (DECISIONS-NEEDED, note 3). Clean-VM acceptance before the v0.1.0
 tag.
+
+---
+
+## 2026-10-12 — Phase 5 task 0: issue #21 follow-ups
+
+**Built.**
+- **Startup "both kept" arm, option (b).** A held shortcut whose original name
+  is occupied again is listed once (no duplicate id), as off, with a new
+  `leftoverShortcut` field; the page labels it "Off — but its shortcut is still
+  in the Startup folder" with a reason naming the path (EN + TR). Re-enable
+  compares the two files with `content_hash::full_hash`: byte-equal → the held
+  copy goes to the quarantine and the row is forgotten, so the entry reads as
+  enabled; different or unreadable → the Occupied refusal, now saying which.
+  `StartupService` takes the `Quarantine` to do this. Tests for both arms and
+  for the single, flagged listing.
+- **`quarantine_item_not_marked`.** `purge_item` on an unmarked item has its own
+  error code; the drawer maps it to its own message.
+- **Log guard.** `manage_state` puts the appender guard into managed state
+  before `db::open`, so setup errors after it reach the log file
+  (`tests/log_guard_survives_setup_error.rs`).
+- **Turkish.** A partial `tr` dictionary for the phase 5 strings (fallback to
+  English, no switcher yet).
+
+**Decisions.** EFS cap (round 4) closed with no code change; downgrade
+mitigation closed as won't-fix. Recorded in `DECISIONS-NEEDED.md`, plus a
+pre-existing camelCase/snake_case mismatch in the `StartupEntry` TS mirror,
+found in passing and not fixed.

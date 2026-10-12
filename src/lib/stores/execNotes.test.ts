@@ -115,9 +115,18 @@ test("a refused removal does not claim the item is still held", () => {
   // Round 4: the backend refuses an item that is no longer held, or one that
   // is not marked; a stale list can ask for either.
   const gone = { code: "unknown_quarantine_item", message: "unknown quarantine item `a`" };
-  const unmarked = { code: "quarantine", message: "removed by the retention window" };
+  const unmarked = {
+    code: "quarantine_item_not_marked",
+    message: "removed by the retention window",
+  };
   assert.deepEqual(removalFailure("a", { error: gone }), { kind: "notEligible" });
-  assert.deepEqual(removalFailure("a", { error: unmarked }), { kind: "notEligible" });
+  // Issue #21: the "not marked" refusal has its own code and its own message.
+  assert.deepEqual(removalFailure("a", { error: unmarked }), { kind: "notMarked" });
+  // The generic quarantine code is no longer read as a refusal.
+  assert.deepEqual(
+    removalFailure("a", { error: { code: "quarantine", message: "boom" } }),
+    { kind: "error", error: "boom" },
+  );
   // Anything else is shown as it came.
   assert.deepEqual(
     removalFailure("a", { error: { code: "database", message: "disk I/O error" } }),

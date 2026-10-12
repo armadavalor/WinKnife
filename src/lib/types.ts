@@ -523,6 +523,12 @@ export interface StartupEntry {
   verdict: StartupVerdict;
   category: string | null;
   note: string;
+  /**
+   * Set when WinKnife holds this shortcut as off while one by the same name is
+   * still in the Startup folder, so it still runs at logon (issue #21). The
+   * path of that shortcut.
+   */
+  leftoverShortcut?: string | null;
 }
 
 /** What one enumeration produced. */

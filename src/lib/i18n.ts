@@ -9,7 +9,7 @@
 import { APP_NAME, APP_TAGLINE } from "$lib/branding";
 
 /** Locales the app knows about. */
-export type Locale = "en";
+export type Locale = "en" | "tr";
 
 /** Fallback locale, used whenever a key is missing from the active one. */
 export const DEFAULT_LOCALE: Locale = "en";
@@ -205,6 +205,9 @@ const en = {
   "startup.verdictUnknown": "Not recognised",
   "startup.on": "On",
   "startup.off": "Off",
+  "startup.offLeftover": "Off — but its shortcut is still in the Startup folder",
+  "startup.leftoverReason":
+    "WinKnife holds this shortcut as switched off, but a shortcut with the same name is back at {path}, so it still runs at logon. Turning it on keeps that shortcut and moves WinKnife's copy to the quarantine if the two are identical; if they differ, nothing is changed and you decide which to keep.",
   "startup.working": "Working…",
   "startup.toggleLabel": "Run {name} at logon",
   "startup.confirmTitle": "Stop {name} running at logon?",
@@ -276,7 +279,9 @@ const en = {
   "quarantine.removeFailed":
     "{path} could not be removed: its file could not be deleted. It is still held, and the automatic purge never removes it; try again, or decrypt it there and restore it.",
   "quarantine.removeRefused":
-    "{path} was not removed: it is no longer held here, or it is not an item you remove by hand. Refresh the list to see where it stands.",
+    "{path} was not removed: it is no longer held here. Refresh the list to see where it stands.",
+  "quarantine.removeNotMarked":
+    "{path} was not removed: its restore was never refused, so it is not an item you remove by hand. It stays held until its retention window ends, and you can still restore it.",
   "quarantine.removeError": "{path} could not be removed: {error}.",
   "quarantine.refusedHeld":
     "Encrypted items kept after a refused restore: {count}, using {used}. They are not counted against the {cap} size limit, and nothing removes them but you: remove them here, or decrypt them and restore them.",
@@ -315,7 +320,20 @@ const en = {
 /** Every key the dictionary knows. */
 export type TranslationKey = keyof typeof en;
 
-const dictionaries: Record<Locale, Partial<Record<string, string>>> = { en };
+/**
+ * Turkish. Partial on purpose: a key missing here falls back to English. It
+ * holds the strings phase 5 added; there is no locale switcher yet, so it is
+ * only reached through `setLocale("tr")`.
+ */
+const tr: Partial<Record<TranslationKey, string>> = {
+  "quarantine.removeNotMarked":
+    "{path} kaldırılmadı: geri yüklemesi hiç reddedilmedi, bu yüzden elle kaldırılan bir öğe değil. Saklama süresi bitene kadar karantinada kalır ve hâlâ geri yükleyebilirsiniz.",
+  "startup.offLeftover": "Kapalı — ama kısayolu hâlâ Başlangıç klasöründe",
+  "startup.leftoverReason":
+    "WinKnife bu kısayolu kapalı olarak tutuyor, ancak aynı adlı bir kısayol {path} konumuna geri gelmiş; bu yüzden oturum açılışında hâlâ çalışıyor. Açtığınızda o kısayol kalır; ikisi aynıysa WinKnife'ın kopyası karantinaya taşınır, farklıysa hiçbir şey değişmez ve hangisini tutacağınıza siz karar verirsiniz.",
+};
+
+const dictionaries: Record<Locale, Partial<Record<string, string>>> = { en, tr };
 
 let activeLocale: Locale = DEFAULT_LOCALE;
 
