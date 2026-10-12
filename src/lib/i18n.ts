@@ -396,6 +396,68 @@ const en = {
     "Each folder is checked again first; one that is no longer empty is skipped.",
   "emptyFolders.doneTitle": "Done",
   "emptyFolders.doneBody": "{count} folders moved to quarantine.",
+  "unlocker.title": "File Unlocker",
+  "unlocker.subtitle":
+    "Find out which program is holding a file open. Checking is read-only; a program is only ever asked to close, never forced.",
+  "unlocker.pickFiles": "Choose files…",
+  "unlocker.pickFolder": "Choose a folder…",
+  "unlocker.dropHint": "Or drop files and folders anywhere on this window.",
+  "unlocker.dropActive": "Drop to check who holds these",
+  "unlocker.pathLabel": "Path",
+  "unlocker.pathPlaceholder": "C:\\path\\to\\file.docx",
+  "unlocker.addPath": "Add",
+  "unlocker.pickError": "The file picker could not open. Drop the files here or type a path instead.",
+  "unlocker.picked": "Checking {count} picked paths",
+  "unlocker.clear": "Clear",
+  "unlocker.recheck": "Check again",
+  "unlocker.checking": "Asking Windows who holds these files…",
+  "unlocker.queryError": "Windows could not answer the question.",
+  "unlocker.filesChecked": "{count} files checked",
+  "unlocker.capNote":
+    "This folder has more files than WinKnife checks at once: only the first {cap} files were checked.",
+  "unlocker.unreadable": "{count} entries inside the folder could not be read and were not checked.",
+  "unlocker.skippedTitle": "Not checked",
+  "unlocker.emptyTitle": "Nothing is holding these files open.",
+  "unlocker.emptyHint":
+    "If the file still cannot be changed, it may be read-only, or your account may not have permission to change it.",
+  "unlocker.pid": "PID {pid}",
+  "unlocker.service": "service {name}",
+  "unlocker.kind.window_app": "Window app",
+  "unlocker.kind.console": "Console",
+  "unlocker.kind.service": "Service",
+  "unlocker.kind.explorer": "Explorer",
+  "unlocker.kind.critical": "System-critical",
+  "unlocker.kind.unknown": "Unknown",
+  "unlocker.holdsSome": "Has {count} of these files open.",
+  "unlocker.holdsUnattributed": "Holds one or more of these files.",
+  "unlocker.heldMore": "and {count} more",
+  "unlocker.reason.window":
+    "Window app. It can be asked to close, the same way Windows asks when you sign out.",
+  "unlocker.reason.console":
+    "Console program. It can be asked to close; it may stop whatever it is running.",
+  "unlocker.reason.service": "Windows service — stop it from Services if you are sure.",
+  "unlocker.reason.explorer":
+    "Explorer — restarting it is safer than closing it; WinKnife does not do this for you.",
+  "unlocker.reason.critical":
+    "Critical system process — closing it could crash or restart Windows, so WinKnife never asks.",
+  "unlocker.reason.unknown":
+    "Windows could not say what kind of program this is, so WinKnife does not offer to close it.",
+  "unlocker.reason.system":
+    "Windows itself (the System process) holds this, often because the file is shared over the network or being indexed. It cannot be closed.",
+  "unlocker.reason.self": "This is WinKnife itself. Close the screen that is using the file instead.",
+  "unlocker.askClose": "Ask to close",
+  "unlocker.asking": "Asking…",
+  "unlocker.openLocation": "Open file location",
+  "unlocker.confirmTitle": "Ask {app} to close?",
+  "unlocker.confirmMessage":
+    "{app} will be asked to close. If it has unsaved work, it may ask you to save first.",
+  "unlocker.confirmNote": "WinKnife never forces a program to close or ends it.",
+  "unlocker.outcome.closed": "{app} closed.",
+  "unlocker.outcome.still_running":
+    "{app} is still running. It may be waiting for you to save, or it chose not to close.",
+  "unlocker.outcome.already_exited": "{app} had already closed.",
+  "unlocker.outcome.refused": "{app} was not asked to close: {reason}",
+  "unlocker.closeError": "Could not ask {app} to close.",
 
   "status.phase": "Phase 3 — disk map + startup",
 } as const;
@@ -483,6 +545,68 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "keepAwake.shutdownArmed":
     "Bir kapatma zamanlayıcısı kurulu. Uyanık tutma onu iptal etmez: zamanlayıcı bitince bilgisayar yine kapanır, yeniden başlar ya da uykuya geçer.",
   "keepAwake.invalidMinutes": "1 ile 1440 arasında tam sayı girin.",
+  "unlocker.title": "Dosya Kilidi Açıcı",
+  "unlocker.subtitle":
+    "Bir dosyayı hangi programın açık tuttuğunu bulun. Kontrol salt okunurdur; bir programdan yalnızca kapanması istenir, asla zorlanmaz.",
+  "unlocker.pickFiles": "Dosya seç…",
+  "unlocker.pickFolder": "Klasör seç…",
+  "unlocker.dropHint": "Ya da dosya ve klasörleri bu pencerenin herhangi bir yerine bırakın.",
+  "unlocker.dropActive": "Kimin tuttuğunu görmek için bırakın",
+  "unlocker.pathLabel": "Yol",
+  "unlocker.pathPlaceholder": "C:\\yol\\dosya.docx",
+  "unlocker.addPath": "Ekle",
+  "unlocker.pickError": "Dosya seçici açılamadı. Dosyaları buraya bırakın ya da yolu yazın.",
+  "unlocker.picked": "Seçilen {count} yol kontrol ediliyor",
+  "unlocker.clear": "Temizle",
+  "unlocker.recheck": "Yeniden kontrol et",
+  "unlocker.checking": "Bu dosyaları kimin tuttuğu Windows'a soruluyor…",
+  "unlocker.queryError": "Windows bu soruyu yanıtlayamadı.",
+  "unlocker.filesChecked": "{count} dosya kontrol edildi",
+  "unlocker.capNote":
+    "Bu klasörde WinKnife'ın tek seferde kontrol ettiğinden fazla dosya var: yalnızca ilk {cap} dosya kontrol edildi.",
+  "unlocker.unreadable": "Klasördeki {count} öge okunamadı ve kontrol edilmedi.",
+  "unlocker.skippedTitle": "Kontrol edilmedi",
+  "unlocker.emptyTitle": "Bu dosyaları açık tutan bir şey yok.",
+  "unlocker.emptyHint":
+    "Dosya hâlâ değiştirilemiyorsa salt okunur olabilir ya da hesabınızın onu değiştirme izni olmayabilir.",
+  "unlocker.pid": "PID {pid}",
+  "unlocker.service": "hizmet {name}",
+  "unlocker.kind.window_app": "Pencereli uygulama",
+  "unlocker.kind.console": "Konsol",
+  "unlocker.kind.service": "Hizmet",
+  "unlocker.kind.explorer": "Gezgin",
+  "unlocker.kind.critical": "Sistem için kritik",
+  "unlocker.kind.unknown": "Bilinmiyor",
+  "unlocker.holdsSome": "Bu dosyalardan {count} tanesini açık tutuyor.",
+  "unlocker.holdsUnattributed": "Bu dosyalardan bir veya daha fazlasını tutuyor.",
+  "unlocker.heldMore": "ve {count} tane daha",
+  "unlocker.reason.window":
+    "Pencereli uygulama. Oturumu kapatırken Windows'un yaptığı gibi kapanması istenebilir.",
+  "unlocker.reason.console":
+    "Konsol programı. Kapanması istenebilir; çalıştırdığı işi durdurabilir.",
+  "unlocker.reason.service": "Windows hizmeti — eminseniz Hizmetler'den durdurun.",
+  "unlocker.reason.explorer":
+    "Gezgin — kapatmak yerine yeniden başlatmak daha güvenlidir; WinKnife bunu sizin yerinize yapmaz.",
+  "unlocker.reason.critical":
+    "Kritik sistem işlemi — kapatılması Windows'u çökertebilir ya da yeniden başlatabilir, bu yüzden WinKnife asla istemez.",
+  "unlocker.reason.unknown":
+    "Windows bunun ne tür bir program olduğunu söyleyemedi, bu yüzden WinKnife kapatmayı önermiyor.",
+  "unlocker.reason.system":
+    "Bunu Windows'un kendisi (System işlemi) tutuyor; genellikle dosya ağda paylaşıldığı ya da dizinlendiği için. Kapatılamaz.",
+  "unlocker.reason.self": "Bu WinKnife'ın kendisi. Dosyayı kullanan ekranı kapatın.",
+  "unlocker.askClose": "Kapanmasını iste",
+  "unlocker.asking": "İsteniyor…",
+  "unlocker.openLocation": "Dosya konumunu aç",
+  "unlocker.confirmTitle": "{app} kapanması istensin mi?",
+  "unlocker.confirmMessage":
+    "{app} uygulamasından kapanması istenecek. Kaydedilmemiş işi varsa önce kaydetmenizi isteyebilir.",
+  "unlocker.confirmNote": "WinKnife bir programı asla zorla kapatmaz ya da sonlandırmaz.",
+  "unlocker.outcome.closed": "{app} kapandı.",
+  "unlocker.outcome.still_running":
+    "{app} hâlâ çalışıyor. Kaydetmenizi bekliyor olabilir ya da kapanmamayı seçti.",
+  "unlocker.outcome.already_exited": "{app} zaten kapanmıştı.",
+  "unlocker.outcome.refused": "{app} uygulamasından kapanması istenmedi: {reason}",
+  "unlocker.closeError": "{app} uygulamasından kapanması istenemedi.",
 };
 
 /** Every key the dictionary knows. */

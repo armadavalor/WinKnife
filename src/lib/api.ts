@@ -8,12 +8,15 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 import type {
   AppSettings,
   CachedScan,
   CleanerSummary,
   CreateOutcome,
+  CloseReport,
   DashboardSummary,
   DriveInfo,
   DuplicateScanResult,
@@ -42,6 +45,7 @@ import type {
   TimerStatus,
   TreeLevel,
   TreemapScanResult,
+  UnlockerReport,
 } from "$lib/types";
 
 /** Event names, mirroring the constants in `core/events.rs` and `lib.rs`. */
@@ -364,6 +368,71 @@ export function keepAwakeStop(): Promise<KeepAwakeStatus> {
 /** Current keep-awake state. */
 export function keepAwakeStatus(): Promise<KeepAwakeStatus> {
   return invoke<KeepAwakeStatus>("keep_awake_status");
+}
+
+/* -------------------------------------------------------------------------
+ * modules/file_unlocker.rs
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Which programs hold `paths` open. Read-only: nothing is closed or changed.
+ * Folders are walked (links not followed) up to the module's file cap.
+ */
+export function unlockerQuery(paths: string[]): Promise<UnlockerReport> {
+  return invoke<UnlockerReport>("unlocker_query", { paths });
+}
+
+/**
+ * Politely ask one program to close (the same request Windows sends at
+ * logoff). Never forces: the program may ask to save, or decline. Rust
+ * refuses services, Explorer, system-critical processes and a PID whose
+ * start time no longer matches.
+ */
+export function unlockerRequestClose(
+  pid: number,
+  startTime: string,
+): Promise<CloseReport> {
+  return invoke<CloseReport>("unlocker_request_close", { pid, startTime });
+}
+
+/** Native picker for one or more files. Resolves to `[]` when cancelled. */
+export async function pickFiles(): Promise<string[]> {
+  const picked = await openDialog({ multiple: true, directory: false });
+  return normalisePicked(picked);
+}
+
+/** Native picker for one folder. Resolves to `[]` when cancelled. */
+export async function pickFolder(): Promise<string[]> {
+  const picked = await openDialog({ multiple: false, directory: true });
+  return normalisePicked(picked);
+}
+
+function normalisePicked(picked: string | string[] | null): string[] {
+  if (picked === null) {
+    return [];
+  }
+  return Array.isArray(picked) ? picked : [picked];
+}
+
+/** Drag-and-drop over the window: hover state and dropped paths. */
+export interface DropHandlers {
+  onHover: (hovering: boolean) => void;
+  onDrop: (paths: string[]) => void;
+}
+
+/** Subscribe to files dropped on the window. Resolves with the unsubscribe function. */
+export function onFileDrop(handlers: DropHandlers): Promise<UnlistenFn> {
+  return getCurrentWebview().onDragDropEvent((event) => {
+    const payload = event.payload;
+    if (payload.type === "enter" || payload.type === "over") {
+      handlers.onHover(true);
+    } else if (payload.type === "leave") {
+      handlers.onHover(false);
+    } else if (payload.type === "drop") {
+      handlers.onHover(false);
+      handlers.onDrop(payload.paths);
+    }
+  });
 }
 
 /* -------------------------------------------------------------------------

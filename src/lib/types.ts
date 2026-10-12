@@ -788,3 +788,68 @@ export interface EmptyFolderScanResult {
   foldersVisited: number;
   cancelled: boolean;
 }
+
+/* -------------------------------------------------------------------------
+ * modules/file_unlocker.rs
+ * ---------------------------------------------------------------------- */
+
+/** What kind of program holds a file, as the Restart Manager reports it. */
+export type AppKind =
+  | "window_app"
+  | "console"
+  | "service"
+  | "explorer"
+  | "critical"
+  | "unknown";
+
+/** One program holding one or more of the picked files. */
+export interface LockRow {
+  pid: number;
+  /** Process start time as decimal text (too large for a JS number). */
+  start_time: string;
+  app_name: string;
+  exe_path: string | null;
+  kind: AppKind;
+  service_name: string | null;
+  /** Whether "Ask to close" may be offered (window and console apps only). */
+  can_close: boolean;
+  /** Stable reason code: window, console, service, explorer, critical, unknown, system, self. */
+  reason_code: string;
+  /** Human-readable reason, English, built in Rust. */
+  reason: string;
+  /** The first few held files (only when attributed). */
+  held_files: string[];
+  held_count: number;
+  /** False when too many files were queried to say which ones a program holds. */
+  attributed: boolean;
+}
+
+/** A picked path that was not checked. */
+export interface SkippedPath {
+  path: string;
+  reason: string;
+}
+
+/** Result of `unlocker_query`. */
+export interface UnlockerReport {
+  rows: LockRow[];
+  files_checked: number;
+  /** A folder had more files than `cap`; only the first `cap` were checked. */
+  capped: boolean;
+  cap: number;
+  skipped: SkippedPath[];
+  unreadable: number;
+}
+
+/** What happened after asking a program to close. */
+export type CloseOutcome =
+  | { status: "closed" }
+  | { status: "still_running" }
+  | { status: "already_exited" }
+  | { status: "refused"; reason: string };
+
+/** Result of `unlocker_request_close`. */
+export interface CloseReport {
+  outcome: CloseOutcome;
+  exe_path: string | null;
+}

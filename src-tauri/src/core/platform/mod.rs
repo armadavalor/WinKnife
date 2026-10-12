@@ -31,6 +31,7 @@ pub(crate) mod process;
 pub(crate) mod recycle_bin;
 pub(crate) mod registry;
 pub(crate) mod restore_point;
+pub(crate) mod restart_manager;
 pub(crate) mod signature;
 pub(crate) mod tasks;
 pub(crate) mod volume;
@@ -55,6 +56,10 @@ pub use restore_point::{
     create_in_helper, failed_exit_code, failure_from_exit_code, FakeRestorePointPlatform, HelperRun,
     RestorePointPlatform, SystemRestorePoints, CREATE_RESTORE_POINT_FLAG, EXIT_CREATED,
     EXIT_MAYBE_SKIPPED, EXIT_PROTECTION_OFF, EXIT_SKIPPED, WIN32_CANCELLED,
+};
+pub use restart_manager::{
+    close_policy, real_restart_manager, AppKind, CloseOutcome, ClosePolicy, LockInfo,
+    RestartManager, RmError, UniqueProcess,
 };
 pub use signature::{MapSignatures, Signature, SignatureProbe, SystemSignatureProbe};
 pub use tasks::{LogonTask, MapTaskScheduler, SystemTaskScheduler, TaskScheduler};

@@ -385,6 +385,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::keep_awake_start,
         commands::keep_awake_stop,
         commands::keep_awake_status,
+        commands::unlocker_query,
+        commands::unlocker_request_close,
     ]
 }
 
@@ -449,6 +451,7 @@ pub fn run() {
             handle_second_instance(app, argv);
         }))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let app_data_dir = app
                 .path()

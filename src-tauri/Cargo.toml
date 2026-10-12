@@ -28,6 +28,8 @@ tauri-plugin-notification = "2"
 # the first and exits, so two copies never share the database or re-arm the
 # same persisted shutdown timer (phase 5 task 1, issue #3).
 tauri-plugin-single-instance = "2"
+# File Unlocker: native file/folder picker (open dialog only).
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
@@ -93,6 +95,9 @@ windows = { version = "0.61", features = [
     "Win32_System_Restore",
     "Win32_System_Threading",
     "Win32_System_Wmi",
+    # The file unlocker asks the Restart Manager who holds a file, and reads
+    # a holder's start time and exe path (core/platform/restart_manager.rs).
+    "Win32_System_RestartManager",
     "Win32_UI_Shell",
     # A native error box when the app cannot start, e.g. a database written by
     # a newer build (core/platform/message.rs).
