@@ -73,6 +73,10 @@ jobs:
 
       - name: Rust tests
         working-directory: src-tauri
+        # The EFS tests are opt-in so a contributor's `cargo test` never makes
+        # Windows create an EFS key; CI runs them.
+        env:
+          WINKNIFE_EFS_TESTS: "1"
         run: cargo test
 
       - name: TypeScript / Svelte check

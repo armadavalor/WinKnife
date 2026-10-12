@@ -5863,6 +5863,9 @@ mod tests {
     #[test]
     fn encrypted_files_are_refused_across_volumes_but_renamed_on_one() {
         const TEST: &str = "encrypted_files_are_refused_across_volumes_but_renamed_on_one";
+        if !crate::core::test_support::efs_tests_enabled(TEST) {
+            return;
+        }
         let dir = tempfile::tempdir().expect("tempdir");
         let single = write(dir.path(), "single.txt", b"secret");
         let tree = dir.path().join("tree");
@@ -6181,6 +6184,9 @@ mod tests {
     #[test]
     fn an_encrypted_item_refused_across_drives_stays_held() {
         const TEST: &str = "an_encrypted_item_refused_across_drives_stays_held";
+        if !crate::core::test_support::efs_tests_enabled(TEST) {
+            return;
+        }
         let h = harness(RetentionPolicy::default());
         let single = write(&h.work, "single.txt", b"secret");
         let item = h
@@ -6230,6 +6236,9 @@ mod tests {
     #[test]
     fn an_encrypted_refusal_that_could_not_be_marked_says_so() {
         const TEST: &str = "an_encrypted_refusal_that_could_not_be_marked_says_so";
+        if !crate::core::test_support::efs_tests_enabled(TEST) {
+            return;
+        }
         let h = harness(RetentionPolicy::default());
         let single = write(&h.work, "single.txt", b"secret");
         let item = h

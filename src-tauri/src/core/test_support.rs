@@ -40,6 +40,26 @@ fn announce(message: &str) {
     let _ = writeln!(std::io::stderr().lock(), "{message}");
 }
 
+/// Opt-in for the EFS tests.
+///
+/// They run `cipher /e`, and on a fresh machine Windows answers that by
+/// creating the user's EFS certificate and nagging them to back up the key.
+/// Running the suite should not do that to a contributor, so the tests run
+/// only when this is `1`. CI and the release workflow set it.
+pub(crate) const EFS_TESTS: &str = "WINKNIFE_EFS_TESTS";
+
+/// Whether the EFS tests should run. Prints a visible skip line when not.
+#[cfg(windows)]
+pub(crate) fn efs_tests_enabled(test: &str) -> bool {
+    if std::env::var_os(EFS_TESTS).is_some_and(|value| value == "1") {
+        return true;
+    }
+    announce(&format!(
+        "-- skipped EFS test {test}: set {EFS_TESTS}=1 to run it (CI does)."
+    ));
+    false
+}
+
 /// The 8.3 short alias of `path`, or `None` when the call fails.
 ///
 /// Two spellings of one directory is the shape several safety tests need:

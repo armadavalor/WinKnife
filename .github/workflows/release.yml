@@ -41,6 +41,8 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+        env:
+          WINKNIFE_EFS_TESTS: "1"
       - run: npm run check
       - run: npm run test:ui
       - run: npm run tauri build -- --bundles nsis
