@@ -9,7 +9,7 @@
 import { APP_NAME, APP_TAGLINE } from "$lib/branding";
 
 /** Locales the app knows about. */
-export type Locale = "en";
+export type Locale = "en" | "tr";
 
 /** Fallback locale, used whenever a key is missing from the active one. */
 export const DEFAULT_LOCALE: Locale = "en";
@@ -309,13 +309,57 @@ const en = {
   "shutdown.dryRunBanner":
     "This build was started with --dry-run: the timer counts down and warns you, but nothing is actually shut down. The action is written to the log instead.",
 
+  "keepAwake.presetsLabel": "For how long",
+  "keepAwake.preset30m": "30 minutes",
+  "keepAwake.preset1h": "1 hour",
+  "keepAwake.preset2h": "2 hours",
+  "keepAwake.preset4h": "4 hours",
+  "keepAwake.customLabel": "Or a custom number of minutes (1 to 1440)",
+  "keepAwake.start": "Keep awake",
+  "keepAwake.stop": "Stop",
+  "keepAwake.displayLabel": "Keep the screen on too",
+  "keepAwake.idle": "The PC may sleep as usual.",
+  "keepAwake.activeFor": "Staying awake for",
+  "keepAwake.until": "Until {time}",
+  "keepAwake.activeDisplay": "The screen stays on as well.",
+  "keepAwake.noPersist":
+    "Nothing is saved. Closing WinKnife, or restarting the PC, ends keep-awake; the longest session is 24 hours.",
+  "keepAwake.shutdownArmed":
+    "A shutdown timer is armed. Keep-awake does not cancel it: the PC will still shut down, restart or sleep when that timer ends.",
+  "keepAwake.invalidMinutes": "Enter a whole number from 1 to 1440.",
+
   "status.phase": "Phase 3 — disk map + startup",
 } as const;
+
+/** Turkish overrides. Missing keys fall back to English. */
+const tr: Partial<Record<TranslationKey, string>> = {
+  "keepAwake.presetsLabel": "Ne kadar süreyle",
+  "keepAwake.preset30m": "30 dakika",
+  "keepAwake.preset1h": "1 saat",
+  "keepAwake.preset2h": "2 saat",
+  "keepAwake.preset4h": "4 saat",
+  "keepAwake.customLabel": "Veya özel dakika sayısı (1 ile 1440 arası)",
+  "keepAwake.start": "Uyanık tut",
+  "keepAwake.stop": "Durdur",
+  "keepAwake.displayLabel": "Ekran da açık kalsın",
+  "keepAwake.idle": "Bilgisayar her zamanki gibi uykuya geçebilir.",
+  "keepAwake.activeFor": "Uyanık kalma süresi",
+  "keepAwake.until": "Bitiş: {time}",
+  "keepAwake.activeDisplay": "Ekran da açık kalır.",
+  "keepAwake.noPersist":
+    "Hiçbir şey kaydedilmez. WinKnife'ı kapatmak ya da bilgisayarı yeniden başlatmak uyanık tutmayı sonlandırır; en uzun oturum 24 saattir.",
+  "keepAwake.shutdownArmed":
+    "Bir kapatma zamanlayıcısı kurulu. Uyanık tutma onu iptal etmez: zamanlayıcı bitince bilgisayar yine kapanır, yeniden başlar ya da uykuya geçer.",
+  "keepAwake.invalidMinutes": "1 ile 1440 arasında tam sayı girin.",
+};
 
 /** Every key the dictionary knows. */
 export type TranslationKey = keyof typeof en;
 
-const dictionaries: Record<Locale, Partial<Record<string, string>>> = { en };
+const dictionaries: Record<Locale, Partial<Record<string, string>>> = {
+  en,
+  tr,
+};
 
 let activeLocale: Locale = DEFAULT_LOCALE;
 

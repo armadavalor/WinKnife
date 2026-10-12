@@ -32,6 +32,7 @@ import type {
   ScanProgress,
   ScanResult,
   ScheduleMode,
+  KeepAwakeStatus,
   ShutdownTick,
   StartupScanResult,
   StartupSource,
@@ -47,6 +48,7 @@ export const EVENTS = {
   execProgress: "exec:progress",
   quarantineChanged: "quarantine:changed",
   shutdownTick: "shutdown:tick",
+  keepAwakeChanged: "keep-awake:changed",
 } as const;
 
 /* -------------------------------------------------------------------------
@@ -289,6 +291,28 @@ export function shutdownStatus(): Promise<TimerStatus> {
 }
 
 /* -------------------------------------------------------------------------
+ * Commands — keep awake
+ * ---------------------------------------------------------------------- */
+
+/** Keep the machine awake for `minutes` (1 to 1440), replacing any session. */
+export function keepAwakeStart(
+  minutes: number,
+  display: boolean,
+): Promise<KeepAwakeStatus> {
+  return invoke<KeepAwakeStatus>("keep_awake_start", { minutes, display });
+}
+
+/** Stop keeping the machine awake. Stopping when idle is not an error. */
+export function keepAwakeStop(): Promise<KeepAwakeStatus> {
+  return invoke<KeepAwakeStatus>("keep_awake_stop");
+}
+
+/** Current keep-awake state. */
+export function keepAwakeStatus(): Promise<KeepAwakeStatus> {
+  return invoke<KeepAwakeStatus>("keep_awake_status");
+}
+
+/* -------------------------------------------------------------------------
  * Events
  * ---------------------------------------------------------------------- */
 
@@ -325,6 +349,11 @@ export function onQuarantineChanged(
   handler: (payload: QuarantineChanged) => void,
 ): Promise<UnlistenFn> {
   return subscribe(EVENTS.quarantineChanged, handler);
+}
+
+/** Subscribe to keep-awake start, stop and expiry. */
+export function onKeepAwakeChanged(handler: () => void): Promise<UnlistenFn> {
+  return subscribe(EVENTS.keepAwakeChanged, handler);
 }
 
 /** Subscribe to the once-a-second shutdown countdown. */

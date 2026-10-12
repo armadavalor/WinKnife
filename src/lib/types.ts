@@ -701,6 +701,17 @@ export interface PurgeReport {
  * modules/shutdown_timer.rs
  * ---------------------------------------------------------------------- */
 
+/* modules/keep_awake.rs */
+
+/** Whether the machine is being kept awake, and until when. */
+export interface KeepAwakeStatus {
+  active: boolean;
+  /** Wall-clock end of the session (RFC 3339), or null when idle. */
+  deadline: string | null;
+  /** Whether the screen is kept on as well. */
+  display: boolean;
+}
+
 /** What happens when a timer reaches zero. */
 export type PowerAction = "shutdown" | "restart" | "sleep";
 

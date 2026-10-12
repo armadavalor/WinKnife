@@ -1453,3 +1453,31 @@ would make it robust. Setup errors after `db::open` still miss the log file.
 **Deferred.** The startup page still shows the known-app label rather than
 the rating (DECISIONS-NEEDED, note 3). Clean-VM acceptance before the v0.1.0
 tag.
+
+---
+
+## 2026-10-12 — Phase 5 task 2: keep-awake
+
+**Built.** Module `keep-awake`: hold the PC awake for 1 to 1440 minutes,
+optionally with the screen on.
+
+- `core/platform/execution_state.rs`: `ExecutionState` trait,
+  `RecordingExecutionState` fake and the crate-private `SystemExecutionState`
+  (`SetThreadExecutionState`, refused unless `real_os_effects_armed()`).
+- `modules/keep_awake.rs`: one dedicated worker thread per session (the OS flag
+  is per thread), wall-clock deadline re-checked every 30 s so a sleep/wake
+  cannot stretch the session, stop joins the thread, replacing a session starts
+  a fresh thread. Max 24 h, no forever mode, nothing persisted. Commands
+  `keep_awake_start/stop/status`, event `keep-awake:changed` (no payload).
+- UI `src/routes/keep-awake/`: presets 30m/1h/2h/4h plus custom, screen toggle,
+  always-visible Stop, countdown from the deadline, "nothing persisted" line,
+  hint when a shutdown timer is armed. Sidebar icon `coffee`. EN keys and the
+  first `tr` dictionary (keep-awake keys only so far; the rest falls back to EN).
+- Wiring test probes cover the three commands (dry run: recorder, no OS call).
+
+**Decisions.** Validation errors reuse `CoreError::InvalidTimer`.
+
+**Deferred / unverified.** The manual `powercfg /requests` check on a real
+Windows session was not run. 5 pre-existing tests fail in this environment
+because creating symlinks needs Developer Mode or elevation (executor,
+quarantine x2, scanner, cleaner); none involve this module.

@@ -213,6 +213,7 @@ pub fn manage_state<R: tauri::Runtime>(
     // spell it the same way.
     app.manage(database);
     app.manage(Arc::clone(&timer));
+    app.manage(Arc::new(modules::keep_awake::build(app, dry_run)));
     if let Some(guard) = log_guard {
         // The appender guard has to outlive the process, or buffered audit lines
         // are lost on exit.
@@ -257,6 +258,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::shutdown_schedule,
         commands::shutdown_cancel,
         commands::shutdown_status,
+        commands::keep_awake_start,
+        commands::keep_awake_stop,
+        commands::keep_awake_status,
     ]
 }
 

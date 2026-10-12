@@ -43,6 +43,7 @@ use crate::core::state::{CancelRegistry, ScanResult, ScanStore};
 use crate::core::types::ExecReport;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, DuplicateProgress, DuplicateScan};
+use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
 use crate::modules::{startup, treemap};
 
@@ -1340,6 +1341,51 @@ pub fn shutdown_cancel(
 #[tauri::command]
 pub fn shutdown_status(timer: State<'_, Arc<ShutdownTimer>>) -> Result<TimerStatus, ApiError> {
     Ok(timer.status(Utc::now()))
+}
+
+/* -------------------------------------------------------------------------
+ * Keep awake
+ * ---------------------------------------------------------------------- */
+
+/// Start keep-awake, replacing any running session.
+///
+/// # Errors
+/// Returns [`CoreError::InvalidTimer`] for zero minutes or more than 24 hours.
+#[tauri::command]
+pub async fn keep_awake_start(
+    minutes: u32,
+    display: bool,
+    engine: State<'_, Arc<KeepAwake>>,
+) -> Result<KeepAwakeStatus, ApiError> {
+    // Joins the previous worker thread, so keep it off the async runtime.
+    let engine = Arc::clone(&engine);
+    tauri::async_runtime::spawn_blocking(move || engine.start(minutes, display, Utc::now()))
+        .await
+        .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")))?
+        .map_err(ApiError::from)
+}
+
+/// Stop keep-awake. Stopping when nothing runs is not an error.
+///
+/// # Errors
+/// Fails only if the background task cannot be joined.
+#[tauri::command]
+pub async fn keep_awake_stop(
+    engine: State<'_, Arc<KeepAwake>>,
+) -> Result<KeepAwakeStatus, ApiError> {
+    let engine = Arc::clone(&engine);
+    tauri::async_runtime::spawn_blocking(move || engine.stop())
+        .await
+        .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")).into())
+}
+
+/// Current keep-awake state.
+///
+/// # Errors
+/// Infallible today; keeps the shared `Result` shape.
+#[tauri::command]
+pub fn keep_awake_status(engine: State<'_, Arc<KeepAwake>>) -> Result<KeepAwakeStatus, ApiError> {
+    Ok(engine.status())
 }
 
 #[cfg(test)]

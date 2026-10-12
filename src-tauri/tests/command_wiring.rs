@@ -221,6 +221,20 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "shutdown_cancel",
             args: json!({}),
         },
+        // `manage_state` is asked for a dry run, so the engine holds a
+        // recorder: started, observed, stopped, never touching the OS.
+        Probe {
+            command: "keep_awake_start",
+            args: json!({ "minutes": 1, "display": false }),
+        },
+        Probe {
+            command: "keep_awake_status",
+            args: json!({}),
+        },
+        Probe {
+            command: "keep_awake_stop",
+            args: json!({}),
+        },
     ]
 }
 
