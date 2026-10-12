@@ -71,9 +71,7 @@ pub type NewestSequence = std::result::Result<Option<u32>, ()>;
 /// call. Pure, so the 24-hour detection is tested without Windows.
 pub fn classify_sequences(before: NewestSequence, after: NewestSequence) -> u32 {
     match (before, after) {
-        (Ok(before), Ok(Some(after))) if before.is_none_or(|before| after > before) => {
-            EXIT_CREATED
-        }
+        (Ok(before), Ok(Some(after))) if before.is_none_or(|before| after > before) => EXIT_CREATED,
         (Ok(before), Ok(after)) if before == after => EXIT_SKIPPED,
         // Fewer points than before, or a list that could not be read: the
         // honest answer is "cannot tell".
@@ -211,17 +209,16 @@ impl RestorePointPlatform for FakeRestorePointPlatform {
 #[cfg(windows)]
 mod sys {
     use super::{
-        classify_sequences, failed_exit_code, HelperRun, NewestSequence,
-        CREATE_RESTORE_POINT_FLAG, EXIT_PROTECTION_OFF, HELPER_TIMEOUT, WIN32_CANCELLED,
-        WIN32_SERVICE_DISABLED,
+        classify_sequences, failed_exit_code, HelperRun, NewestSequence, CREATE_RESTORE_POINT_FLAG,
+        EXIT_PROTECTION_OFF, HELPER_TIMEOUT, WIN32_CANCELLED, WIN32_SERVICE_DISABLED,
     };
     use crate::core::error::{CoreError, Result};
     use windows::core::{w, BSTR, HSTRING, PCWSTR};
     use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoSetProxyBlanket,
-        CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, EOAC_NONE,
-        RPC_C_AUTHN_LEVEL_CALL, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
+        CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoSetProxyBlanket, CoUninitialize,
+        CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL,
+        RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
     };
     use windows::Win32::System::Restore::{
         SRSetRestorePointW, BEGIN_SYSTEM_CHANGE, END_SYSTEM_CHANGE, MODIFY_SETTINGS,
@@ -381,7 +378,11 @@ mod sys {
         if com.is_some() {
             init_security();
         }
-        let before = if com.is_some() { newest_sequence() } else { Err(()) };
+        let before = if com.is_some() {
+            newest_sequence()
+        } else {
+            Err(())
+        };
 
         // Built locally and moved in whole: the struct is packed, so its
         // fields cannot be borrowed.
@@ -420,7 +421,11 @@ mod sys {
             return failed_exit_code(end_status.nStatus.0);
         }
 
-        let after = if com.is_some() { newest_sequence() } else { Err(()) };
+        let after = if com.is_some() {
+            newest_sequence()
+        } else {
+            Err(())
+        };
         drop(com);
         classify_sequences(before, after)
     }
@@ -548,13 +553,24 @@ mod tests {
     fn an_unreadable_or_shrunk_list_cannot_tell() {
         assert_eq!(classify_sequences(Err(()), Ok(Some(8))), EXIT_MAYBE_SKIPPED);
         assert_eq!(classify_sequences(Ok(Some(7)), Err(())), EXIT_MAYBE_SKIPPED);
-        assert_eq!(classify_sequences(Ok(Some(7)), Ok(Some(6))), EXIT_MAYBE_SKIPPED);
-        assert_eq!(classify_sequences(Ok(Some(7)), Ok(None)), EXIT_MAYBE_SKIPPED);
+        assert_eq!(
+            classify_sequences(Ok(Some(7)), Ok(Some(6))),
+            EXIT_MAYBE_SKIPPED
+        );
+        assert_eq!(
+            classify_sequences(Ok(Some(7)), Ok(None)),
+            EXIT_MAYBE_SKIPPED
+        );
     }
 
     #[test]
     fn failure_codes_never_collide_with_the_small_codes() {
-        for small in [EXIT_CREATED, EXIT_SKIPPED, EXIT_MAYBE_SKIPPED, EXIT_PROTECTION_OFF] {
+        for small in [
+            EXIT_CREATED,
+            EXIT_SKIPPED,
+            EXIT_MAYBE_SKIPPED,
+            EXIT_PROTECTION_OFF,
+        ] {
             assert_eq!(small & EXIT_FAILED_BIT, 0);
         }
         assert_eq!(failed_exit_code(5), 0x2000_0005);
@@ -571,7 +587,10 @@ mod tests {
     fn a_test_process_cannot_reach_the_real_platform() {
         assert!(!super::super::real_os_effects_armed());
         let real = SystemRestorePoints;
-        assert!(matches!(real.run_helper("x"), Err(CoreError::RestorePoint(_))));
+        assert!(matches!(
+            real.run_helper("x"),
+            Err(CoreError::RestorePoint(_))
+        ));
         assert!(matches!(
             real.open_protection_settings(),
             Err(CoreError::RestorePoint(_))

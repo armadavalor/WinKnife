@@ -89,7 +89,10 @@ pub fn launch_route(args: &LaunchArgs, is_known: impl Fn(&str) -> bool) -> Optio
     if is_known(id) {
         return Some(format!("/{id}"));
     }
-    tracing::warn!(module = id, "unknown module on the command line; opening the dashboard");
+    tracing::warn!(
+        module = id,
+        "unknown module on the command line; opening the dashboard"
+    );
     Some(DASHBOARD_ROUTE.to_owned())
 }
 
@@ -761,8 +764,14 @@ mod tests {
     #[test]
     fn the_module_flag_is_parsed_in_both_spellings() {
         let expected = Some("startup".to_owned());
-        assert_eq!(parse_launch_args(argv(&["--module", "startup"])).module, expected);
-        assert_eq!(parse_launch_args(argv(&["--module=startup"])).module, expected);
+        assert_eq!(
+            parse_launch_args(argv(&["--module", "startup"])).module,
+            expected
+        );
+        assert_eq!(
+            parse_launch_args(argv(&["--module=startup"])).module,
+            expected
+        );
         assert_eq!(
             parse_launch_args(argv(&["--dry-run", "--module", "startup"])).module,
             expected
@@ -780,8 +789,14 @@ mod tests {
 
     #[test]
     fn a_module_flag_without_a_value_is_an_empty_id() {
-        assert_eq!(parse_launch_args(argv(&["--module"])).module, Some(String::new()));
-        assert_eq!(parse_launch_args(argv(&["--module="])).module, Some(String::new()));
+        assert_eq!(
+            parse_launch_args(argv(&["--module"])).module,
+            Some(String::new())
+        );
+        assert_eq!(
+            parse_launch_args(argv(&["--module="])).module,
+            Some(String::new())
+        );
     }
 
     #[test]
@@ -799,7 +814,10 @@ mod tests {
 
         assert_eq!(route(&[]), None, "no flag leaves the window where it is");
         assert_eq!(route(&["--module", "startup"]).as_deref(), Some("/startup"));
-        assert_eq!(route(&["--module", "nope"]).as_deref(), Some(DASHBOARD_ROUTE));
+        assert_eq!(
+            route(&["--module", "nope"]).as_deref(),
+            Some(DASHBOARD_ROUTE)
+        );
         assert_eq!(route(&["--module"]).as_deref(), Some(DASHBOARD_ROUTE));
         // An id is a registry key, not a path: nothing else gets through.
         assert_eq!(

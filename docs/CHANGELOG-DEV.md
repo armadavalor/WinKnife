@@ -1639,3 +1639,21 @@ polite action.
 **Deferred / unverified.** The manual check against Word with unsaved work
 (the save prompt and the "still running" path) has not been done. There is
 no language picker for TR yet (see DECISIONS-NEEDED).
+
+---
+
+## 2026-10-12 — v0.2.0 integration
+
+**Built.** Merged `feat/v0.2.0-core` (#21 follow-ups, single instance +
+`--module`, restore point), `feat/v0.2.0-tools` (keep-awake, empty folders) and
+`feat/v0.2.0-unlocker` (file unlocker) into `feat/v0.2.0`.
+
+- **Folder gate.** The executor now refuses a `Directory` finding from any
+  module other than empty-folders: folders skip the lock probe, and only that
+  module re-checks emptiness right before the move. Test:
+  `a_folder_finding_from_another_module_is_refused`.
+- **EFS tests are opt-in.** The three quarantine tests that run `cipher /e`
+  make Windows create an EFS key and show a "back up your key" notification on
+  a contributor's machine. They now run only with `WINKNIFE_EFS_TESTS=1` and
+  print a visible skip line otherwise; `ci.yml` and `release.yml` set it.
+- `cargo fmt` over the merged tree.

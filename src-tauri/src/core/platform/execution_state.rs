@@ -16,9 +16,9 @@
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
-use crate::core::error::Result;
 #[cfg(windows)]
 use crate::core::error::CoreError;
+use crate::core::error::Result;
 
 /// What a session asks the system to stay awake for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

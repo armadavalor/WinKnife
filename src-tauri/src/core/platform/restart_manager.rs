@@ -365,8 +365,7 @@ impl<A: RmApi> RestartManager for RmSessions<A> {
 
     fn request_close(&self, target: UniqueProcess) -> Result<CloseOutcome, RmError> {
         // The two PIDs that are never asked, whatever Windows calls them.
-        if let ClosePolicy::InfoOnly { reason, .. } = close_policy(target.pid, AppKind::WindowApp)
-        {
+        if let ClosePolicy::InfoOnly { reason, .. } = close_policy(target.pid, AppKind::WindowApp) {
             return Self::refusal(reason);
         }
         match self.api.process_state(target.pid) {
@@ -404,12 +403,16 @@ impl<A: RmApi> RestartManager for RmSessions<A> {
                 Err(RmError::NotArmed) => return Err(RmError::NotArmed),
                 // The program declined or did not answer in time. Whether it
                 // is still running is checked below either way.
-                Err(err) => tracing::info!(pid = target.pid, %err, "polite close was not completed"),
+                Err(err) => {
+                    tracing::info!(pid = target.pid, %err, "polite close was not completed")
+                }
             }
         }
 
         Ok(match self.api.process_state(target.pid) {
-            ProcessState::Running(start) if start == target.start_time => CloseOutcome::StillRunning,
+            ProcessState::Running(start) if start == target.start_time => {
+                CloseOutcome::StillRunning
+            }
             // Cannot tell: the cautious answer is that it may still be there.
             ProcessState::Unknown => CloseOutcome::StillRunning,
             ProcessState::Running(_) | ProcessState::Gone => CloseOutcome::Closed,
@@ -437,7 +440,10 @@ pub struct SystemRmApi;
 #[cfg(windows)]
 fn wide(path: &Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
-    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// UTF-16 buffer up to its first NUL.
@@ -448,7 +454,10 @@ fn from_wide(buf: &[u16]) -> String {
 }
 
 #[cfg(windows)]
-fn check(call: &'static str, result: windows::Win32::Foundation::WIN32_ERROR) -> Result<(), RmError> {
+fn check(
+    call: &'static str,
+    result: windows::Win32::Foundation::WIN32_ERROR,
+) -> Result<(), RmError> {
     if result.0 == 0 {
         Ok(())
     } else {
@@ -610,7 +619,9 @@ mod win_process {
     use std::path::PathBuf;
 
     use windows::core::PWSTR;
-    use windows::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, STILL_ACTIVE};
+    use windows::Win32::Foundation::{
+        CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, STILL_ACTIVE,
+    };
     use windows::Win32::System::Threading::{
         GetExitCodeProcess, GetProcessTimes, OpenProcess, QueryFullProcessImageNameW,
         PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -675,7 +686,12 @@ mod win_process {
         let mut len = u32::try_from(buffer.len()).ok()?;
         // SAFETY: `len` is the buffer length; the buffer outlives the call.
         unsafe {
-            QueryFullProcessImageNameW(handle.0, PROCESS_NAME_WIN32, PWSTR(buffer.as_mut_ptr()), &mut len)
+            QueryFullProcessImageNameW(
+                handle.0,
+                PROCESS_NAME_WIN32,
+                PWSTR(buffer.as_mut_ptr()),
+                &mut len,
+            )
         }
         .ok()?;
         let end = (len as usize).min(buffer.len());
@@ -730,7 +746,12 @@ pub(crate) mod fake {
         pub fn with_holders(holders: Vec<(LockInfo, Vec<PathBuf>)>) -> Self {
             let running = holders
                 .iter()
-                .map(|(info, _)| (info.process.pid, ProcessState::Running(info.process.start_time)))
+                .map(|(info, _)| {
+                    (
+                        info.process.pid,
+                        ProcessState::Running(info.process.start_time),
+                    )
+                })
                 .collect();
             Self {
                 holders,
@@ -744,7 +765,9 @@ pub(crate) mod fake {
         }
 
         fn holds(files: &[PathBuf], wanted: &[PathBuf]) -> bool {
-            files.iter().any(|f| wanted.iter().any(|w| Path::new(w) == f))
+            files
+                .iter()
+                .any(|f| wanted.iter().any(|w| Path::new(w) == f))
         }
     }
 
@@ -768,7 +791,11 @@ pub(crate) mod fake {
                 });
             }
             let mut registered = self.registered.lock().expect("registered");
-            registered.entry(session).or_default().0.extend_from_slice(files);
+            registered
+                .entry(session)
+                .or_default()
+                .0
+                .extend_from_slice(files);
             Ok(())
         }
 
@@ -813,7 +840,10 @@ pub(crate) mod fake {
                 });
             }
             let registered = self.registered.lock().expect("registered");
-            let processes = registered.get(&session).map(|r| r.1.clone()).unwrap_or_default();
+            let processes = registered
+                .get(&session)
+                .map(|r| r.1.clone())
+                .unwrap_or_default();
             let mut running = self.running.lock().expect("running");
             for process in processes {
                 running.insert(process.pid, ProcessState::Gone);
@@ -912,7 +942,9 @@ mod tests {
     #[test]
     fn files_are_registered_in_batches_of_500() {
         let rm = rm_with(Vec::new());
-        let files: Vec<PathBuf> = (0..1_234).map(|i| PathBuf::from(format!("C:\\f{i}"))).collect();
+        let files: Vec<PathBuf> = (0..1_234)
+            .map(|i| PathBuf::from(format!("C:\\f{i}")))
+            .collect();
         rm.locking_processes(&files).expect("query");
         assert_eq!(rm.api().calls().file_batches, vec![500, 500, 234]);
         assert_every_session_ended(&rm);
@@ -924,7 +956,9 @@ mod tests {
             fail_register: true,
             ..FakeRmApi::default()
         });
-        let err = rm.locking_processes(&[PathBuf::from("C:\\a")]).expect_err("fails");
+        let err = rm
+            .locking_processes(&[PathBuf::from("C:\\a")])
+            .expect_err("fails");
         assert!(matches!(err, RmError::Win32 { .. }));
         assert_every_session_ended(&rm);
     }
@@ -934,15 +968,23 @@ mod tests {
         let a = PathBuf::from("C:\\a");
         let rm = rm_with(vec![(holder(10, AppKind::WindowApp), vec![a.clone()])]);
         *rm.api().more_data_rounds.lock().expect("rounds") = MORE_DATA_RETRIES;
-        let list = rm.locking_processes(std::slice::from_ref(&a)).expect("last retry succeeds");
+        let list = rm
+            .locking_processes(std::slice::from_ref(&a))
+            .expect("last retry succeeds");
         assert_eq!(list.len(), 1);
-        assert_eq!(rm.api().calls().get_list_capacities.len(), MORE_DATA_RETRIES + 1);
+        assert_eq!(
+            rm.api().calls().get_list_capacities.len(),
+            MORE_DATA_RETRIES + 1
+        );
 
         let rm = rm_with(vec![(holder(10, AppKind::WindowApp), vec![a.clone()])]);
         *rm.api().more_data_rounds.lock().expect("rounds") = MORE_DATA_RETRIES + 1;
         let err = rm.locking_processes(&[a]).expect_err("gives up");
         assert!(matches!(err, RmError::ListKeptGrowing));
-        assert_eq!(rm.api().calls().get_list_capacities.len(), MORE_DATA_RETRIES + 1);
+        assert_eq!(
+            rm.api().calls().get_list_capacities.len(),
+            MORE_DATA_RETRIES + 1
+        );
         assert_every_session_ended(&rm);
     }
 
@@ -968,7 +1010,10 @@ mod tests {
         assert_eq!(outcome, CloseOutcome::Closed);
         let calls = rm.api().calls();
         assert_eq!(calls.registered_processes, vec![word.process]);
-        assert!(calls.file_batches.is_empty(), "no files in the close session");
+        assert!(
+            calls.file_batches.is_empty(),
+            "no files in the close session"
+        );
         assert_eq!(calls.shutdowns, 1);
         drop(calls);
         assert_every_session_ended(&rm);
@@ -978,7 +1023,10 @@ mod tests {
     fn a_program_that_declines_is_reported_still_running() {
         let word = holder(10, AppKind::WindowApp);
         let rm = rm_with(vec![(word.clone(), vec![PathBuf::from("C:\\a")])]);
-        assert_eq!(rm.request_close(word.process).expect("asked"), CloseOutcome::StillRunning);
+        assert_eq!(
+            rm.request_close(word.process).expect("asked"),
+            CloseOutcome::StillRunning
+        );
         assert_every_session_ended(&rm);
     }
 
@@ -991,7 +1039,10 @@ mod tests {
             start_time: word.process.start_time + 1,
         };
         let outcome = rm.request_close(stale).expect("answered");
-        assert!(matches!(outcome, CloseOutcome::Refused { .. }), "{outcome:?}");
+        assert!(
+            matches!(outcome, CloseOutcome::Refused { .. }),
+            "{outcome:?}"
+        );
         let calls = rm.api().calls();
         assert_eq!(calls.started, 0);
         assert_eq!(calls.shutdowns, 0);
@@ -999,9 +1050,15 @@ mod tests {
 
     #[test]
     fn info_only_kinds_are_refused_server_side() {
-        for kind in [AppKind::Service, AppKind::Explorer, AppKind::Critical, AppKind::Unknown] {
+        for kind in [
+            AppKind::Service,
+            AppKind::Explorer,
+            AppKind::Critical,
+            AppKind::Unknown,
+        ] {
             let info = holder(20, kind);
-            let mut api = FakeRmApi::with_holders(vec![(info.clone(), vec![PathBuf::from("C:\\a")])]);
+            let mut api =
+                FakeRmApi::with_holders(vec![(info.clone(), vec![PathBuf::from("C:\\a")])]);
             api.shutdown_closes = true;
             let rm = RmSessions::new(api);
             let outcome = rm.request_close(info.process).expect("answered");
@@ -1049,7 +1106,10 @@ mod tests {
     #[test]
     fn the_real_process_lookup_finds_this_test() {
         let pid = std::process::id();
-        assert!(matches!(SystemRmApi.process_state(pid), ProcessState::Running(_)));
+        assert!(matches!(
+            SystemRmApi.process_state(pid),
+            ProcessState::Running(_)
+        ));
         assert!(SystemRmApi.exe_path(pid).is_some());
     }
 }

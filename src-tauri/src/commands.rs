@@ -34,7 +34,6 @@ use crate::core::executor::{self, ExecEnvironment};
 use crate::core::history;
 use crate::core::module::{ModuleManifest, ModuleRegistry};
 use crate::core::platform::{PowerAction, RecycleBin};
-use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::core::quarantine::{
     PurgeReport, Quarantine, QuarantineBatch, QuarantineItem, QuarantineStats, RestoreOutcome,
     RetentionPolicy,
@@ -46,6 +45,7 @@ use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, DuplicateProgress, DuplicateScan};
 use crate::modules::empty_folders;
 use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
+use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
 use crate::modules::{startup, treemap};
 
@@ -526,7 +526,11 @@ pub async fn start_empty_folder_scan<R: Runtime>(
         ))
     };
     let root = root
-        .or_else(|| crate::core::platform::SystemEnv.var("USERPROFILE").map(PathBuf::from))
+        .or_else(|| {
+            crate::core::platform::SystemEnv
+                .var("USERPROFILE")
+                .map(PathBuf::from)
+        })
         .ok_or_else(|| invalid("no folder was chosen and no user profile was found".to_owned()))?;
     if !root.is_dir() {
         return Err(invalid(format!("`{}` is not a folder", root.display())).into());
@@ -1604,7 +1608,9 @@ pub async fn unlocker_query(
         crate::modules::file_unlocker::query(rm.as_ref(), &paths).map_err(unlocker_error)
     })
     .await
-    .map_err(|err| ApiError::new("unlocker_failed", "the query did not finish").with_detail(err.to_string()))?
+    .map_err(|err| {
+        ApiError::new("unlocker_failed", "the query did not finish").with_detail(err.to_string())
+    })?
 }
 
 /// Ask one window or console program to close, politely (`RmShutdown` with no
@@ -1619,16 +1625,21 @@ pub async fn unlocker_request_close(
     pid: u32,
     start_time: String,
 ) -> Result<crate::modules::file_unlocker::CloseReport, ApiError> {
-    let start_time: u64 = start_time
-        .parse()
-        .map_err(|_| ApiError::new("invalid_start_time", "the process start time is not a number"))?;
+    let start_time: u64 = start_time.parse().map_err(|_| {
+        ApiError::new(
+            "invalid_start_time",
+            "the process start time is not a number",
+        )
+    })?;
     let process = crate::core::platform::UniqueProcess { pid, start_time };
     tauri::async_runtime::spawn_blocking(move || {
         let rm = crate::core::platform::real_restart_manager();
         crate::modules::file_unlocker::request_close(rm.as_ref(), process).map_err(unlocker_error)
     })
     .await
-    .map_err(|err| ApiError::new("unlocker_failed", "the request did not finish").with_detail(err.to_string()))?
+    .map_err(|err| {
+        ApiError::new("unlocker_failed", "the request did not finish").with_detail(err.to_string())
+    })?
 }
 
 #[cfg(test)]
