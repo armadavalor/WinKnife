@@ -21,6 +21,9 @@ pub const SCAN_DONE: &str = "scan:done";
 pub const EXEC_PROGRESS: &str = "exec:progress";
 /// The quarantine contents changed (item added, restored or purged).
 pub const QUARANTINE_CHANGED: &str = "quarantine:changed";
+/// A keep-awake session started, stopped or expired. No payload: the UI
+/// re-reads `keep_awake_status`.
+pub const KEEP_AWAKE_CHANGED: &str = "keep-awake:changed";
 
 /// Upper bound on progress events per second, per ARCHITECTURE section 3.
 pub const MAX_PROGRESS_EVENTS_PER_SEC: u32 = 10;
@@ -131,6 +134,14 @@ pub fn emit_quarantine_changed<R: Runtime>(
     payload: &QuarantineChanged,
 ) -> Result<()> {
     emit(app, QUARANTINE_CHANGED, payload)
+}
+
+/// Emit [`KEEP_AWAKE_CHANGED`].
+///
+/// # Errors
+/// See [`CoreError::Emit`].
+pub fn emit_keep_awake_changed<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
+    emit(app, KEEP_AWAKE_CHANGED, &())
 }
 
 /// Rate limiter for progress events.

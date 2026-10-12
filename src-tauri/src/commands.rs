@@ -44,6 +44,8 @@ use crate::core::state::{CancelRegistry, ScanResult, ScanStore};
 use crate::core::types::ExecReport;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, DuplicateProgress, DuplicateScan};
+use crate::modules::empty_folders;
+use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
 use crate::modules::{startup, treemap};
 
@@ -473,6 +475,130 @@ pub async fn start_duplicate_scan<R: Runtime>(
         wasted_bytes: scan.wasted_bytes(),
         scan_id,
         scan,
+        recommendations,
+    })
+}
+
+/// What an empty-folder scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmptyFolderScanResult {
+    /// Id for `execute` and `cancel_scan`.
+    pub scan_id: Uuid,
+    /// The folder that was scanned.
+    pub root: PathBuf,
+    /// The topmost empty folders.
+    pub findings: Vec<crate::core::types::Finding>,
+    /// One explained recommendation per finding.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+    /// Folders that could not be read and were therefore treated as not empty.
+    pub unreadable: u64,
+    /// Protected trees that were deliberately not entered.
+    pub skipped_protected: u64,
+    /// Folders looked at.
+    pub folders_visited: u64,
+    /// Whether the scan was cancelled part-way.
+    pub cancelled: bool,
+}
+
+/// Scan `root` (default: the user profile) for folders with no files in them.
+///
+/// Blocking work; read-only.
+///
+/// # Errors
+/// Returns an error when the root is not a folder, is a protected location, or
+/// no default root can be determined.
+#[tauri::command]
+pub async fn start_empty_folder_scan<R: Runtime>(
+    app: AppHandle<R>,
+    root: Option<PathBuf>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+    cancels: State<'_, CancelRegistry>,
+) -> Result<EmptyFolderScanResult, ApiError> {
+    use crate::core::platform::EnvResolver;
+
+    let invalid = |message: String| {
+        CoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            message,
+        ))
+    };
+    let root = root
+        .or_else(|| crate::core::platform::SystemEnv.var("USERPROFILE").map(PathBuf::from))
+        .ok_or_else(|| invalid("no folder was chosen and no user profile was found".to_owned()))?;
+    if !root.is_dir() {
+        return Err(invalid(format!("`{}` is not a folder", root.display())).into());
+    }
+    if let Some(refusal) = services.brain.path_refusal(&root) {
+        return Err(invalid(refusal.reason).into());
+    }
+
+    let scan_id = Uuid::new_v4();
+    let started_at = Utc::now();
+    let cancel = cancels.start(scan_id);
+    let mut throttle = ProgressThrottle::new();
+    let mut emit = |visited: u64, current: &Path| {
+        if !throttle.should_emit() {
+            return;
+        }
+        let payload = ScanProgress {
+            scan_id,
+            module: empty_folders::MODULE_ID.to_owned(),
+            items_scanned: visited,
+            current_path: Some(current.display().to_string()),
+            pct: None,
+        };
+        if let Err(err) = events::emit_scan_progress(&app, &payload) {
+            tracing::debug!(error = %err, "empty-folder progress event was not delivered");
+        }
+    };
+
+    let output = empty_folders::scan(
+        &empty_folders::ScanContext {
+            root: &root,
+            protected: services.brain.protected_paths(),
+            cancel: &cancel,
+        },
+        Some(&mut emit),
+    );
+    cancels.finish(scan_id);
+
+    let recommendations = empty_folders::analyze(&output.findings, &services.brain);
+    store.insert(ScanResult {
+        scan_id,
+        module: empty_folders::MODULE_ID.to_owned(),
+        findings: output.findings.clone(),
+        recommendations: recommendations.clone(),
+        skipped_rules: Vec::new(),
+    });
+    remember(
+        &db,
+        scan_id,
+        empty_folders::MODULE_ID,
+        started_at,
+        output.findings.len() as u64,
+        0,
+        output.cancelled,
+    );
+    let _ = events::emit_scan_done(
+        &app,
+        &ScanDone {
+            scan_id,
+            module: empty_folders::MODULE_ID.to_owned(),
+            finding_count: output.findings.len() as u64,
+        },
+    );
+
+    Ok(EmptyFolderScanResult {
+        scan_id,
+        root,
+        unreadable: output.unreadable.len() as u64,
+        skipped_protected: output.skipped_protected,
+        folders_visited: output.folders_visited,
+        cancelled: output.cancelled,
+        findings: output.findings,
         recommendations,
     })
 }
@@ -1100,6 +1226,7 @@ fn read_settings(
         .brain
         .packs()
         .iter()
+        .filter(|pack| pack.spec.module == cleaner::CLEANER_MODULE_ID)
         .map(|pack| PackView {
             id: pack.id().to_owned(),
             name: pack.spec.name.clone(),
@@ -1404,6 +1531,51 @@ pub fn restore_point_open_settings(
     service: State<'_, Arc<RestorePointService>>,
 ) -> Result<(), ApiError> {
     Ok(service.open_protection_settings()?)
+}
+
+/* -------------------------------------------------------------------------
+ * Keep awake
+ * ---------------------------------------------------------------------- */
+
+/// Start keep-awake, replacing any running session.
+///
+/// # Errors
+/// Returns [`CoreError::InvalidTimer`] for zero minutes or more than 24 hours.
+#[tauri::command]
+pub async fn keep_awake_start(
+    minutes: u32,
+    display: bool,
+    engine: State<'_, Arc<KeepAwake>>,
+) -> Result<KeepAwakeStatus, ApiError> {
+    // Joins the previous worker thread, so keep it off the async runtime.
+    let engine = Arc::clone(&engine);
+    tauri::async_runtime::spawn_blocking(move || engine.start(minutes, display, Utc::now()))
+        .await
+        .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")))?
+        .map_err(ApiError::from)
+}
+
+/// Stop keep-awake. Stopping when nothing runs is not an error.
+///
+/// # Errors
+/// Fails only if the background task cannot be joined.
+#[tauri::command]
+pub async fn keep_awake_stop(
+    engine: State<'_, Arc<KeepAwake>>,
+) -> Result<KeepAwakeStatus, ApiError> {
+    let engine = Arc::clone(&engine);
+    tauri::async_runtime::spawn_blocking(move || engine.stop())
+        .await
+        .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")).into())
+}
+
+/// Current keep-awake state.
+///
+/// # Errors
+/// Infallible today; keeps the shared `Result` shape.
+#[tauri::command]
+pub fn keep_awake_status(engine: State<'_, Arc<KeepAwake>>) -> Result<KeepAwakeStatus, ApiError> {
+    Ok(engine.status())
 }
 
 #[cfg(test)]

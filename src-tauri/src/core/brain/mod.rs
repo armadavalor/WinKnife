@@ -322,6 +322,24 @@ impl Brain {
         if finding.kind == FindingKind::RecycleBinItem {
             return self.classify_by_rule(matched, signals);
         }
+        // A folder is never "held open" the way a file is: the lock probe can
+        // only answer `Inaccessible` for it, which would rate every folder red.
+        // The path gate still applies in full; what a folder's contents are
+        // doing is the owning module's emptiness check, re-run at execute time.
+        if finding.kind == FindingKind::Directory {
+            if let Some(refusal) = self.path_refusal(&finding.path) {
+                return Verdict {
+                    bucket: RiskBucket::DoNotDelete,
+                    confidence: GATE_CONFIDENCE,
+                    action: Action::InfoOnly,
+                    reason: refusal.reason,
+                    source: VerdictSource::ProtectedPath,
+                    rule: matched.map(|rule| (rule.pack_id.clone(), rule.spec.id.clone())),
+                    scored: None,
+                };
+            }
+            return self.classify_by_rule(matched, signals);
+        }
         self.classify_with(&finding.path, matched, signals)
     }
 

@@ -1533,3 +1533,53 @@ directly on a mock app.
 create within 24h reports skipped; answering "No" to UAC reports declined. None
 of these has been run: the UAC prompt and `SRSetRestorePointW` cannot be
 exercised from the test suite.
+## 2026-10-12 — Phase 5 task 2: keep-awake
+
+**Built.** Module `keep-awake`: hold the PC awake for 1 to 1440 minutes,
+optionally with the screen on.
+
+- `core/platform/execution_state.rs`: `ExecutionState` trait,
+  `RecordingExecutionState` fake and the crate-private `SystemExecutionState`
+  (`SetThreadExecutionState`, refused unless `real_os_effects_armed()`).
+- `modules/keep_awake.rs`: one dedicated worker thread per session (the OS flag
+  is per thread), wall-clock deadline re-checked every 30 s so a sleep/wake
+  cannot stretch the session, stop joins the thread, replacing a session starts
+  a fresh thread. Max 24 h, no forever mode, nothing persisted. Commands
+  `keep_awake_start/stop/status`, event `keep-awake:changed` (no payload).
+- UI `src/routes/keep-awake/`: presets 30m/1h/2h/4h plus custom, screen toggle,
+  always-visible Stop, countdown from the deadline, "nothing persisted" line,
+  hint when a shutdown timer is armed. Sidebar icon `coffee`. EN keys and the
+  first `tr` dictionary (keep-awake keys only so far; the rest falls back to EN).
+- Wiring test probes cover the three commands (dry run: recorder, no OS call).
+
+**Decisions.** Validation errors reuse `CoreError::InvalidTimer`.
+
+**Deferred / unverified.** The manual `powercfg /requests` check on a real
+Windows session was not run. 5 pre-existing tests fail in this environment
+because creating symlinks needs Developer Mode or elevation (executor,
+quarantine x2, scanner, cleaner); none involve this module.
+
+## Phase 5 - empty-folders module (spec 08)
+
+**Built.**
+- `src-tauri/src/modules/empty_folders.rs`, rule pack `rules/empty-folders.json`.
+  A folder is empty only when it holds no file at any depth (even `desktop.ini`
+  counts). Only the topmost empty folder of each subtree is reported, with the
+  nested count in `meta`. Reparse points, cloud placeholders, unreadable folders
+  and protected trees are never traversed or reported (the last two are counted).
+  A drive root may be scanned but is never a finding. Cancellable, with progress.
+- Analysis: hard gates first (`path_refusal`, protected-below, system folder),
+  then the rule pack via the Brain. Savings are 0. Execute is `Quarantine`; the
+  executor re-checks emptiness (`recheck_refusal`) and skips with a reason.
+- Command `start_empty_folder_scan(root?)` (default root: user profile).
+- UI `src/routes/empty-folders/` plus `stores/emptyFolders.svelte.ts`, `folder`
+  icon, EN + TR keys, typed wrappers and mirrored types. Nothing starts selected.
+- Brain: `FindingKind::Directory` branch; executor: lock probe skipped for
+  directories. Cleaner now only loads its own pack (`CLEANER_MODULE_ID`), and
+  `read_settings` filters packs by module.
+
+**Decisions.** See DECISIONS-NEEDED.md (2026-10-12 phase 5 entries).
+
+**Deferred / unverified.** The access-denied test returns early when the
+`icacls` deny is ineffective (e.g. elevated token), so it may not exercise that
+path on every machine. The same 5 environmental symlink test failures apply.

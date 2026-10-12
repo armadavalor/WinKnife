@@ -810,3 +810,10 @@ not ours to take.
   (helper still running after 5 minutes; it is left alone, never killed).
   A second create while one is running is refused — safest interpretation
   taken.
+- [ ] 2026-10-12 (phase 5): ProgramData is a protected tree, so the `program-data` NeedsReview rule in `rules/empty-folders.json` is never reached (protected trees are skipped, not reported) — kept as is, harmless.
+- [ ] 2026-10-12 (phase 5): Brain and executor skip the lock probe for directories (an empty folder has no handle to probe); the execute-time emptiness re-check replaces it — kept the re-check, the safest reading.
+- [ ] 2026-10-12 (phase 5): Rule packs are now filtered per module (cleaner loads only `cleaner`, `read_settings` too) so the empty-folders pack cannot leak into the cleaner — added a module filter.
+- [ ] 2026-10-12 (phase 5): The `**` fallback and `program-data` rules set `requires_admin: true` only to satisfy the rule-containment validator; it has no runtime meaning here.
+- [ ] 2026-10-12 (phase 5): UNC paths match no rule and become DoNotDelete; an 8.3-spelled `%TEMP%` may fall to NeedsReview — both err toward not deleting.
+- [ ] 2026-10-12 (phase 5): Invalid scan roots are reported as `CoreError::Io(InvalidInput)` rather than adding an error variant — minimal diff.
+- [ ] 2026-10-12 (phase 5): `program-data` is now `info_only` capped at do_not_delete (it sits in a protected tree), and cleaner test `no_shipped_rule_targets_a_protected_path` skips the empty root of the catch-all `**` glob — the only test edit beyond pack filtering.

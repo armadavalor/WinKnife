@@ -337,6 +337,7 @@ pub fn manage_state<R: tauri::Runtime>(
     // spell it the same way.
     app.manage(database);
     app.manage(Arc::clone(&timer));
+    app.manage(Arc::new(modules::keep_awake::build(app, dry_run)));
 
     Ok(timer)
 }
@@ -354,6 +355,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::start_scan,
         commands::cancel_scan,
         commands::start_duplicate_scan,
+        commands::start_empty_folder_scan,
         commands::treemap_drives,
         commands::treemap_scan,
         commands::treemap_children,
@@ -380,6 +382,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::restore_point_status,
         commands::restore_point_create,
         commands::restore_point_open_settings,
+        commands::keep_awake_start,
+        commands::keep_awake_stop,
+        commands::keep_awake_status,
     ]
 }
 

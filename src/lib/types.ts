@@ -707,6 +707,17 @@ export interface PurgeReport {
  * modules/shutdown_timer.rs
  * ---------------------------------------------------------------------- */
 
+/* modules/keep_awake.rs */
+
+/** Whether the machine is being kept awake, and until when. */
+export interface KeepAwakeStatus {
+  active: boolean;
+  /** Wall-clock end of the session (RFC 3339), or null when idle. */
+  deadline: string | null;
+  /** Whether the screen is kept on as well. */
+  display: boolean;
+}
+
 /** What happens when a timer reaches zero. */
 export type PowerAction = "shutdown" | "restart" | "sleep";
 
@@ -753,3 +764,27 @@ export type CreateOutcome =
   | { state: "declined" }
   | { state: "timedOut" }
   | { state: "failed"; code: number };
+/* -------------------------------------------------------------------------
+ * modules/empty_folders.rs
+ * ---------------------------------------------------------------------- */
+
+/** Metadata an empty-folder finding carries. */
+export interface EmptyFolderMeta {
+  /** How many empty folders are nested inside this one. */
+  nested: number;
+  /** True for a folder Windows marks as a system folder. */
+  system: boolean;
+}
+
+/** What `start_empty_folder_scan` hands back. */
+export interface EmptyFolderScanResult {
+  scanId: string;
+  root: string;
+  /** The topmost empty folders. */
+  findings: Finding[];
+  recommendations: Recommendation[];
+  unreadable: number;
+  skippedProtected: number;
+  foldersVisited: number;
+  cancelled: boolean;
+}

@@ -116,6 +116,11 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "start_duplicate_scan",
             args: json!({ "roots": [&root] }),
         },
+        // An explicit root, or the command scans the developer's profile.
+        Probe {
+            command: "start_empty_folder_scan",
+            args: json!({ "root": &root }),
+        },
         Probe {
             command: "treemap_drives",
             args: json!({}),
@@ -239,6 +244,20 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
         // Refused for the same reason: no settings window opens.
         Probe {
             command: "restore_point_open_settings",
+            args: json!({}),
+        },
+        // `manage_state` is asked for a dry run, so the engine holds a
+        // recorder: started, observed, stopped, never touching the OS.
+        Probe {
+            command: "keep_awake_start",
+            args: json!({ "minutes": 1, "display": false }),
+        },
+        Probe {
+            command: "keep_awake_status",
+            args: json!({}),
+        },
+        Probe {
+            command: "keep_awake_stop",
             args: json!({}),
         },
     ]

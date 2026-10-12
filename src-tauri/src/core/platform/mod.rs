@@ -19,6 +19,7 @@
 //! only `lib.rs::run()` can do (security review H5).
 
 pub(crate) mod env;
+pub(crate) mod execution_state;
 pub(crate) mod explorer;
 pub(crate) mod file_id;
 pub(crate) mod guard;
@@ -37,6 +38,7 @@ pub(crate) mod volume;
 use std::sync::Arc;
 
 pub use env::{EnvResolver, MapEnv, SystemEnv};
+pub use execution_state::{AwakeRequest, ExecutionState, RecordedCall, RecordingExecutionState};
 pub use explorer::reveal_in_explorer;
 pub use file_id::{file_identity, try_file_identity, FileId};
 pub use guard::real_os_effects_armed;
@@ -76,6 +78,19 @@ pub fn real_power_controller() -> Arc<dyn PowerController> {
     {
         // No power API to reach off Windows; log instead of pretending.
         Arc::new(DryRunPower::new())
+    }
+}
+
+/// The execution-state API that talks to the OS (keep-awake).
+pub fn real_execution_state() -> Arc<dyn ExecutionState> {
+    #[cfg(windows)]
+    {
+        Arc::new(execution_state::SystemExecutionState)
+    }
+    #[cfg(not(windows))]
+    {
+        // No such API off Windows; record instead of pretending.
+        Arc::new(RecordingExecutionState::new())
     }
 }
 
