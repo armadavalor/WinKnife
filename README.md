@@ -1,143 +1,98 @@
-<img width="412" height="412" alt="WinKnife Logo gh" src="https://github.com/user-attachments/assets/02b97ebe-a96e-4508-9b20-208a2db247a1" />
-
-
-
-
 # WinKnife
+
+<img width="412" height="412" alt="WinKnife Logo gh" src="https://github.com/user-attachments/assets/02b97ebe-a96e-4508-9b20-208a2db247a1" />
 
 [![CI](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml/badge.svg)](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A modular Windows "Swiss army knife" utility: disk cleaning, duplicate finding,
-treemap, startup management and a shutdown timer (& more to come!) — in one calm window.
+A Windows utility that brings disk cleaning, duplicate finding, a disk map,
+startup management and a shutdown timer into one window.
 
-> **Status: Phase 1 (first blood).** Two working tools — a shutdown timer and
-> a disk cleaner covering the three "safe" rule packs — on top of a quarantine
-> service that makes every removal reversible. See `docs/phases/` for the
-> roadmap.
+[ Türkçe ](README.tr.md)
 
-## Core promise
+**Status:** five tools implemented; preparing the first v0.1.0 release.
+Release acceptance, including a fresh Windows VM install/restore/uninstall check,
+is still pending. There is no promised release date.
 
-**Analyze first, never delete without consent, everything reversible.**
+| Tool | What works |
+| --- | --- |
+| Disk Cleaner | Read-only scans, reasons and risk buckets, selected cleanup through quarantine, previous scan summary. |
+| Duplicate Finder | Byte-identical duplicate detection and review before quarantining selected copies. |
+| Disk map | Folder sizes, drill-down and a treemap to investigate disk usage. |
+| Startup | Review login entries, disable and restore supported entries. Impact is estimated, not a measured boot time. |
+| Shutdown Timer | Schedule shutdown, restart or sleep; countdown, warnings and cancellation. |
 
-- Nothing is deleted without an explicit confirmation. Everything removable
-  goes to a **quarantine** first and can be restored.
-- **Offline-first.** The intelligence is a local rule engine. The optional LLM
-  layer is off by default and never sees file contents.
-- **Every recommendation explains itself** — each one carries a human-readable
-  reason.
+## Safety and privacy
 
-## Tech stack
+- Scans inspect first; file cleanup requires confirmation. Each recommendation explains its reason.
+- Ordinary cleaned files go to quarantine and can be restored **while retained**. Retention age and size limits can permanently purge them, including at app startup.
+- **Emptying the Windows recycle bin is permanent** and has its own confirmation. It cannot be restored through WinKnife.
+- Protected system locations cannot receive a cleanup action. Uncertain items require review or are informational only.
+- The current app uses local rules. The optional LLM layer is planned and **not implemented** in this release preparation.
+- WinKnife is not a registry cleaner, driver updater, antivirus or a promise of more FPS. See [module backlog](docs/modules/BACKLOG.md).
 
-| Layer      | Choice                                  |
-| ---------- | --------------------------------------- |
-| Backend    | Rust, [Tauri v2](https://tauri.app)     |
-| UI         | Svelte 5 + TypeScript + Tailwind CSS v4 |
-| Storage    | SQLite (rusqlite) + JSON rule packs     |
-| CI         | GitHub Actions on `windows-latest`      |
+## Build and run
 
-## Development
+Windows development requires Rust stable with the MSVC toolchain, Visual Studio
+C++ Build Tools, Node.js **24**, and the WebView2 runtime.
 
-### Prerequisites
+From the repository root:
 
-Windows 10 or 11, plus:
+~~~powershell
+git clone https://github.com/armadavalor/WinKnife.git
+cd WinKnife
+npm ci
+npm run tauri dev
+~~~
 
-| Tool | Version | Notes |
-| ---- | ------- | ----- |
-| [Rust](https://rustup.rs) | stable, `x86_64-pc-windows-msvc` | `rustup default stable-msvc` |
-| [Node.js](https://nodejs.org) | 20 or newer | ships with npm |
-| Visual Studio Build Tools | 2019 or newer | "Desktop development with C++" workload |
-| [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) | evergreen | preinstalled on Windows 11 and up-to-date Windows 10 |
+Checks and production build:
 
-That is the full list from Tauri's
-[Windows prerequisites](https://tauri.app/start/prerequisites/). If
-`cargo build` fails with a linker error, the C++ workload is the usual cause.
+~~~powershell
+npm run check
+npm run test:ui
+npm run build
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run tauri build -- --bundles nsis
+~~~
 
-### First run
+Link safety tests require Windows Developer Mode or an elevated test session.
+CI must run them without opt-outs. The local opt-out and its limitations are
+recorded in [release instructions](docs/RELEASING.md).
 
-```sh
-git clone https://github.com/armadavalor/WinKnife.git && cd WinKnife
-npm install              # UI dependencies
-npm run tauri dev        # build everything and open the app
-```
+The executable is built at `src-tauri/target/release/winknife.exe`; it needs
+its `rules/` resources beside it. Use the portable ZIP when distributing it.
+Application data remains in Windows roaming app data under `com.winknife.app`;
+“portable” means no installer, not that user data travels with the executable.
 
-The first `cargo` build compiles the whole dependency tree and takes a few
-minutes; later builds are incremental.
+~~~powershell
+npm run tauri dev -- -- --dry-run
+~~~
 
-### Everyday commands
+**The flag only disables real power actions.** It does not disable cleaner,
+startup edits, recycle-bin emptying or quarantine retention. Use an isolated
+VM or the separate QA identity described in [QA notes](docs/POLISH-QA.md).
 
-```sh
-npm run build            # build the UI only
-npm run check            # svelte-check / TypeScript, must be 0 errors
+## Contributing
 
-cd src-tauri
-cargo test               # unit + integration tests
-cargo clippy --all-targets -- -D warnings
-cargo fmt --check
-cargo build --release    # portable exe in target/release/
+Small, reproducible fixes, tests, documentation and reviewed rule-pack changes
+are welcome. Describe the problem, expected behavior and your verification.
+Read [conventions](docs/CONVENTIONS.md) and the relevant
+[module specification](docs/modules/) before changing behavior.
 
-npm run tauri build      # portable exe + NSIS installer
-```
+For rule packs, read [the format](docs/RULES-FORMAT.md), edit `rules/*.json`,
+and run the Rust tests. Protected paths and quarantine guarantees remain
+mandatory. Prefer a focused change over unrelated cleanup in the same PR.
 
-### Running the shutdown timer safely
-
-The shutdown timer really does shut the machine down. Pass `--dry-run` to make
-every power action a log line instead:
-
-```sh
-npm run tauri dev -- -- --dry-run     # dev
-./target/release/winknife.exe --dry-run
-```
-
-The UI shows a banner when the flag is active. **The test suite can never
-trigger a real shutdown, sleep or recycle-bin empty**: those calls live behind
-traits in `src-tauri/src/core/platform/`, the real implementations refuse to
-run under `cfg!(test)`, and tests only ever construct the fakes.
-
-### Where things live
-
-| Path | What |
-| ---- | ---- |
-| `rules/*.json` | Rule packs — the data the cleaner runs on. See `docs/RULES-FORMAT.md`. |
-| `src-tauri/src/core/` | Quarantine, executor, brain, scanner, database, platform wrappers |
-| `src-tauri/src/modules/` | One file per tool |
-| `src/routes/<module-id>/` | One folder per tool's UI |
-| `%APPDATA%\com.winknife.app\` | Database, quarantine and rolling logs at runtime |
-
-### Adding or editing a rule pack
-
-Edit or add a file in `rules/`, then run `cargo test`. The validate-all-packs
-test loads every pack and fails loudly with the pack name and the exact field
-if anything is wrong; a separate test proves no rule can point at a protected
-path. `rules/rule-pack.schema.json` gives editor completion.
-
-## Tools
-
-| Tool | What it does |
-| ---- | ------------ |
-| **Disk Cleaner** | Scans temp folders, Explorer's thumbnail/icon caches and the recycle bin. Sorts findings into three buckets — safe, needs review, left alone — each with a plain-language reason. Cleaning moves files to quarantine. |
-| **Shutdown Timer** | Schedules a shutdown, restart or sleep by duration or clock time, with a tray countdown, 5- and 1-minute warnings, and a cancel button that is never more than one click away. |
-
-## Adding a tool module
-
-A new tool is **2 files + 1 registry line**:
-
-1. `src-tauri/src/modules/<id>.rs` — implement `ToolModule`.
-2. `src/routes/<id>/+page.svelte` — the module's UI route.
-3. One line in the `register_modules!` block in
-   `src-tauri/src/modules/mod.rs`.
-
-The sidebar, manifests and routing follow from the registry automatically, and
-a test fails the build if a registered module has no route.
-
-## Documentation
-
-- `docs/ARCHITECTURE.md` — system design, module contract, data model
-- `docs/CONVENTIONS.md` — code style, testing, commit format
-- `docs/RULES-FORMAT.md` — rule pack JSON schema
-- `docs/phases/` — phase-by-phase implementation plan
-- `docs/CHANGELOG-DEV.md` — development log
-
-## License
+| Location | Contents |
+| --- | --- |
+| `src-tauri/src/core/` | Safety gates, quarantine, database, scanner and platform wrappers |
+| `src-tauri/src/modules/` | Tool implementations |
+| `src/routes/` | Svelte screens |
+| `rules/` | Local rule packs and schemas |
+| [Architecture](docs/ARCHITECTURE.md) | Module contract and design |
+| [Development log](docs/CHANGELOG-DEV.md) | Completed work and deferrals |
+| [Release checklist](docs/RELEASING.md) | Packaging and acceptance |
 
 MIT — see [LICENSE](LICENSE).

@@ -1,0 +1,30 @@
+name: Improvement to an existing tool
+description: Suggest a change to one of the current tools.
+labels: ["type: enhancement", "status: triage"]
+body:
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Tool
+      options: [Disk Cleaner, Duplicate Finder, Disk map, Startup, Shutdown Timer, Quarantine, Settings / app shell, Cleaner rules]
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: The change keeps scans read-only and destructive actions reversible.
+          required: true

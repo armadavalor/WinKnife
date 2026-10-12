@@ -19,6 +19,7 @@ import type {
   ExecProgress,
   ExecReport,
   ModuleManifest,
+  MoveWarning,
   PowerAction,
   PurgeReport,
   QuarantineBatch,
@@ -158,12 +159,14 @@ export function startupScan(): Promise<StartupScanResult> {
  * The reversal. Turning something **off** goes through {@link execute}, so it
  * passes the executor's gates and is written to the audit log; putting it back
  * has nothing left to re-verify, exactly like restoring from quarantine.
+ * Resolves to what the user should know about a shortcut that came back only
+ * in part; empty otherwise.
  */
 export function startupEnable(
   source: StartupSource,
   key: string,
-): Promise<void> {
-  return invoke<void>("startup_enable", { source, key });
+): Promise<MoveWarning[]> {
+  return invoke<MoveWarning[]>("startup_enable", { source, key });
 }
 
 /* -------------------------------------------------------------------------
@@ -253,6 +256,14 @@ export function quarantineRestoreItem(
 /** Run the retention purge and the size cap now. */
 export function quarantinePurge(): Promise<PurgeReport> {
   return invoke<PurgeReport>("quarantine_purge");
+}
+
+/**
+ * Permanently remove one item whose encrypted restore was refused. The
+ * backend refuses any other item (decision b, 2026-10-12).
+ */
+export function quarantinePurgeItem(itemId: string): Promise<PurgeReport> {
+  return invoke<PurgeReport>("quarantine_purge_item", { itemId });
 }
 
 /* -------------------------------------------------------------------------

@@ -67,7 +67,11 @@ pub struct Recorded(());
 ///
 /// # Errors
 /// See [`crate::core::quarantine::move_user_file`].
-pub fn move_user_file(_recorded: &Recorded, from: &Path, to: &Path) -> Result<()> {
+pub fn move_user_file(
+    _recorded: &Recorded,
+    from: &Path,
+    to: &Path,
+) -> Result<Vec<crate::core::types::MoveWarning>> {
     crate::core::quarantine::move_user_file(from, to)
 }
 

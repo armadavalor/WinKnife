@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in WinKnife does not work as expected.
+labels: ["type: bug", "status: triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the bug could delete, overwrite or expose data, **do not file it here** —
+        use the private security report instead (see SECURITY.md).
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Tool
+      options: [Disk Cleaner, Duplicate Finder, Disk map, Startup, Shutdown Timer, Quarantine, Settings / app shell, Installer]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open …\n2. Click …"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: WinKnife version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 23H2 (build 22631)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log excerpt
+      description: The log folder is linked from Settings. Remove personal paths if you prefer.
+      render: text

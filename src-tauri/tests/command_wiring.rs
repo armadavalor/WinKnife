@@ -201,6 +201,11 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "quarantine_purge",
             args: json!({}),
         },
+        // An unknown id: refused before anything is touched.
+        Probe {
+            command: "quarantine_purge_item",
+            args: json!({ "itemId": nil }),
+        },
         // Armed, observed, then cancelled. Safe because `manage_state` is asked
         // for a dry run, so the timer holds a controller that only logs — and
         // no ticker is spawned here in any case.

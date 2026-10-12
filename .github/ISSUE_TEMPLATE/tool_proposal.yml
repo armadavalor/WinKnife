@@ -1,0 +1,47 @@
+name: New tool proposal
+description: Propose a new WinKnife tool. Scope and safety are agreed here before code.
+labels: ["type: new tool", "status: triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A tool belongs in WinKnife when it solves a real, recurring Windows annoyance,
+        fits on one screen (or scan → review → act), and can be made reversible.
+        Check [docs/ROADMAP.md](https://github.com/armadavalor/WinKnife/blob/main/docs/ROADMAP.md)
+        and the non-goals in [BACKLOG.md](https://github.com/armadavalor/WinKnife/blob/main/docs/modules/BACKLOG.md) first.
+  - type: textarea
+    id: annoyance
+    attributes:
+      label: Which Windows annoyance does it solve?
+    validations:
+      required: true
+  - type: textarea
+    id: flow
+    attributes:
+      label: What does the user see and do?
+      description: Screens, the analysis it shows, and the action the user confirms.
+    validations:
+      required: true
+  - type: textarea
+    id: changes
+    attributes:
+      label: What does it change on the system, and how is it undone?
+      description: Files, registry keys, services, settings. "Nothing" is a great answer.
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Documentation or prior art
+      description: Microsoft docs for each setting, or existing tools that do this.
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Project rules
+      options:
+        - label: No permanent deletion outside quarantine.
+          required: true
+        - label: No network access unless the user turns it on.
+          required: true
+        - label: Every recommendation explains its reason.
+          required: true

@@ -31,6 +31,19 @@ pub struct FileId {
 /// file as *possibly* shared, which the duplicate finder does by falling back to
 /// content comparison rather than by assuming.
 pub fn file_identity(path: &Path) -> Option<FileId> {
+    try_file_identity(path).ok()
+}
+
+/// The identity of the file at `path`, or why it could not be read.
+///
+/// For a caller that must tell "there is no file there" (`NotFound`) apart
+/// from "the filesystem would not say" (anything else): the quarantine's
+/// cross-volume move treats only the first as the source being gone
+/// (adversarial review follow-up B).
+///
+/// # Errors
+/// Returns the error opening `path` or reading its identity produced.
+pub fn try_file_identity(path: &Path) -> std::io::Result<FileId> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
@@ -49,13 +62,14 @@ pub fn file_identity(path: &Path) -> Option<FileId> {
         // would say the same thing in three lines, but they are still unstable
         // (`windows_by_handle`, rust-lang/rust#63010) and this crate builds on
         // stable.
-        let file = std::fs::File::open(path).ok()?;
+        let file = std::fs::File::open(path)?;
         let mut info = BY_HANDLE_FILE_INFORMATION::default();
         // SAFETY: the handle is owned by `file` and outlives the call, and
         // `info` is a live, correctly-sized out parameter.
-        unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }.ok()?;
+        unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }
+            .map_err(|_| std::io::Error::last_os_error())?;
 
-        Some(FileId {
+        Ok(FileId {
             volume: u64::from(info.dwVolumeSerialNumber),
             index: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
         })
@@ -64,8 +78,8 @@ pub fn file_identity(path: &Path) -> Option<FileId> {
     #[cfg(not(windows))]
     {
         use std::os::unix::fs::MetadataExt;
-        let metadata = std::fs::metadata(path).ok()?;
-        Some(FileId {
+        let metadata = std::fs::metadata(path)?;
+        Ok(FileId {
             volume: metadata.dev(),
             index: metadata.ino(),
         })
@@ -75,6 +89,15 @@ pub fn file_identity(path: &Path) -> Option<FileId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Follow-up B: a missing file says `NotFound`, so a caller can tell it
+    /// apart from an identity that could not be read.
+    #[test]
+    fn a_missing_file_reads_as_not_found() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let err = try_file_identity(&dir.path().join("absent.bin")).expect_err("no file");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
 
     #[test]
     fn one_file_has_one_identity_however_it_is_reached() {

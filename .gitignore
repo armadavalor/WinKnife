@@ -18,3 +18,12 @@ vite.config.ts.timestamp-*
 *.swp
 *.swo
 .idea/
+
+# Local release packages
+/release-artifacts/
+
+# Generated local knowledge graph
+/graphify-out/
+
+# Internal orchestration notes stay local
+ORKESTRA.md

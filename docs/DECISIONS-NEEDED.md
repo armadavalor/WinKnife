@@ -29,7 +29,7 @@ Open scope questions and contradictions found while implementing. Format:
       **RESOLVED (architect, 2026-08-06): set approved; extend per phase as
       needed, never remove variants.**
 - [ ] 2026-08-06 (phase 0): the MIT `LICENSE` needs a copyright holder but no
-      name/entity has been chosen (see `PLAN.md` §7, the product name is still
+      name/entity has been chosen (see `docs/PLAN.md` §7, the product name is still
       a codename) — used "WinKnife contributors"; update when the project name
       and owner are final.
 - [ ] 2026-08-06 (phase 0): the CI badge in `README.md` needs a GitHub
@@ -284,7 +284,7 @@ raising it rather than improvising was the right call. The permanent answer:
   path list erodes: the mechanism outlives the justification, and the next
   contributor argues their directory is just as safe. This phase was bitten four
   times by protected-path defects; we are not adding a door.
-- **Informational is not a workaround, it is the design.** `PLAN.md` §3.1 defines
+- **Informational is not a workaround, it is the design.** `docs/PLAN.md` §3.1 defines
   the red bucket as "information only, no button — this is the honesty feature",
   and `windows-update-leftovers` is the first real case of it. Keep it shipping,
   keep it inert, but **make the `reason` earn its place**: it must name the size
@@ -483,3 +483,275 @@ found late and blamed on something else.
       the arena resolves, justified by the walk's own guarantee that it never
       leaves its root; if a future caller feeds `treemap::scan` paths from
       somewhere else, that assumption is the one to re-check.
+
+- [ ] 2026-09-13 (phase 4): User prioritizes polish, release, then Graphify. Release engineering is prepared first; optional LLM adapters, keyring and privacy UI remain unimplemented. No claim of Phase 4 acceptance until its full scope and fresh-VM checks are satisfied.
+
+## Phase 4 release audit — 2026-10-03
+
+A read-only audit of the hard rules before the first release (raw deletes,
+network, read-only scans, protected paths, reasons) found two violations and
+three items needing review. The fixes are logged in CHANGELOG-DEV; what is
+recorded here is the decisions they rest on, and the one decision that is
+not ours to take.
+
+- [x] 2026-10-03 (phase 4, ESCALATED — destructive; resolved 2026-10-11 by
+      the owner, option a): **emptying the recycle bin is the one documented
+      exception to the first hard rule.** `SHEmptyRecycleBinW`
+      (`core/platform/recycle_bin.rs`) deletes permanently and does not go
+      through quarantine. The phase 1 resolution accepted it and spec 02 calls
+      it "the one non-quarantine action", but CLAUDE.md was never amended, so
+      the audit flagged it. Before the fix the rule (`rules/recycle-bin.json`,
+      score 95, `max_bucket: safe`) made the row green and the cleaner
+      pre-selected every green row, so **the recycle bin started ticked**; the
+      confirm dialog added a danger warning and the backend refused unless
+      `confirm_empty_recycle_bin` came from that dialog. Options were (a) a
+      narrow carve-out and the row never starts ticked, (b) a carve-out as the
+      code stood, (c) drop the action. Taken: (a). CLAUDE.md and CONTRIBUTING
+      now name the exception; `initialSelection` (`stores/selection.ts`, with
+      tests) keeps the row unticked after a scan, so emptying it takes a tick
+      the user makes plus the separate warning. The row stays green: the
+      rating says the contents are safe to lose, the selection says WinKnife
+      will not choose it for you.
+- [x] 2026-10-03 (phase 4): **the LLM layer is deferred to v0.2.0.**
+      v0.1.0 ships with no network client at all. Its opt-in, the
+      exact-payload preview and the keyring move together to the next minor
+      version, so the first release can make the simplest privacy promise
+      there is. The README must not mention LLM features until then, and phase
+      4 acceptance is claimed against this narrowed scope only.
+- [x] 2026-10-03 (phase 4): **log retention is the newest 14 daily files.**
+      Logs carry the local paths of cleaned items, and nothing ever removed
+      them. `core/logging.rs` now asks tracing-appender for `max_log_files(14)`.
+      It counts files, not days: when the log opens and at each daily rotation
+      it deletes the oldest `winknife.log*` files in the app's own log
+      directory. Two consequences worth knowing: (1) the phase 1 resolution
+      "purge deletes the ledger row, `tracing` keeps the audit trail" now has
+      a horizon: a purge line lives about 14 days of use after the purge,
+      which still outlives the 7-day default quarantine retention; (2) the old
+      `rolling::daily` panicked when the log file could not be opened; the
+      builder hands the error back, and the app starts without a file log.
+      The deletion happens inside the dependency, on app-owned files, so it is
+      outside the hard rule; recorded here so nobody has to rediscover that.
+- [x] 2026-10-03 (phase 4): **a startup entry is rated Safe only when its
+      program clears the cleaner's protected-path gate.** The known-app list
+      (`startup-known.json`) matches on the command line alone, so an entry
+      running `C:\Program Files (x86)\Steam\steam.exe` came out green.
+      `startup_rating` (`commands.rs`) now asks `Brain::path_refusal`, the
+      same gate the cleaner uses. Safe needs three things: a safe-to-disable
+      verdict, a resolved program, and no refusal. Anything else is
+      NeedsReview, and the reason says why ("It is not rated safe: …").
+      Consequence worth knowing: most third-party programs live under
+      `Program Files`, so few startup entries are green any more; programs
+      installed per user under `AppData` still can be. Turning an entry off
+      is unchanged: still offered, still reversible, nothing removed. Notes
+      from the fix, none blocking:
+      (1) a `target` naming a missing file passes the gate unless the lexical
+      list refuses it. Only hand-built entries can carry one, because
+      `executable_of` returns existing files only;
+      (2) the gate's wording ("protected location, not cleanable: … use the
+      app's own uninstaller instead") was written for the cleaner and reads
+      oddly inside a startup reason. Reword when the startup reason reaches
+      the UI;
+      (3) the startup page still shows the known-app label "Safe to turn off"
+      (grey, from `entry.verdict`) beside the known-app note, never the
+      rating or its reason. That is no green rating, and the note explains
+      the label, so it is not a hard-rule breach; but for a protected program
+      the page and the backend now disagree. Open for polish: show the rating
+      and reason, or soften the label;
+      (4) QA exercised the gate only through unit tests: the protected
+      entries on the QA machine (Epic, Spotify) were already disabled, so no
+      live entry flipped from green to review.
+- [x] 2026-10-03 (phase 4): **the webview has a content security policy, and
+      the unused opener plugin is gone.** `tauri.conf.json` shipped
+      `"csp": null`, and the opener plugin was registered with
+      `opener:default` although nothing used it. The policy now is
+      `default-src 'self'; script-src 'self'; style-src 'self'
+      'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src ipc:
+      http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action
+      'none'; frame-src 'none'`. The choices behind it:
+      `style-src` keeps `'unsafe-inline'` because Svelte writes `style=`
+      attributes (treemap tiles, bars); Tauri adds hashes only for inline
+      `<script>`/`<style>` elements and the built HTML has no `<style>`
+      element, so nothing switches `'unsafe-inline'` off. Scripts get no such
+      allowance: Tauri hashes the one inline SvelteKit bootstrap at build
+      time. `img-src` drops `data:`, which nothing uses today; add it back
+      deliberately if icons ever arrive as data URLs. `connect-src` is
+      Tauri's IPC only, which matches "no network". No `devCsp`: in Tauri
+      2.11.5 the Windows dev page gets no CSP at all, so CSP checks mean
+      something only in a release or QA build. The opener left Rust
+      (`lib.rs`, `Cargo.toml`), the capability file and npm; `Cargo.lock`
+      lost `tauri-plugin-opener`, `open`, `is-wsl` and `is-docker` and
+      nothing else. QA (release build, `com.winknife.qa` identity): 7 routes,
+      35 IPC calls answered, 0 console errors, 0 CSP violations; an image and
+      a fetch to an outside host were both blocked. `release-ipc.json` has no
+      command list, so `list_modules` stood in as the IPC probe.
+- [x] 2026-10-03 (phase 4), revised 2026-10-11 after two adversarial
+      reviews: **a cross-volume move pins the source and deletes through
+      the pins.** Every folder, the top one included, is opened as itself
+      (links are never followed) and held without sharing delete until its
+      own delete, so it cannot be swapped for a junction mid-move. A folder
+      that is a link or reparse point is refused, and every file and folder
+      must resolve inside the top folder's real path (whole components,
+      case-insensitive). Each file is pinned against writes. Its main data
+      stream and its Zone.Identifier stream are copied and checked byte for
+      byte, and so is its list of named streams; a file or folder with any
+      other alternate data stream is refused before anything is created.
+      Read-only, hidden, system, archive and not-indexed attributes come
+      across and are checked. Deletes go through the pins: after each
+      delete is marked, the streams are listed again, and if they changed
+      the delete is taken back and the file stays at the source (if it is
+      the first file, the whole move is undone). A probe on NTFS confirmed
+      the take-back clears the pending delete and that a marked file cannot
+      be reopened or gain a stream. The take-back is verified: the same
+      handle is asked whether the delete is still pending. If the take-back
+      fails or cannot be confirmed, the source is treated as gone: the
+      verified copy stays, the move goes ahead, and the user is told that
+      the stream which arrived could not be kept.
+      Before the copy is undone, the source's pin is closed and the source
+      is checked to still be there; if it went, the copy stays. Refused
+      before anything is created, with a reason: a file or folder encrypted
+      with Windows EFS ("moving it across drives would store it
+      unencrypted"; a rename on one volume still works and keeps the
+      encryption), and a file with more than one name ("hard link"; before
+      this, a tree holding two names of one file was moved as two separate
+      copies). `open_to_delete` and `open_dir_to_delete` are visible to
+      `core` only, and the guard test rejects them, delete-on-close,
+      `NtSetInformationFile`, the ANSI deletes, the shell's removal and
+      `MOVEFILE_REPLACE_EXISTING` outside `src/core/quarantine.rs` (by exact
+      path). Once any source file is gone the move counts as done and
+      keeps its ledger row; leftovers are reported to the user. Paths over MAX_PATH work.
+      Before this patch the copy already lost alternate streams and
+      hidden/system attributes; that loss was not introduced here. Known
+      limits: streams other than Zone.Identifier are refused, not carried.
+      EFS-encrypted and hard-linked files are refused, not moved, across
+      drives. Creation time, folder times and ACLs are not kept. For a lone
+      file, an ancestor junction retargeted between pin and move is not
+      detected (the moved file is still copied and verified). Read-only
+      files on FAT stay behind. The destination is not pinned between
+      verification and the source delete. Test note: the EFS test needs an
+      EFS-capable volume (NTFS, Windows Pro or above; it reports itself
+      skipped otherwise). On first run it makes Windows create the user's
+      own EFS certificate, and Windows may offer to back up the key.
+      `cipher` only runs on paths inside the test's own temporary
+      directory, which the test removes.
+
+      Follow-up review (2026-10-12). What a move that did happen left
+      undone now reaches the user: the take and restore results carry
+      warnings (path and plain-English reason) shown under the cleaner,
+      duplicates, startup and quarantine-drawer results. Covered: part of
+      a folder left at its old place, a source gone although its delete
+      was refused (only the moved copy remains), and a stream that arrived
+      during the move and could not be kept. The ledger schema is
+      unchanged; the warnings are optional fields on the result types. A
+      late stream whose take-back fails is no longer counted as moved. The
+      move still reports success with a warning, because the source is
+      already gone and an error would drop the ledger row of the only copy
+      (security review C2). After a refused delete, the source counts as
+      gone only when its name is not found or holds another file. When its
+      identity cannot be read, both are kept and the move succeeds with a
+      "both kept" warning naming the old place, so the ledger row of the
+      moved copy survives (round 2, 2026-10-12; it first failed, which
+      left a quarantined copy with no ledger row). That was chosen over
+      guessing.
+
+      Decided 2026-10-12 (user decision, option b): an EFS-encrypted item
+      whose restore is refused across drives stays held and is never
+      removed by the automatic purge. Implementation:
+      - Migration 004 adds a nullable `restore_refused_at` column to
+        `quarantine`. It is additive, so a version-3 database loads and its
+        rows read as unmarked.
+      - `restore_item` sets the marker when `move_out` fails with the
+        typed encrypted refusal, after the ledger has put the row back to
+        held. A failure to set it is logged, not returned.
+      - `purge_expired` skips marked items. `enforce_size_cap` never evicts
+        them. *(Superseded in round 4, below: it no longer counts them
+        towards the total either.)*
+      - The only removal path is the user's: `Quarantine::purge_item`,
+        exposed as the `quarantine_purge_item` command and the drawer's
+        Remove button behind a confirmation that says it is permanent.
+        The drawer labels such an item "restore refused: encrypted; kept
+        until you remove it".
+      Scope choice, open for review: `purge_item` refuses an item without
+      the marker, so it does not become a second delete button for
+      ordinary held items (those stay with their retention window). The
+      marker is not cleared by a later successful restore; once restored,
+      the row is no longer held and the marker has no effect.
+
+      Follow-up review, round 3 (2026-10-12):
+      - *(Superseded by round 4, below.)* Size cap. When the marked items
+        alone are at or over the cap,
+        `enforce_size_cap` removes nothing for size. Before this, it evicted
+        every unmarked item and still ended up over the cap, so each later
+        clean was made irreversible at the next start. The retention window
+        still applies to unmarked items. `QuarantineStats` now carries
+        `refused_bytes` and `cap_bytes`, and the drawer explains in plain
+        English why nothing is being removed for size. When the marked
+        items are under the cap, eviction works as before.
+      - When the marker cannot be written (a database error, or no held row
+        matched), the refusal message no longer promises to keep the item.
+        It says the automatic purge may still remove the item when its
+        retention ends (with the date) or when the quarantine is over its
+        size limit, and tells the user to decrypt and restore before then.
+        This option was chosen over returning a different error because
+        the restore is refused either way. The user needs to see the
+        refusal and how to act on it, not an internal database failure.
+      - Remove in the drawer shows the item's quarantine path, and the
+        confirmation does too. A Remove that fails has its own message.
+        The purge's "retried on the next purge" would be wrong here,
+        because the automatic purge never touches a marked item.
+
+      Follow-up review, round 4 (2026-10-12). **Needs architect review:
+      this narrows decision b as written ("counts toward the cap").**
+      - Marked items are now outside the size cap. `enforce_size_cap`
+        measures unmarked bytes only (`over_by = unmarked - cap`) and still
+        never evicts a marked item. Round 3's rule (remove nothing for size
+        once the marked items fill the cap) left a cliff just below it: with
+        marked items at 3.99 GiB of a 4 GiB cap, any clean bigger than the
+        last 10 MB evicted older unmarked items at the next start, and one
+        byte more stopped the cap altogether. Consequence to review: the
+        quarantine folder can now hold the cap plus whatever the marked
+        items hold, without limit, until the user removes them. The
+        retention window still applies to unmarked items.
+      - `QuarantineStats` also carries `refused_items`. The drawer explains
+        whenever any marked items are held, not only once they fill the
+        cap: how many, how much they use, that they are not counted against
+        the size limit, and that only the user removes them.
+      - The drawer's Remove failure message now says "still held, never
+        auto-purged" only when the file could not be deleted. When the
+        backend refuses (the item is no longer held, or it is not marked,
+        from a stale list), it says so and asks the user to refresh. Any
+        other error is shown as it came.
+
+## Open items raised in the follow-up review, round 3 (2026-10-12)
+
+- **Startup stash: the "both kept" (Unknown) arm leaves the original
+  shortcut in the Startup folder.** This happens on a cross-volume stash
+  whose source delete was refused and whose identity then cannot be read.
+  The move succeeds with a "both kept" warning, so the ledger row of the
+  stored copy survives. The original `.lnk` also stays in the Startup
+  folder, though, so it still runs at logon. Meanwhile the page shows the
+  entry as disabled, with the warning. Re-enable then tries to move the
+  stored copy back onto a name the original still occupies, and that fails
+  as Occupied: the move primitive never overwrites. Nothing is lost, and
+  the warning names the old place, so the user can delete the original by
+  hand. Still, "disabled" is not true until they do. Options:
+  (a) leave as is; the warning is the signal.
+  (b) show such an entry as "disabled, but its shortcut is still in the
+      Startup folder", and make re-enable drop the stored copy when the
+      original at that name has the same contents.
+  (c) refuse the stash in this arm instead. That was rejected in round 2
+      because it dropped the ledger row of a copy that may be the only one.
+  Not changed in round 3. Option (b) touches re-enable's delete rules, so
+  it needs an architect decision.
+- **A database from a newer build.** `run_migrations` now refuses a
+  database whose `user_version` is newer than the newest migration this
+  build knows (`CoreError::SchemaTooNew`, code `schema_too_new`). An older
+  build would otherwise run with a schema it does not understand and could,
+  for example, purge items that a newer build promised to keep. Startup
+  fails in setup, and a native error box (`MessageBoxW`, only in a build
+  armed for real OS effects) tells the user to install the newer version
+  again. Round 4: `manage_state` now logs the `db::open` error itself,
+  while the log file's appender guard is still alive, so the refusal
+  reaches the log file. The setup's own log line afterwards can still miss
+  it, because the guard is dropped when `manage_state` returns; it only
+  repeats what is already recorded. Downgrading a database is not
+  supported.

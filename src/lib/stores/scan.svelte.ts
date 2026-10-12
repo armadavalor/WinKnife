@@ -19,6 +19,7 @@ import {
   type Recommendation,
   type ScanResult,
 } from "$lib/types";
+import { initialSelection } from "./selection";
 
 /** Which step of the 3-step pattern the route is on. */
 export type Step = "idle" | "scanning" | "review" | "executing" | "done";
@@ -87,7 +88,7 @@ class ScanStore {
     );
   }
 
-  /** Run a scan. Green items start selected, yellow deselected (spec 02). */
+  /** Run a scan. Green items start selected, except the recycle bin. */
   async scan(moduleId: string): Promise<void> {
     this.step = "scanning";
     this.error = null;
@@ -99,11 +100,7 @@ class ScanStore {
     try {
       const result = await startScan(moduleId);
       this.result = result;
-      this.selected = new Set(
-        result.recommendations
-          .filter((rec) => rec.risk === "safe" && rec.action !== "infoOnly")
-          .map((rec) => rec.id),
-      );
+      this.selected = initialSelection(result.recommendations, result.findings);
       this.summary = await scanSummary(result.scanId);
       this.step = "review";
     } catch (error: unknown) {

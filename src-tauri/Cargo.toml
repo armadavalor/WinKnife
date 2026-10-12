@@ -22,7 +22,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # `tray-icon` powers the shutdown timer's tray countdown and cancel menu.
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-opener = "2"
 # T-5 / T-1 minute warnings for the shutdown timer.
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
@@ -85,5 +84,8 @@ windows = { version = "0.61", features = [
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Power",
     "Win32_UI_Shell",
+    # A native error box when the app cannot start, e.g. a database written by
+    # a newer build (core/platform/message.rs).
+    "Win32_UI_WindowsAndMessaging",
 ] }
 

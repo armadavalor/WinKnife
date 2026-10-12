@@ -15,6 +15,8 @@ import {
   type StartupScanResult,
 } from "$lib/types";
 
+import { itemNote, warningsNote } from "./execNotes";
+
 /** Lifecycle of the enumeration. */
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -61,14 +63,20 @@ class StartupStore {
     if (this.#loaded) {
       return Promise.resolve();
     }
-    this.#inflight ??= this.reload().finally(() => {
+    return this.reload();
+  }
+
+  /** Share refreshes; a mutation performs its own fresh enumeration. */
+  reload(): Promise<void> {
+    if (this.busy !== null) return Promise.resolve();
+    this.#inflight ??= this.#doReload().finally(() => {
       this.#inflight = null;
     });
     return this.#inflight;
   }
 
   /** Enumerate again, whatever the current state. */
-  async reload(): Promise<void> {
+  async #doReload(): Promise<void> {
     this.status = "loading";
     this.error = null;
     try {
@@ -107,6 +115,7 @@ class StartupStore {
 
   /** Turn an entry off, through the executor. */
   async disable(entry: StartupEntry): Promise<void> {
+    if (this.busy !== null || this.status === "loading") return;
     const recommendation = this.byEntry.get(entry.id);
     if (this.scanId === null || !recommendation) {
       this.error = "This entry can no longer be changed; refresh the list.";
@@ -117,17 +126,11 @@ class StartupStore {
     try {
       const report = await execute(this.scanId, [recommendation.id], false);
       const item = report.items[0];
-      if (item && item.outcome.status !== "succeeded") {
-        // A skip carries the reason Rust refused; showing it beats a silent
-        // toggle that springs back.
-        this.lastReport =
-          item.outcome.status === "skipped"
-            ? item.outcome.reason
-            : item.outcome.error;
-      } else {
-        this.lastReport = null;
-      }
-      await this.reload();
+      // A skip carries the reason Rust refused; showing it beats a silent
+      // toggle that springs back. A move that happened but left something
+      // undone says so too (adversarial review follow-up A).
+      this.lastReport = item ? itemNote(item) : null;
+      await this.#doReload();
     } catch (error: unknown) {
       this.error = message(error);
     } finally {
@@ -137,12 +140,13 @@ class StartupStore {
 
   /** Turn an entry back on. */
   async enable(entry: StartupEntry): Promise<void> {
+    if (this.busy !== null || this.status === "loading") return;
     this.busy = entry.id;
     this.error = null;
     try {
-      await startupEnable(entry.source, entry.key);
-      this.lastReport = null;
-      await this.reload();
+      // A shortcut that came back only in part says so (round-2 review).
+      this.lastReport = warningsNote(await startupEnable(entry.source, entry.key));
+      await this.#doReload();
     } catch (error: unknown) {
       this.error = message(error);
     } finally {

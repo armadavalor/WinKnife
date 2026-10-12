@@ -10,12 +10,11 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
-    "test:ui": "node --test \"src/lib/**/*.test.ts\""
+    "test:ui": "node --test \"src/lib/**/*.test.ts\" && node scripts/startup-regression.mjs"
   },
   "license": "MIT",
   "dependencies": {
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2"
+    "@tauri-apps/api": "^2"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

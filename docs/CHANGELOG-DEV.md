@@ -1207,3 +1207,249 @@ is in flight, so `reload()` can run concurrently with the `reload()` a
 `disable()`/`enable()` issues internally — two enumerations race and the last
 response to land wins. Fix belongs with a small sequencing pass over
 `startup.reload()`, not in this diff.
+
+## 2026-09-13 — Startup race, cleaner history and release preparation
+
+- Fixed overlapping startup enumeration/mutation requests and added a deferred-response regression harness to test:ui.
+- Cleaner now shows the saved previous scan estimate without restoring stale actionable findings; returning to idle reloads the summary.
+- Production IPC fallback and narrow-window overflow were not reproduced; no speculative workaround. See POLISH-QA.md for coverage and remaining cases.
+- Updated English/Turkish README, added release checklist, portable ZIP/NSIS/checksum packaging and a draft-release workflow. Optional LLM work, demo GIF, external uploads/publication and fresh-VM acceptance remain pending.
+- Type check, UI tests and Clippy pass. Rust: 481 unit tests passed without opt-outs; 5 link safety tests require Windows symlink privileges. Remaining suites completed with the explicit local link-test opt-out; those five are not counted as verified.
+
+- Local release artifacts built: NSIS installer and portable ZIP containing exe + 11 rules resources + license/readmes, with SHA-256 file. No GitHub publication.
+- Graphify snapshot created: 107 code/config files + 26 documents, 2181 nodes / 6374 edges / 79 communities. Health caveat: 276 unresolved AST endpoints plus duplicate relationships; source verification remains mandatory. No new paid API, watcher or Git hook. See DEVELOPMENT-TOOLS.md.
+
+## 2026-10-03 / 2026-10-11 — Phase 4 release audit fixes
+
+Before the first release, a read-only audit checked the hard rules: raw
+deletes, network, read-only scans, protected paths and reasons. It found two
+violations and three items that needed review. Startup ratings, the content
+security policy and log retention landed as separate commits (`93fc13b`,
+`a2057ec`, `8bccbae`). The recycle bin was escalated and the owner chose the
+narrow exception on 2026-10-11 (`97d464f`). The LLM layer moves to v0.2.0,
+so v0.1.0 ships with no network client. Decisions are in DECISIONS-NEEDED,
+"Phase 4 release audit — 2026-10-03".
+
+**Built (this entry's commit): quarantine cross-volume moves no longer
+remove the source by path after verification** (security review C, C2, D).
+- Every source file is pinned with a read-and-delete handle that lets others
+  only read; every folder is opened as itself, never through a link, and
+  held without delete sharing. A top folder swapped for a junction mid-move
+  is refused, and everything must resolve inside the top folder's real path.
+- The copy reads through the pins and is checked byte for byte, including
+  Zone.Identifier, the named-stream list and the attribute mask (read-only,
+  hidden, system, archive, not-indexed). Any other alternate data stream is
+  refused before anything is created.
+- Exactly the pinned files are deleted through their handles; streams are
+  re-listed after the delete is marked and the delete is taken back if they
+  changed. Folders go deepest first and only when empty, so anything that
+  arrived during the move stays and is logged.
+- Once any source file is gone the move reports success and keeps its
+  ledger row. If nothing was deleted, the destination is cleaned only by
+  file identity and empty-folder removal, never `remove_dir_all`.
+- `rename_no_replace` takes `\?\` paths, so moves past MAX_PATH work.
+- The handle code lives in `core/platform/pinned.rs`. Attribute setters stay
+  in `quarantine.rs` so the `no_other_module_removes_user_data` guard holds.
+- 11 new tests (zone identifier, other streams refused, late stream keeps
+  its file, attributes, junction swap, containment, long path, read-only
+  cleanup, stream listing, final path).
+
+**Also.** CI's stable Rust moved to 1.99, whose clippy flags `chunks_exact(2)`;
+`registry.rs` and `pinned.rs` decode UTF-16 with `as_chunks` (`3a1e007`).
+
+**Review.** Opus adversarial review of the first patch: SHIP-WITH-FIXES
+(stale probe tests, named streams lost, junction swap of the top folder,
+attributes, long paths). All fixed. Second Opus review: SHIP. An NTFS probe
+confirmed the delete take-back and that a marked file cannot be reopened.
+The four LOW items it left are now closed:
+- A take-back is confirmed through the same handle (`DeletePending`). An
+  unconfirmed one counts as a delete, so the verified copy stays and the
+  path is logged. Before the copy is undone, the source pin is closed and the
+  source is checked to still be there. A test where the take-back is skipped
+  used to lose both the source and the copy.
+- EFS-encrypted files and folders are refused across drives: the copy would
+  be written in the clear. The encryption loss itself predates this work. A
+  same-volume rename still works.
+- Files with more than one name (hard links) are refused with that reason.
+  Before, a tree holding two names of one file was moved as two separate
+  copies.
+- The guard test also rejects delete-on-close (by name and by value),
+  `NtSetInformationFile`, `DeleteFileA`, `RemoveDirectoryA`,
+  `SHFileOperation`, `IFileOperation` and `MOVEFILE_REPLACE_EXISTING`. Its
+  exemption is now the exact path `src/core/quarantine.rs`, and
+  `open_to_delete` and `open_dir_to_delete` are `pub(in crate::core)` and
+  usable only from quarantine.
+- 5 new tests:
+  - an unconfirmed take-back keeps the copy;
+  - a real take-back during `take` leaves the source, quarantine and ledger
+    clean;
+  - the pending flag primitive;
+  - EFS refused but renamed;
+  - hard links refused.
+
+  The EFS test needs an EFS-capable volume. On first run it creates the
+  user's EFS certificate, and it runs `cipher` only inside its own temp
+  directory.
+
+**Follow-up review (2026-10-12).**
+- Warnings reach the user. A cross-volume move that happened but left
+  something undone now returns warnings (path and plain-English reason).
+  They go through `move_path` into `TakeOutcome`, `ExecItemResult.warnings`
+  and `RestoreOutcome.warnings`, and are shown in amber under the cleaner,
+  duplicates and quarantine-drawer results and in the startup note. The
+  fields are optional and omitted when empty; there is no ledger change.
+  `take()` keeps its signature, and `take_reporting()` returns the
+  warnings.
+- After a refused delete, only "not found" or another file at the name
+  means the source went (`try_file_identity`). An unreadable identity
+  keeps both (round 2 turned its failure into a warning).
+- A late stream whose take-back fails is no longer counted as moved.
+  The copy stays and a warning says the stream was lost.
+- A restore refused because the item is EFS-encrypted says it stays held
+  and to decrypt it where it is held (purge policy: see round 2, item 8).
+- Guards:
+  - `MoveFileEx` is a guard-test needle.
+  - `OpenOptionsExt::custom_flags` is disallowed in `clippy.toml`, and
+    its five uses in `pinned.rs` each carry a visible `allow` with a
+    comment.
+  - The `open_to_delete` and `open_dir_to_delete` docs now say the
+    compiler limits them to `crate::core` and the guard test limits them
+    to `quarantine.rs`.
+- Tests: 9 Rust (partial take and partial restore warnings, unreadable
+  identity, each revoke fix on its own, late stream lost, EFS restore
+  refused and held, wire format, `NotFound` identity) and 5 UI
+  (`execNotes`). Each revoke test was checked to fail with only its own
+  fix reverted.
+
+**Follow-up review, round 2 (2026-10-12).**
+1. When the source's identity cannot be read after a refused delete, both
+   copies are kept and the move now succeeds with a "both kept" warning,
+   so the ledger row of the moved copy survives (take and startup stash).
+2. Startup move warnings travel through disable (`StartupControl::disable`)
+   and re-enable (`startup_enable`) into the startup page's warnings.
+3. `MoveWarning.path` is a lossy `String`.
+4. `MoveFailure::Encrypted` is a typed variant; nothing reads the message.
+5. A take-back that cannot be confirmed has its own reason, separate from
+   a lost stream.
+6. `reclaimed_bytes` leaves out bytes left at the old place.
+7. Warning lists in the drawer, cleaner and duplicates pages are keyed by
+   index, so two equal warnings no longer collide.
+8. User decision b: an item whose encrypted restore was refused is never
+   removed by the automatic purge. Migration 004 adds
+   `restore_refused_at`; the restore sets it; `purge_expired` skips it;
+   `enforce_size_cap` counts it but never evicts it and logs when it cannot
+   get under the cap. The drawer labels it "restore refused: encrypted;
+   kept until you remove it" and offers Remove behind a permanent-delete
+   confirmation (`quarantine_purge_item`, which refuses unmarked items).
+   Details in DECISIONS-NEEDED.
+- Tests: Rust for each item (both-kept take and startup stash, startup
+  warnings end to end, typed encrypted failure, unconfirmed take-back,
+  reclaimed bytes, retention purge keeps refused, size cap skips refused,
+  size cap removes nothing when only refused items are over, user removal,
+  removal refused for unmarked items, version-3 database migrates), the
+  command-wiring probe for `quarantine_purge_item`, and UI (`execNotes`:
+  `warningsNote`, `isRestoreRefused`; startup regression: re-enable
+  warnings).
+
+**Follow-up review, round 3 (2026-10-12).**
+1. If marked (refused-restore) items alone are at or over the size cap,
+   `enforce_size_cap` removes nothing for size and logs a warning.
+   Retention still applies, and eviction is unchanged while they are under
+   the cap. `QuarantineStats` gains `refusedBytes` and `capBytes`; the
+   drawer says in plain English why nothing is removed for size.
+2. Fixed the runs of spaces in `STREAM_UNCONFIRMED`.
+3. A failed Remove in the drawer gets its own message
+   (`quarantine.removeFailed`), not the purge's "retried on the next
+   purge".
+4. The quarantine path of a refused item is shown as selectable text, both
+   in its drawer row ("Held at") and in the Remove confirmation
+   (`ConfirmDialog` gains an optional `detail`).
+5. `mark_restore_refused` reports whether it marked the row. If it did
+   not, the refusal message drops "kept until you remove it" and says the
+   purge may still remove the item, and when.
+6. The startup stash "both kept" arm, which leaves the original shortcut
+   running at logon, is recorded in DECISIONS-NEEDED. Code unchanged.
+7. Tested that `purge_item` on a restored item returns
+   `UnknownQuarantineItem`.
+8. `run_migrations` refuses a database from a newer build
+   (`CoreError::SchemaTooNew`, `schema_too_new`). Setup shows a native
+   error box (`core::platform::show_fatal_error`, gated on armed OS
+   effects) instead of exiting silently. The windows crate feature
+   `Win32_UI_WindowsAndMessaging` was added.
+- Tests (Rust): size cap removes nothing while refused items fill it, size
+  cap still evicts when they are under it, removing a restored item is
+  refused, the refusal promises to keep only when marked, a failed mark
+  (SQLite trigger) is reported, no warning reason has runs of spaces,
+  wire format with the new stats fields, a newer database is refused, and
+  a test build never shows a box. UI (`execNotes`): `sizeCapBlocked` and
+  `removalFailure`.
+
+**Follow-up review, round 4 (2026-10-12).**
+1. The size cap applies to unmarked bytes only (`over_by = unmarked - cap`).
+   Marked items are never counted and never evicted. This replaces round
+   3's "remove nothing once they fill the cap", which left a cliff just
+   below the cap. It narrows decision b as written, so it is flagged for
+   architect review in DECISIONS-NEEDED. `QuarantineStats` gains
+   `refusedItems`. The drawer explains whenever any marked items are held
+   (`quarantine.refusedHeld` replaces `capBlocked`; `refusedHeld`
+   replaces `sizeCapBlocked`).
+2. `restore_item`'s "kept" promise is tested where it is wired. The EFS
+   harness runs with the `refuse_marker` trigger, and the error must say
+   the purge "may still remove it". Hard-coding `true` at the call makes
+   it fail.
+3. Fixed the runs of spaces in the size-cap and stream-unconfirmed log
+   messages (backslash continuations). A new test scans `quarantine.rs`
+   for a run of spaces inside a line.
+4. A failed Remove is reported by kind (`RemovalFailure`):
+   - `stuck`: the file could not be deleted. Only this case says "still
+     held, never auto-purged".
+   - `notEligible`: `unknown_quarantine_item`, or `quarantine` for an
+     unmarked item. The drawer says so and asks for a refresh
+     (`quarantine.removeRefused`).
+   - `error`: anything else, shown as it came (`quarantine.removeError`).
+   `quarantine.removeFileStuck` was removed.
+5. `manage_state` logs the `db::open` error while the log guard is still
+   alive.
+- Tests:
+  - Rust:
+    - Marked items just under the cap do not evict what fits.
+    - Marked items are not counted against the cap (it replaces "removes
+      nothing while refused items alone fill it").
+    - The skip and under-the-cap tests now expect unmarked-only eviction.
+    - The wiring test, the source runs-of-spaces test, and `refusedItems`
+      in the wire format.
+  - UI: `refusedHeld`, and `removalFailure` by kind.
+  - Not covered: no test covers the `db::open` log line.
+
+**Verified (Rust 1.99, 2026-10-12, round 2).** `cargo fmt --check` clean;
+`cargo clippy --all-targets -- -D warnings` clean; `cargo test`: `540
+passed; 5 failed` in the library, and the 5 are the symlink tests that need Developer
+Mode or elevation (they run on CI); integration suites 8 + 3 + 3 + 1 passed,
+3 ignored. UI: `svelte-check` 0 errors, 0 warnings; `test:ui` 22 passed plus
+the startup regression; `npm run build` done.
+
+**Verified (Rust 1.99, 2026-10-12, round 3).** `cargo fmt --check` clean;
+`cargo clippy --all-targets -- -D warnings` clean; `cargo test`: `548
+passed; 5 failed` in the library, and the 5 are the same symlink tests that need
+Developer Mode or elevation; integration suites 8 + 3 + 3 + 1 passed, 3
+ignored. UI: `svelte-check` 178 files, 0 errors, 0 warnings; `test:ui` 24
+passed plus the startup regression; `npm run build` done.
+
+**Verified (Rust 1.99, 2026-10-12, round 4).** `cargo fmt --check` clean;
+`cargo clippy --all-targets -- -D warnings` clean; `cargo test`: `551
+passed; 5 failed` in the library, and the 5 are the same symlink tests that
+need Developer Mode or elevation; integration suites 8 + 3 + 3 + 1 passed, 3
+ignored. UI: `svelte-check` 178 files, 0 errors, 0 warnings; `test:ui` 25
+passed plus the startup regression; `npm run build` done. The drawer's new
+texts were not checked in a running app.
+
+**Final review (round 4): SHIP.** The one LOW finding, that the Settings label
+for the size limit no longer told the whole truth, is fixed with a hint under
+the field: encrypted items kept after a refused restore are not counted against
+it. Two notes are left open. The "not eligible" remove message keys off the
+catch-all `quarantine` error code; that is accurate today, but a dedicated code
+would make it robust. Setup errors after `db::open` still miss the log file.
+
+**Deferred.** The startup page still shows the known-app label rather than
+the rating (DECISIONS-NEEDED, note 3). Clean-VM acceptance before the v0.1.0
+tag.

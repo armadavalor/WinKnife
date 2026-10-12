@@ -18,6 +18,8 @@
     message: string;
     /** Reassurance line, e.g. the quarantine promise. */
     note?: string;
+    /** A path or similar the user may need to copy, shown selectable. */
+    detail?: string;
     /** Extra warning shown in the danger colour. */
     warning?: string;
     /** Label of the confirming button. */
@@ -33,6 +35,7 @@
     title,
     message,
     note,
+    detail,
     warning,
     confirmLabel,
     onconfirm,
@@ -78,6 +81,12 @@
       {#if note}
         <p class="mt-3 rounded-lg bg-surface-2 p-3 text-xs leading-relaxed text-ink-muted">
           {note}
+        </p>
+      {/if}
+
+      {#if detail}
+        <p class="mt-2 select-text break-all font-mono text-xs text-ink-muted">
+          {detail}
         </p>
       {/if}
 

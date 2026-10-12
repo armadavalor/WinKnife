@@ -16,7 +16,7 @@ Open-source Windows "Swiss army knife" utility. Tauri v2 (Rust backend) + Svelte
 
 ## Hard rules (violating these is a failed task)
 
-- **Never permanently delete user files.** All destructive actions go through the Quarantine service (`docs/ARCHITECTURE.md §6`). No `fs::remove_*` on user data outside quarantine purge.
+- **Never permanently delete user files.** All destructive actions go through the Quarantine service (`docs/ARCHITECTURE.md §6`). No `fs::remove_*` on user data outside quarantine purge. One documented exception: emptying the Windows recycle bin (`SHEmptyRecycleBinW`) is permanent by nature; its row must never start ticked, and the backend refuses it without the separate confirmation flag from the warning dialog (DECISIONS-NEEDED, Phase 4 release audit).
 - **Protected paths are absolute.** `C:\Windows`, `C:\Program Files*`, user profile roots, and anything in `brain::protected_paths()` can never receive a Safe (green) rating or a delete action. Enforce in code, not just in rules data.
 - **No network calls without explicit user opt-in.** The LLM layer is the only networked component and is off by default.
 - **All scans are read-only.** `scan()` and `analyze()` must not modify the filesystem or registry.

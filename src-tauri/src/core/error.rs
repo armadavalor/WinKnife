@@ -130,6 +130,15 @@ pub enum CoreError {
     /// File Explorer could not be opened.
     #[error("could not show this in File Explorer: {0}")]
     Explorer(String),
+
+    /// The database was written by a newer build. Opening it here could
+    /// purge items the newer build promised to keep (round 3).
+    #[error(
+        "the WinKnife database is at schema version {found}, but this build only knows up to \
+         version {known}: it was written by a newer WinKnife. Install that version again; this \
+         one will not open the database, so nothing in it is changed or removed"
+    )]
+    SchemaTooNew { found: u32, known: u32 },
 }
 
 impl CoreError {
@@ -160,6 +169,7 @@ impl CoreError {
             Self::TaskSchedulerBlocked => "task_scheduler_blocked",
             Self::UnknownStartupEntry(_) => "unknown_startup_entry",
             Self::Explorer(_) => "explorer",
+            Self::SchemaTooNew { .. } => "schema_too_new",
         }
     }
 }
