@@ -257,6 +257,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::shutdown_schedule,
         commands::shutdown_cancel,
         commands::shutdown_status,
+        commands::unlocker_query,
+        commands::unlocker_request_close,
     ]
 }
 
@@ -304,6 +306,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let app_data_dir = app
                 .path()

@@ -1342,6 +1342,59 @@ pub fn shutdown_status(timer: State<'_, Arc<ShutdownTimer>>) -> Result<TimerStat
     Ok(timer.status(Utc::now()))
 }
 
+/* -------------------------------------------------------------------------
+ * File unlocker
+ * ---------------------------------------------------------------------- */
+
+fn unlocker_error(err: crate::core::platform::RmError) -> ApiError {
+    let code = match err {
+        crate::core::platform::RmError::NotArmed => "not_armed",
+        _ => "unlocker_failed",
+    };
+    ApiError::new(code, err.to_string())
+}
+
+/// Which programs have these files (or files inside these folders) open.
+/// Read-only (module spec 07).
+///
+/// # Errors
+/// Returns an error when the Restart Manager fails.
+#[tauri::command]
+pub async fn unlocker_query(
+    paths: Vec<PathBuf>,
+) -> Result<crate::modules::file_unlocker::UnlockerReport, ApiError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rm = crate::core::platform::real_restart_manager();
+        crate::modules::file_unlocker::query(rm.as_ref(), &paths).map_err(unlocker_error)
+    })
+    .await
+    .map_err(|err| ApiError::new("unlocker_failed", "the query did not finish").with_detail(err.to_string()))?
+}
+
+/// Ask one window or console program to close, politely (`RmShutdown` with no
+/// force flag). `start_time` is the decimal text a query returned; a mismatch
+/// with the running process is refused.
+///
+/// # Errors
+/// Returns an error for a malformed start time, when the Restart Manager
+/// fails, or when this build may not reach the OS.
+#[tauri::command]
+pub async fn unlocker_request_close(
+    pid: u32,
+    start_time: String,
+) -> Result<crate::modules::file_unlocker::CloseReport, ApiError> {
+    let start_time: u64 = start_time
+        .parse()
+        .map_err(|_| ApiError::new("invalid_start_time", "the process start time is not a number"))?;
+    let process = crate::core::platform::UniqueProcess { pid, start_time };
+    tauri::async_runtime::spawn_blocking(move || {
+        let rm = crate::core::platform::real_restart_manager();
+        crate::modules::file_unlocker::request_close(rm.as_ref(), process).map_err(unlocker_error)
+    })
+    .await
+    .map_err(|err| ApiError::new("unlocker_failed", "the request did not finish").with_detail(err.to_string()))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

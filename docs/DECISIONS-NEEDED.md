@@ -755,3 +755,10 @@ not ours to take.
   it, because the guard is dropped when `manage_state` returns; it only
   repeats what is already recorded. Downgrading a database is not
   supported.
+
+## Open items raised during phase 5 — file-unlocker (2026-10-12)
+
+- [ ] 2026-10-12 (phase 5): the brief asks for a file/folder pick "via the dialog plugin", but `tauri-plugin-dialog` was not in the project. Added it (Cargo `tauri-plugin-dialog = "2"`, npm `@tauri-apps/plugin-dialog`, capability `dialog:allow-open` only — no save/message permissions, one `.plugin(tauri_plugin_dialog::init())` line in `lib.rs` next to the notification plugin). Drag-drop and a typed path work without it — safest reading: smallest permission set, open dialog only.
+- [ ] 2026-10-12 (phase 5): the brief asks for EN + TR keys, but `i18n.ts` had only an English dictionary. Added a partial `tr` dictionary holding only the File Unlocker keys (everything else falls back to English) and widened `Locale` to `"en" | "tr"`; nothing calls `setLocale("tr")` yet and there is no language picker. Other phase 5 workers adding TR keys will touch the same object — expect a trivial merge. The Rust-built `reason` and the `refused` reason text stay English; the UI rebuilds row reasons from `reason_code` so they translate.
+- [ ] 2026-10-12 (phase 5): Restart Manager kinds other than window/console/service/explorer/critical (`RmUnknownApp` and anything unrecognised) are treated as info-only with a reason, never closable — safest interpretation of "Ask to close applies ONLY to window and console apps".
+- [ ] 2026-10-12 (phase 5): the process start time (a `FILETIME`, ~1.3e17) does not fit a JS number exactly, so it travels as a decimal string and `unlocker_request_close` takes `start_time: String`; a non-numeric value is refused (`invalid_start_time`).

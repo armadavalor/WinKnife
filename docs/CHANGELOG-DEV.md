@@ -1453,3 +1453,60 @@ would make it robust. Setup errors after `db::open` still miss the log file.
 **Deferred.** The startup page still shows the known-app label rather than
 the rating (DECISIONS-NEEDED, note 3). Clean-VM acceptance before the v0.1.0
 tag.
+
+## 2026-10-12 — Phase 5 task 3: File Unlocker (`file-unlocker`)
+
+**Built.** "Which program is holding this file open?", read-only, with one
+polite action.
+
+- **Restart Manager wrapper** (`core/platform/restart_manager.rs`). An
+  `RmApi` trait (the real `SystemRmApi`, plus `FakeRmApi` for unit tests)
+  under `RmSessions`, which implements the module-facing `RestartManager`
+  trait. `RmEndSession` always runs through a `Session` drop guard, also
+  after a failed registration. `RmGetList` retries `ERROR_MORE_DATA` at
+  most 3 times. Files are registered in batches of 500.
+- **Module** (`modules/file_unlocker.rs`). Files and folders expand to at
+  most 5 000 files. The scanner walker does not follow links or reparse
+  points, and a link given as a root is skipped with a reason. `capped`
+  drives the "only the first 5 000 files were checked" note. Every row
+  carries a reason and a stable `reason_code`.
+- **Attribution choice.** With 50 files or fewer, the query runs one RM
+  session per file, so each row lists what it holds (the first 3 plus a
+  count). Above 50, it runs one session over all the files and the row
+  says "holds one or more of these files". Per-file sessions for thousands
+  of files would be slow, and a wrong attribution is worse than none.
+- **Ask to close** (`unlocker_request_close(pid, start_time)`).
+  - Offered only for window and console apps.
+  - Info-only, with a reason and no button: services, Explorer,
+    `RmCritical`, unknown kinds, PID 4 and WinKnife's own PID. Rust
+    refuses them again server-side.
+  - A start-time mismatch (PID reuse) is refused.
+  - The close opens a fresh session that registers only that
+    `RM_UNIQUE_PROCESS` and calls `RmShutdown` with flags = 0. It never
+    uses `RmForceShutdown`, `TerminateProcess` or handle closing.
+  - Afterwards the process is checked again: closed, still running,
+    already exited or refused. Every request is logged with the exe path
+    and the outcome.
+  - The real `RmShutdown` is gated on `real_os_effects_armed()`, so no
+    test can close anything.
+- **UI** (`routes/file-unlocker`).
+  - File and folder pickers (`tauri-plugin-dialog`, open only), window-wide
+    drag-drop and a typed path.
+  - Confirm dialog: "<App> will be asked to close. If it has unsaved work,
+    it may ask you to save first."
+  - The query runs again after a close.
+  - "Open file location", and an empty state with the
+    read-only/permissions hint.
+  - EN keys plus a partial TR dictionary.
+  - The start time travels as a decimal string, because it does not fit a
+    JS number.
+- **Tests.**
+  - Fake-driven unit tests: classification, batching, bounded retry, the
+    guard on failure, fresh-session close, PID reuse, server-side refusals.
+  - `tests/unlocker_query.rs`: a PowerShell child holds a temp file with
+    no sharing, and the test asserts that the real query names its PID.
+  - The command-wiring test probes both commands.
+
+**Deferred / unverified.** The manual check against Word with unsaved work
+(the save prompt and the "still running" path) has not been done. There is
+no language picker for TR yet (see DECISIONS-NEEDED).

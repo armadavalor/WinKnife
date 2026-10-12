@@ -29,6 +29,7 @@ pub(crate) mod power;
 pub(crate) mod process;
 pub(crate) mod recycle_bin;
 pub(crate) mod registry;
+pub(crate) mod restart_manager;
 pub(crate) mod signature;
 pub(crate) mod tasks;
 pub(crate) mod volume;
@@ -47,6 +48,10 @@ pub use recycle_bin::{RecycleBin, RecycleBinStats, StubRecycleBin};
 pub use registry::{
     Hive, MapRegistry, RegValue, Registry, SystemRegistry, REG_TYPE_BINARY, REG_TYPE_EXPAND_SZ,
     REG_TYPE_SZ,
+};
+pub use restart_manager::{
+    close_policy, real_restart_manager, AppKind, CloseOutcome, ClosePolicy, LockInfo,
+    RestartManager, RmError, UniqueProcess,
 };
 pub use signature::{MapSignatures, Signature, SignatureProbe, SystemSignatureProbe};
 pub use tasks::{LogonTask, MapTaskScheduler, SystemTaskScheduler, TaskScheduler};

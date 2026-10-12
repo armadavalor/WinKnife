@@ -221,6 +221,17 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "shutdown_cancel",
             args: json!({}),
         },
+        // Read-only: asks the Restart Manager about an empty temp folder.
+        Probe {
+            command: "unlocker_query",
+            args: json!({ "paths": [&root] }),
+        },
+        // Closes nothing: PID 0 never matches a running process, and the real
+        // `RmShutdown` refuses in any build `run()` did not arm.
+        Probe {
+            command: "unlocker_request_close",
+            args: json!({ "pid": 0, "startTime": "0" }),
+        },
     ]
 }
 

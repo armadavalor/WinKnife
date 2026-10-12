@@ -37,6 +37,7 @@ register_modules! {
     duplicates => duplicates::DuplicatesModule,
     startup => startup::StartupModule,
     shutdown_timer => shutdown_timer::ShutdownTimerModule,
+    file_unlocker => file_unlocker::FileUnlockerModule,
 }
 
 /// Build the application's module registry.
@@ -112,6 +113,7 @@ mod tests {
             "duplicates",
             "startup",
             "shutdown-timer",
+            "file-unlocker",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }
