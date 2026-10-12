@@ -55,6 +55,7 @@ use crate::core::types::{
     Action, ExecItemResult, ExecOutcome, ExecReport, Finding, FindingKind, Justification,
     MoveWarning, Recommendation, StartupSource,
 };
+use crate::modules::empty_folders;
 
 /// One unit of work: a recommendation paired with the finding it acts on.
 #[derive(Debug, Clone, Copy)]
@@ -328,9 +329,14 @@ fn apply_one(
 
     // 3. Locks are re-checked too: a file can be opened between review and
     //    confirm. Skipped, reported, batch continues.
-    let lock = env.brain.lock_state(&unit.finding.path);
-    if !lock.is_free() {
-        return skipped(format!("skipped: {}", lock.reason()));
+    //    A folder has no lock state of its own (the probe can only say
+    //    `Inaccessible`); the owning module's emptiness re-check in gate 4
+    //    stands in for it.
+    if unit.finding.kind != FindingKind::Directory {
+        let lock = env.brain.lock_state(&unit.finding.path);
+        if !lock.is_free() {
+            return skipped(format!("skipped: {}", lock.reason()));
+        }
     }
 
     // 4. And the reason itself. Gates 2 and 3 ask whether this is still
@@ -392,6 +398,13 @@ fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Opti
         // reaching here means the action changes nothing.
         Justification::Informational => None,
         Justification::Rule { pack_id, rule_id } => {
+            // The reason for removing a folder is "it holds no files", and
+            // that is only true until something is written into it.
+            if unit.finding.module == empty_folders::MODULE_ID {
+                if let Some(reason) = empty_folders::recheck_refusal(&unit.finding.path) {
+                    return Some(reason);
+                }
+            }
             rule_refusal(pack_id, rule_id, unit.finding, env.brain)
         }
         Justification::DuplicateOf {

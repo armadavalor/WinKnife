@@ -1481,3 +1481,28 @@ optionally with the screen on.
 Windows session was not run. 5 pre-existing tests fail in this environment
 because creating symlinks needs Developer Mode or elevation (executor,
 quarantine x2, scanner, cleaner); none involve this module.
+
+## Phase 5 - empty-folders module (spec 08)
+
+**Built.**
+- `src-tauri/src/modules/empty_folders.rs`, rule pack `rules/empty-folders.json`.
+  A folder is empty only when it holds no file at any depth (even `desktop.ini`
+  counts). Only the topmost empty folder of each subtree is reported, with the
+  nested count in `meta`. Reparse points, cloud placeholders, unreadable folders
+  and protected trees are never traversed or reported (the last two are counted).
+  A drive root may be scanned but is never a finding. Cancellable, with progress.
+- Analysis: hard gates first (`path_refusal`, protected-below, system folder),
+  then the rule pack via the Brain. Savings are 0. Execute is `Quarantine`; the
+  executor re-checks emptiness (`recheck_refusal`) and skips with a reason.
+- Command `start_empty_folder_scan(root?)` (default root: user profile).
+- UI `src/routes/empty-folders/` plus `stores/emptyFolders.svelte.ts`, `folder`
+  icon, EN + TR keys, typed wrappers and mirrored types. Nothing starts selected.
+- Brain: `FindingKind::Directory` branch; executor: lock probe skipped for
+  directories. Cleaner now only loads its own pack (`CLEANER_MODULE_ID`), and
+  `read_settings` filters packs by module.
+
+**Decisions.** See DECISIONS-NEEDED.md (2026-10-12 phase 5 entries).
+
+**Deferred / unverified.** The access-denied test returns early when the
+`icacls` deny is ineffective (e.g. elevated token), so it may not exercise that
+path on every machine. The same 5 environmental symlink test failures apply.

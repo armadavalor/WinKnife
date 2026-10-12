@@ -236,6 +236,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::start_scan,
         commands::cancel_scan,
         commands::start_duplicate_scan,
+        commands::start_empty_folder_scan,
         commands::treemap_drives,
         commands::treemap_scan,
         commands::treemap_children,

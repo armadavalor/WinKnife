@@ -1,0 +1,79 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "empty-folders",
+  "name": "Empty Folders",
+  "version": 1,
+  "module": "empty-folders",
+  "enabled_by_default": true,
+  "description": "Folders that contain no files at any depth. Rules are tried in order and the first match wins; only the Empty Folders tool reads this pack.",
+  "rules": [
+    {
+      "id": "shell-folders",
+      "paths": [
+        "%USERPROFILE%\\Desktop",
+        "%USERPROFILE%\\Documents",
+        "%USERPROFILE%\\Downloads",
+        "%USERPROFILE%\\Pictures",
+        "%USERPROFILE%\\Music",
+        "%USERPROFILE%\\Videos",
+        "%USERPROFILE%\\OneDrive"
+      ],
+      "score": { "base": 0, "max_bucket": "do_not_delete" },
+      "action": "info_only",
+      "reason": "Windows and your apps expect this standard folder to exist, even when it is empty, so it is left alone."
+    },
+    {
+      "id": "temp-old",
+      "paths": ["%TEMP%\\**", "%LOCALAPPDATA%\\Temp\\**"],
+      "match": { "min_age_hours": 168 },
+      "score": { "base": 90, "max_bucket": "safe" },
+      "action": "quarantine",
+      "reason": "Empty folder in your temp folder, untouched for more than 7 days; programs recreate these when they need them."
+    },
+    {
+      "id": "temp-recent",
+      "paths": ["%TEMP%\\**", "%LOCALAPPDATA%\\Temp\\**"],
+      "score": { "base": 60, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "Empty folder in your temp folder, but it changed within the last 7 days, so a running program may still be about to use it."
+    },
+    {
+      "id": "shell-folder-children",
+      "paths": [
+        "%USERPROFILE%\\Desktop\\*",
+        "%USERPROFILE%\\Documents\\*",
+        "%USERPROFILE%\\Downloads\\*",
+        "%USERPROFILE%\\Pictures\\*",
+        "%USERPROFILE%\\Music\\*",
+        "%USERPROFILE%\\Videos\\*",
+        "%USERPROFILE%\\OneDrive\\*"
+      ],
+      "score": { "base": 60, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "Empty folder inside one of your personal folders. You may have created it on purpose, so check before removing it."
+    },
+    {
+      "id": "app-data",
+      "paths": ["%APPDATA%\\**", "%LOCALAPPDATA%\\**"],
+      "score": { "base": 60, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "Empty folder in application data. An app may expect this folder to exist, so check before removing it."
+    },
+    {
+      "id": "program-data",
+      "paths": ["%PROGRAMDATA%\\**"],
+      "score": { "base": 60, "max_bucket": "do_not_delete" },
+      "action": "info_only",
+      "reason": "Empty folder in shared application data. An app may expect this folder to exist, so it is shown for information and never offered for removal.",
+      "requires_admin": true
+    },
+    {
+      "id": "anything-else",
+      "paths": ["**"],
+      "score": { "base": 60, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "This folder holds no files at any depth. It may be a leftover, or it may be a placeholder you made on purpose.",
+      "requires_admin": true
+    }
+  ]
+}

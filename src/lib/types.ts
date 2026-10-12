@@ -736,3 +736,28 @@ export interface TimerStatus {
   /** True when this build logs power actions instead of performing them. */
   dryRun: boolean;
 }
+
+/* -------------------------------------------------------------------------
+ * modules/empty_folders.rs
+ * ---------------------------------------------------------------------- */
+
+/** Metadata an empty-folder finding carries. */
+export interface EmptyFolderMeta {
+  /** How many empty folders are nested inside this one. */
+  nested: number;
+  /** True for a folder Windows marks as a system folder. */
+  system: boolean;
+}
+
+/** What `start_empty_folder_scan` hands back. */
+export interface EmptyFolderScanResult {
+  scanId: string;
+  root: string;
+  /** The topmost empty folders. */
+  findings: Finding[];
+  recommendations: Recommendation[];
+  unreadable: number;
+  skippedProtected: number;
+  foldersVisited: number;
+  cancelled: boolean;
+}

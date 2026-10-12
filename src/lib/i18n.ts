@@ -328,11 +328,66 @@ const en = {
     "A shutdown timer is armed. Keep-awake does not cancel it: the PC will still shut down, restart or sleep when that timer ends.",
   "keepAwake.invalidMinutes": "Enter a whole number from 1 to 1440.",
 
+  "emptyFolders.intro":
+    "Finds folders that hold no files at any depth. Nothing starts selected, and anything you remove goes to quarantine, where you can restore it.",
+  "emptyFolders.rootLabel": "Folder to scan",
+  "emptyFolders.rootHint": "Leave empty to scan your user profile.",
+  "emptyFolders.scan": "Find empty folders",
+  "emptyFolders.scanning": "Looking for empty folders…",
+  "emptyFolders.stop": "Stop",
+  "emptyFolders.stopping": "Stopping…",
+  "emptyFolders.scanAgain": "Scan again",
+  "emptyFolders.summary": "{count} empty folders found in {visited} folders.",
+  "emptyFolders.cancelled":
+    "The scan was stopped early, so this list is incomplete.",
+  "emptyFolders.unreadable":
+    "{count} folders could not be read and were left alone.",
+  "emptyFolders.skippedProtected":
+    "{count} protected locations were not entered.",
+  "emptyFolders.nested": "includes {count} empty folders inside",
+  "emptyFolders.empty": "No empty folders found.",
+  "emptyFolders.selectAll": "Select all",
+  "emptyFolders.selectNone": "Select none",
+  "emptyFolders.selection": "{count} folders selected",
+  "emptyFolders.remove": "Move folders to quarantine",
+  "emptyFolders.confirmTitle": "Move {count} empty folders to quarantine?",
+  "emptyFolders.confirmBody":
+    "Each folder is checked again first; one that is no longer empty is skipped.",
+  "emptyFolders.doneTitle": "Done",
+  "emptyFolders.doneBody": "{count} folders moved to quarantine.",
+
   "status.phase": "Phase 3 — disk map + startup",
 } as const;
 
 /** Turkish overrides. Missing keys fall back to English. */
 const tr: Partial<Record<TranslationKey, string>> = {
+  "module.empty-folders.name": "Boş klasörler",
+  "module.empty-folders.description":
+    "Hiçbir derinlikte dosya içermeyen klasörleri bulur ve karantinaya taşır.",
+  "emptyFolders.intro":
+    "Hiçbir derinlikte dosya içermeyen klasörleri bulur. Başlangıçta hiçbiri seçili değildir; kaldırdığınız her şey karantinaya gider ve geri alınabilir.",
+  "emptyFolders.rootLabel": "Taranacak klasör",
+  "emptyFolders.rootHint": "Boş bırakırsanız kullanıcı profiliniz taranır.",
+  "emptyFolders.scan": "Boş klasörleri bul",
+  "emptyFolders.scanning": "Boş klasörler aranıyor…",
+  "emptyFolders.stop": "Durdur",
+  "emptyFolders.stopping": "Durduruluyor…",
+  "emptyFolders.scanAgain": "Yeniden tara",
+  "emptyFolders.summary": "{visited} klasörde {count} boş klasör bulundu.",
+  "emptyFolders.cancelled": "Tarama erken durduruldu, bu liste eksik.",
+  "emptyFolders.unreadable": "{count} klasör okunamadı ve dokunulmadı.",
+  "emptyFolders.skippedProtected": "{count} korumalı konuma girilmedi.",
+  "emptyFolders.nested": "içinde {count} boş klasör daha var",
+  "emptyFolders.empty": "Boş klasör bulunamadı.",
+  "emptyFolders.selectAll": "Tümünü seç",
+  "emptyFolders.selectNone": "Seçimi kaldır",
+  "emptyFolders.selection": "{count} klasör seçili",
+  "emptyFolders.remove": "Klasörleri karantinaya taşı",
+  "emptyFolders.confirmTitle": "{count} boş klasör karantinaya taşınsın mı?",
+  "emptyFolders.confirmBody":
+    "Her klasör önce yeniden kontrol edilir; artık boş olmayan atlanır.",
+  "emptyFolders.doneTitle": "Tamamlandı",
+  "emptyFolders.doneBody": "{count} klasör karantinaya taşındı.",
   "keepAwake.presetsLabel": "Ne kadar süreyle",
   "keepAwake.preset30m": "30 dakika",
   "keepAwake.preset1h": "1 saat",

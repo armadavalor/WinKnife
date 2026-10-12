@@ -38,6 +38,7 @@ register_modules! {
     startup => startup::StartupModule,
     shutdown_timer => shutdown_timer::ShutdownTimerModule,
     keep_awake => keep_awake::KeepAwakeModule,
+    empty_folders => empty_folders::EmptyFoldersModule,
 }
 
 /// Build the application's module registry.
@@ -114,6 +115,7 @@ mod tests {
             "startup",
             "shutdown-timer",
             "keep-awake",
+            "empty-folders",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }

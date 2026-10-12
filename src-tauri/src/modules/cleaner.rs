@@ -39,6 +39,9 @@ pub const MIN_QUIET_HOURS: i64 = 1;
 /// Pack whose findings come from the shell API rather than a walk.
 pub const RECYCLE_BIN_PACK: &str = "recycle-bin";
 
+/// Id of this module, which is also the `module` value its packs declare.
+pub const CLEANER_MODULE_ID: &str = "cleaner";
+
 /// Sentinel path for the recycle bin. Not a real filesystem path — the shell
 /// namespace is how Explorer refers to it too.
 pub const RECYCLE_BIN_PATH: &str = "shell:RecycleBinFolder";
@@ -131,6 +134,11 @@ pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) ->
     let mut seen = 0u64;
 
     for pack in ctx.packs {
+        // Packs written for other tools (the empty-folders pack) share the
+        // rules directory but are none of the cleaner's business.
+        if pack.spec.module != CLEANER_MODULE_ID {
+            continue;
+        }
         // A pack the user turned off — or one that ships off, like `dev-caches`
         // and `windows-update-leftovers` — is not walked at all. Silently:
         // "you asked for this not to run" is not a partial scan, so it has no
@@ -770,7 +778,11 @@ mod tests {
         }
 
         fn packs(&self) -> Vec<RulePack> {
-            rules::load_dir(&repo_rules_dir(), &self.env).expect("the shipped packs must load")
+            rules::load_dir(&repo_rules_dir(), &self.env)
+                .expect("the shipped packs must load")
+                .into_iter()
+                .filter(|pack| pack.spec.module == CLEANER_MODULE_ID)
+                .collect()
         }
 
         /// The injected protected path: a rule pack cannot see it, and it must
@@ -872,7 +884,11 @@ mod tests {
 
         assert!(!packs.is_empty(), "the app ships with no rule packs");
         for pack in &packs {
-            assert_eq!(pack.spec.module, "cleaner", "{} targets no module", pack.id());
+            assert!(
+                ["cleaner", "empty-folders"].contains(&pack.spec.module.as_str()),
+                "{} targets no known module",
+                pack.id()
+            );
             assert!(!pack.rules.is_empty(), "{} compiled to nothing", pack.id());
             assert!(pack.skipped.is_empty(), "{} skipped {:?}", pack.id(), pack.skipped);
             for rule in &pack.rules {
@@ -902,6 +918,7 @@ mod tests {
                 "browser-cache",
                 "crash-dumps-logs",
                 "dev-caches",
+                "empty-folders",
                 "installer-leftovers",
                 "old-downloads",
                 "recycle-bin",
@@ -921,7 +938,11 @@ mod tests {
     /// user (`docs/DECISIONS-NEEDED.md`, phase 2).
     #[test]
     fn the_default_pack_selection_is_the_one_the_module_spec_states() {
-        let packs = rules::load_dir(&repo_rules_dir(), &stock_env()).expect("load");
+        let packs: Vec<_> = rules::load_dir(&repo_rules_dir(), &stock_env())
+            .expect("load")
+            .into_iter()
+            .filter(|pack| pack.spec.module == CLEANER_MODULE_ID)
+            .collect();
         let settings = CleanerSettings::default();
 
         let mut on: Vec<_> = packs
@@ -1002,7 +1023,9 @@ mod tests {
                         );
                         continue;
                     }
-                    if !protected.is_protected(root) {
+                    // A catch-all glob (`**`) has no concrete root, so it names
+                    // no location; the Brain's gate still judges every real path.
+                    if root.as_os_str().is_empty() || !protected.is_protected(root) {
                         continue;
                     }
 

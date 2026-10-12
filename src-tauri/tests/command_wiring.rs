@@ -116,6 +116,11 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "start_duplicate_scan",
             args: json!({ "roots": [&root] }),
         },
+        // An explicit root, or the command scans the developer's profile.
+        Probe {
+            command: "start_empty_folder_scan",
+            args: json!({ "root": &root }),
+        },
         Probe {
             command: "treemap_drives",
             args: json!({}),

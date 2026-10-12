@@ -16,6 +16,7 @@ import type {
   DashboardSummary,
   DriveInfo,
   DuplicateScanResult,
+  EmptyFolderScanResult,
   ExecProgress,
   ExecReport,
   ModuleManifest,
@@ -102,6 +103,21 @@ export function startDuplicateScan(
   roots?: string[],
 ): Promise<DuplicateScanResult> {
   return invoke<DuplicateScanResult>("start_duplicate_scan", { roots });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — empty folders
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Run a read-only scan for empty folders under `root` (the user profile when
+ * omitted). Cancellable with {@link cancelScan}; progress arrives on
+ * `scan:progress`.
+ */
+export function startEmptyFolderScan(
+  root?: string,
+): Promise<EmptyFolderScanResult> {
+  return invoke<EmptyFolderScanResult>("start_empty_folder_scan", { root });
 }
 
 /* -------------------------------------------------------------------------
