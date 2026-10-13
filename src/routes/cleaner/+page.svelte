@@ -16,7 +16,12 @@
   import RiskBadge from "$lib/components/RiskBadge.svelte";
   import InfoTip from "$lib/components/InfoTip.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
-  import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
+  import {
+    formatBytes,
+    formatCount,
+    formatDateTime,
+    truncatePath,
+  } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { dashboardStore } from "$lib/stores/dashboard.svelte";
   import { itemsToReport, warningsOf } from "$lib/stores/execNotes";
@@ -104,7 +109,7 @@
       {#if lastScan}
         <div class="min-w-0 flex-1">
           <p class="text-sm text-ink-muted">
-            {t("dashboard.lastScan", { when: formatDateTime(lastScan.startedAt), count: lastScan.findingCount })}
+            {t("dashboard.lastScan", { when: formatDateTime(lastScan.startedAt), count: formatCount(lastScan.findingCount) })}
             · {t("dashboard.couldFree", { size: formatBytes(lastScan.reclaimableBytes) })}
             {#if lastScan.status === "cancelled"} · {t("dashboard.wasCancelled")}{/if}
           </p>

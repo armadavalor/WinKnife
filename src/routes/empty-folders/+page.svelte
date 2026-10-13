@@ -14,7 +14,7 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import InfoTip from "$lib/components/InfoTip.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
-  import { truncatePath } from "$lib/format";
+  import { formatCount, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { emptyFoldersStore } from "$lib/stores/emptyFolders.svelte";
   import { itemsToReport, warningsOf } from "$lib/stores/execNotes";
@@ -163,8 +163,8 @@
     >
       <p class="flex-1 text-sm leading-relaxed">
         {t("emptyFolders.summary", {
-          count: result.findings.length,
-          visited: result.foldersVisited,
+          count: formatCount(result.findings.length),
+          visited: formatCount(result.foldersVisited),
         })}
       </p>
       <button

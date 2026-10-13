@@ -789,7 +789,8 @@ fn windows_filetime(now: DateTime<Utc>) -> u64 {
 /// guess — an invented path would be handed to the signature check, which would
 /// then report "unknown" about a file nobody meant.
 pub fn executable_of(command: &str) -> Option<PathBuf> {
-    let trimmed = command.trim();
+    let expanded = expand_env_with(command, |name| std::env::var(name).ok());
+    let trimmed = expanded.trim();
     if trimmed.is_empty() {
         return None;
     }
@@ -819,6 +820,39 @@ pub fn executable_of(command: &str) -> Option<PathBuf> {
         }
     }
     best
+}
+
+/// Replace each `%NAME%` with its value, as Windows does when it runs a
+/// `REG_EXPAND_SZ` command (`%windir%\system32\SecurityHealthSystray.exe`).
+///
+/// A name `lookup` does not know, an empty `%%` and an unclosed `%` stay as
+/// written, so a path that cannot be resolved is simply not found later.
+fn expand_env_with(command: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(command.len());
+    let mut rest = command;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('%') else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let name = &after[..end];
+        match (!name.is_empty()).then(|| lookup(name)).flatten() {
+            Some(value) => {
+                out.push_str(&value);
+                rest = &after[end + 1..];
+            }
+            None => {
+                // Keep the first `%` and rescan from the second, which may
+                // open a real variable (`50% %windir%`).
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Estimate the impact tier, honestly.
@@ -2602,6 +2636,40 @@ mod tests {
             None,
             "an invented path would be handed to the signature check"
         );
+    }
+
+    #[test]
+    fn environment_variables_in_a_command_line_are_expanded() {
+        let lookup = |name: &str| match name.to_ascii_lowercase().as_str() {
+            "windir" => Some(r"C:\Windows".to_owned()),
+            "programfiles" => Some(r"C:\Program Files".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            expand_env_with(r"%windir%\system32\SecurityHealthSystray.exe", lookup),
+            r"C:\Windows\system32\SecurityHealthSystray.exe"
+        );
+        assert_eq!(
+            expand_env_with(r#""%ProgramFiles%\A\a.exe" /q %WINDIR%"#, lookup),
+            r#""C:\Program Files\A\a.exe" /q C:\Windows"#
+        );
+    }
+
+    #[test]
+    fn unknown_or_unclosed_variables_are_left_as_written() {
+        let lookup = |_: &str| None;
+        assert_eq!(expand_env_with(r"%nope%\x.exe", lookup), r"%nope%\x.exe");
+        assert_eq!(expand_env_with("50% off", lookup), "50% off");
+        assert_eq!(expand_env_with("a %% b", lookup), "a %% b");
+        assert_eq!(expand_env_with("", lookup), "");
+    }
+
+    #[test]
+    fn a_command_line_with_windir_finds_the_real_program() {
+        let found = executable_of(r"%windir%\system32\cmd.exe /c exit");
+        let path = found.expect("%windir% must be expanded before the lookup");
+        assert!(path.is_file());
+        assert!(!path.to_string_lossy().contains('%'));
     }
 
     /* --- registration --------------------------------------------------- */

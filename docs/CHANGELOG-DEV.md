@@ -1715,3 +1715,20 @@ maintainer steps (`docs/RELEASING.md`).
 interface", carried over from the 0.1.0 draft. Nothing calls `setLocale("tr")`
 and there is no picker (DECISIONS-NEEDED, 2026-10-12 phase 5), and `tr` holds
 117 of 352 keys, so the release notes now say English, with the switch pending.
+## 2026-10-13 — Startup: `%windir%` commands read as unsigned
+
+**Built.** `executable_of` expands `%NAME%` variables before looking for the
+program, as Windows does for `REG_EXPAND_SZ` commands. `SecurityHealth`
+(`%windir%\system32\SecurityHealthSystray.exe`) now resolves, so its signature
+reads "Microsoft Windows" instead of "unsigned", and the resolved path reaches
+the OS-owned and protected-path checks. Unknown names, `%%` and an unclosed `%`
+stay as written. Pure `expand_env_with` with unit tests, plus one test that
+`%windir%\system32\cmd.exe` resolves. Verified live over CDP.
+
+## 2026-10-13 — Counts with digit grouping
+
+**Built.** `formatCount` in `src/lib/format.ts` (system locale, like
+`formatDateTime`), used for the last-scan finding count on the dashboard and
+cleaner page and for the empty-folders summary: "2530292 found" now reads
+"2,530,292 found". Not applied inside `t()`, because `{pid}`, `{id}` and
+`{code}` must stay ungrouped. Unit test `format.test.ts`.
