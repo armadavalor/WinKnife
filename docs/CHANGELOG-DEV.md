@@ -1710,3 +1710,8 @@ the bug.
 
 **Deferred.** Fresh-VM acceptance, VirusTotal and the demo GIF stay manual
 maintainer steps (`docs/RELEASING.md`).
+
+**Correction (same day).** `CHANGELOG.md` claimed an "English and Turkish
+interface", carried over from the 0.1.0 draft. Nothing calls `setLocale("tr")`
+and there is no picker (DECISIONS-NEEDED, 2026-10-12 phase 5), and `tr` holds
+117 of 352 keys, so the release notes now say English, with the switch pending.
