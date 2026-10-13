@@ -13,7 +13,12 @@
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import StatCard from "$lib/components/StatCard.svelte";
-  import { formatBytes, formatDateTime, formatRemaining } from "$lib/format";
+  import {
+    formatBytes,
+    formatCount,
+    formatDateTime,
+    formatRemaining,
+  } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { dashboardStore } from "$lib/stores/dashboard.svelte";
   import { moduleStore } from "$lib/stores/modules.svelte";
@@ -148,7 +153,7 @@
               {#if last}
                 {t("dashboard.lastScan", {
                   when: formatDateTime(last.startedAt),
-                  count: last.findingCount,
+                  count: formatCount(last.findingCount),
                 })}
                 {#if last.reclaimableBytes > 0}
                   · {t("dashboard.couldFree", {

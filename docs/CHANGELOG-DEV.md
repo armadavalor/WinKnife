@@ -1720,3 +1720,11 @@ reads "Microsoft Windows" instead of "unsigned", and the resolved path reaches
 the OS-owned and protected-path checks. Unknown names, `%%` and an unclosed `%`
 stay as written. Pure `expand_env_with` with unit tests, plus one test that
 `%windir%\system32\cmd.exe` resolves. Verified live over CDP.
+
+## 2026-10-13 — Counts with digit grouping
+
+**Built.** `formatCount` in `src/lib/format.ts` (system locale, like
+`formatDateTime`), used for the last-scan finding count on the dashboard and
+cleaner page and for the empty-folders summary: "2530292 found" now reads
+"2,530,292 found". Not applied inside `t()`, because `{pid}`, `{id}` and
+`{code}` must stay ungrouped. Unit test `format.test.ts`.

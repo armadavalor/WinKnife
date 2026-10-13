@@ -40,6 +40,14 @@ export function formatRemaining(totalSecs: number): string {
   return `${seconds}s`;
 }
 
+/**
+ * A count with digit grouping (`2,530,292`), in the system locale like
+ * {@link formatDateTime}. Only for counts: ids and codes stay ungrouped.
+ */
+export function formatCount(count: number, locale?: string): string {
+  return count.toLocaleString(locale);
+}
+
 /** Local date and time, for "will run at" and "kept until". */
 export function formatDateTime(rfc3339: string): string {
   const date = new Date(rfc3339);
