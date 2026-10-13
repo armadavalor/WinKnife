@@ -1657,3 +1657,21 @@ no language picker for TR yet (see DECISIONS-NEEDED).
   a contributor's machine. They now run only with `WINKNIFE_EFS_TESTS=1` and
   print a visible skip line otherwise; `ci.yml` and `release.yml` set it.
 - `cargo fmt` over the merged tree.
+
+## 2026-10-12 — UI declutter
+
+**Built.** Less visible prose, same information.
+
+- New shared components `PageHeader`, `InfoTip`, `StatCard`, `EmptyState`.
+  Every page subtitle and long helper paragraph now sits behind an (i)
+  popover (hover, focus or click; Escape closes).
+- Dashboard: stat cards via `StatCard`; module cards in a 1/2/3-column grid
+  with the description in an InfoTip.
+- `FindingList`: each reason shows as one line and expands on click, so
+  every recommendation still carries a readable reason.
+- Cleaner: last-scan summary and Scan button merged into one row. Keep Awake:
+  idle state is a single line; the big countdown appears only while active.
+- Empty "nothing found" states use `EmptyState`. All pages share one
+  container width (treemap stays wider).
+- Kept visible on purpose: warnings, errors, the permanent recycle-bin note,
+  ConfirmDialog content, status lines and short safety hints.

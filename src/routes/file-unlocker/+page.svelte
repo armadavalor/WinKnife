@@ -20,6 +20,9 @@
     unlockerRequestClose,
   } from "$lib/api";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import InfoTip from "$lib/components/InfoTip.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import { t, tDynamic, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import type { CloseOutcome, LockRow, UnlockerReport } from "$lib/types";
@@ -137,13 +140,11 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-10">
-  <header class="flex flex-col gap-2">
-    <h1 class="text-2xl font-semibold tracking-tight">
-      {manifest ? tModuleName(MODULE_ID, manifest.name) : t("unlocker.title")}
-    </h1>
-    <p class="max-w-3xl text-sm leading-relaxed text-ink-muted">{t("unlocker.subtitle")}</p>
-  </header>
+<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
+  <PageHeader
+    title={manifest ? tModuleName(MODULE_ID, manifest.name) : t("unlocker.title")}
+    info={t("unlocker.subtitle")}
+  />
 
   <section
     class="flex flex-col gap-3 rounded-xl border-2 border-dashed p-5 transition-colors {hovering
@@ -185,10 +186,11 @@
           {t("unlocker.addPath")}
         </button>
       </form>
+      <InfoTip text={t("unlocker.dropHint")} />
     </div>
-    <p class="text-xs text-ink-faint">
-      {hovering ? t("unlocker.dropActive") : t("unlocker.dropHint")}
-    </p>
+    {#if hovering}
+      <p class="text-xs text-ink-faint">{t("unlocker.dropActive")}</p>
+    {/if}
   </section>
 
   {#if paths.length > 0}
@@ -249,10 +251,11 @@
     {/if}
 
     {#if report.rows.length === 0}
-      <div class="rounded-xl border border-dashed border-surface-3 p-6 text-sm">
-        <p class="font-medium">{t("unlocker.emptyTitle")}</p>
-        <p class="mt-1 text-ink-faint">{t("unlocker.emptyHint")}</p>
-      </div>
+      <EmptyState message={t("unlocker.emptyTitle")}>
+        {#snippet action()}
+          <InfoTip text={t("unlocker.emptyHint")} />
+        {/snippet}
+      </EmptyState>
     {:else}
       <ul class="flex flex-col gap-2">
         {#each report.rows as row (row.pid + ":" + row.start_time)}

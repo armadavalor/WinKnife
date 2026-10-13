@@ -11,6 +11,9 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import RiskBadge from "$lib/components/RiskBadge.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import InfoTip from "$lib/components/InfoTip.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import { truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { emptyFoldersStore } from "$lib/stores/emptyFolders.svelte";
@@ -47,17 +50,11 @@
   );
 </script>
 
-<div class="mx-auto flex max-w-4xl flex-col gap-8 px-8 py-10">
-  <header class="flex flex-col gap-2">
-    <h1 class="text-2xl font-semibold tracking-tight">
-      {manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
-    </h1>
-    {#if manifest}
-      <p class="max-w-2xl text-sm leading-relaxed text-ink-muted">
-        {tModuleDescription(manifest.id, manifest.description)}
-      </p>
-    {/if}
-  </header>
+<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
+  <PageHeader
+    title={manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
+    info={manifest ? tModuleDescription(manifest.id, manifest.description) : undefined}
+  />
 
   {#if store.error}
     <p
@@ -71,9 +68,6 @@
     <section
       class="flex flex-col items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-6"
     >
-      <p class="max-w-xl text-sm leading-relaxed text-ink-muted">
-        {t("emptyFolders.intro")}
-      </p>
       <label class="flex w-full max-w-xl flex-col gap-1 text-sm">
         <span class="text-ink-muted">{t("emptyFolders.rootLabel")}</span>
         <input
@@ -84,13 +78,16 @@
         />
         <span class="text-xs text-ink-faint">{t("emptyFolders.rootHint")}</span>
       </label>
-      <button
-        type="button"
-        class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
-        onclick={() => store.scan()}
-      >
-        {t("emptyFolders.scan")}
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+          onclick={() => store.scan()}
+        >
+          {t("emptyFolders.scan")}
+        </button>
+        <InfoTip text={t("emptyFolders.intro")} />
+      </div>
     </section>
   {:else if store.step === "scanning"}
     <section
@@ -196,11 +193,7 @@
     {/if}
 
     {#if result.findings.length === 0}
-      <p
-        class="rounded-xl border border-dashed border-surface-3 p-5 text-sm text-ink-faint"
-      >
-        {t("emptyFolders.empty")}
-      </p>
+      <EmptyState message={t("emptyFolders.empty")} />
     {:else}
       <div class="flex gap-2 text-xs">
         <button

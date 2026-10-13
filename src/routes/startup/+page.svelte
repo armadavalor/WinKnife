@@ -17,6 +17,8 @@
   import { onMount } from "svelte";
 
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
@@ -76,27 +78,20 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-10">
-  <header class="flex flex-col gap-2">
-    <h1 class="text-2xl font-semibold tracking-tight">
-      {manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
-    </h1>
-    <p class="max-w-3xl text-sm leading-relaxed text-ink-muted">
-      {manifest
-        ? tModuleDescription(manifest.id, manifest.description)
-        : t("startup.intro")}
-    </p>
-    <p class="max-w-3xl text-sm leading-relaxed text-ink-muted">
-      {t("startup.intro")}
-    </p>
-    <!-- Module spec 09: a plain link above the toggles. No modal, no nagging. -->
-    <a
-      href="/restore-point"
-      class="self-start text-sm text-accent underline-offset-2 hover:underline"
-    >
-      {t("startup.restorePointLink")}
-    </a>
-  </header>
+<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
+  <PageHeader
+    title={manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
+    info={[manifest ? tModuleDescription(manifest.id, manifest.description) : "", t("startup.intro")]
+      .filter(Boolean)
+      .join(" ")}
+  />
+  <!-- Module spec 09: a plain link above the toggles. No modal, no nagging. -->
+  <a
+    href="/restore-point"
+    class="self-start text-sm text-accent underline-offset-2 hover:underline"
+  >
+    {t("startup.restorePointLink")}
+  </a>
 
   {#if store.error}
     <p class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger">
@@ -119,9 +114,7 @@
       </button>
     </div>
   {:else if store.entries.length === 0}
-    <p class="rounded-xl border border-dashed border-surface-3 p-6 text-sm text-ink-faint">
-      {t("startup.empty")}
-    </p>
+    <EmptyState message={t("startup.empty")} />
   {:else}
     <div class="flex flex-wrap items-center gap-3 text-sm text-ink-muted">
       <span>{t("startup.summary", { total: store.entries.length, on: store.enabledCount })}</span>
