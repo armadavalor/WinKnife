@@ -1675,3 +1675,22 @@ no language picker for TR yet (see DECISIONS-NEEDED).
   container width (treemap stays wider).
 - Kept visible on purpose: warnings, errors, the permanent recycle-bin note,
   ConfirmDialog content, status lines and short safety hints.
+
+## 2026-10-13 — Startup: OS-owned toggles were clickable
+
+**Fixed.** `StartupEntry` serialises with `rename_all = "camelCase"`, but
+`src/lib/types.ts` and the startup page read `os_owned`, `os_reason`,
+`signature_note` and `impact_reason`. All four arrived as `undefined`, so
+Windows-owned rows looked clickable, their reason never showed and the
+signature/impact tooltips were empty. The backend still refused the toggle
+(`executor.rs` live re-check), so nothing was ever disabled wrongly; UI only.
+
+- TS fields renamed to camelCase; new Rust test
+  `the_wire_format_is_camel_case_as_the_ui_reads_it` pins the JSON key names.
+- The OS reason is hidden when it repeats the known-app note word for word.
+- Live check (CDP, dev build): 45 rows, 26 OS-owned, all greyed and disabled.
+
+**Deferred (noticed during the check).** `%windir%`-style commands (e.g.
+SecurityHealth) show "unsigned / not a program on this machine", so env vars
+look unexpanded before the signature check. The sidebar footer still says
+"Phase 3 — disk map + startup" (`status.phase`), so it should change with the 0.2.0 bump.
