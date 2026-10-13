@@ -1,6 +1,6 @@
 # Release checklist
 
-The current work prepares v0.1.0. It does not declare Phase 4 complete.
+The current work prepares v0.2.0. It does not declare Phase 4 complete.
 The phase brief also includes optional LLM adapters, credential storage and
 privacy controls; those have not been implemented. Do not advertise them.
 
@@ -13,7 +13,7 @@ privacy controls; those have not been implemented. Do not advertise them.
    WINKNIFE_ALLOW_SKIP_LINK_TESTS=1 is useful to test the rest of the suite but
    is not release acceptance. Never set that option in CI.
 3. Run `npm run tauri build -- --bundles nsis`, then
-   `./scripts/package-release.ps1 -Version 0.1.0` in PowerShell at the repo root.
+   `./scripts/package-release.ps1 -Version 0.2.0` in PowerShell at the repo root.
    The portable ZIP includes rules and license files; an exe alone is insufficient.
    Review/archive an existing release-artifacts directory before packaging again.
 4. Complete the fresh-VM checks below. Record Windows/WebView2 versions,

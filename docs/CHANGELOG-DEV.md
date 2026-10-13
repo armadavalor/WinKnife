@@ -1694,3 +1694,19 @@ signature/impact tooltips were empty. The backend still refused the toggle
 SecurityHealth) show "unsigned / not a program on this machine", so env vars
 look unexpanded before the signature check. The sidebar footer still says
 "Phase 3 — disk map + startup" (`status.phase`), so it should change with the 0.2.0 bump.
+
+## 2026-10-13 — Version 0.2.0
+
+**Built.** Version 0.2.0 in `package.json`, `package-lock.json`,
+`Cargo.toml`, `Cargo.lock` and `tauri.conf.json`. The sidebar footer showed the
+stale "Phase 3 — disk map + startup"; it now shows `Version {version}` read
+from `package.json` (EN + TR). `CHANGELOG.md`, both READMEs and
+`docs/RELEASING.md` describe 0.2.0 with nine tools.
+
+**Decisions.** 0.1.0 was never tagged, so 0.2.0 is the first public release and
+its changelog section carries the former 0.1.0 list plus the phase 5 tools.
+The startup wire-name fix is not listed under "Fixed": no released version had
+the bug.
+
+**Deferred.** Fresh-VM acceptance, VirusTotal and the demo GIF stay manual
+maintainer steps (`docs/RELEASING.md`).

@@ -2,10 +2,11 @@
 
 [English](README.md)
 
-Disk temizliği, aynı dosyaları bulma, disk haritası, başlangıç uygulamaları ve
-kapatma zamanlayıcısını tek pencerede sunan açık kaynak Windows aracı.
+Disk temizliği, aynı dosyaları ve boş klasörleri bulma, disk haritası, başlangıç
+uygulamaları, dosya kilidi açıcı, uyanık tutma, geri yükleme noktası ve kapatma
+zamanlayıcısını tek pencerede sunan açık kaynak Windows aracı.
 
-**Durum:** Beş araç uygulanmış durumda; ilk v0.1.0 sürümü hazırlanıyor.
+**Durum:** Dokuz araç uygulanmış durumda; ilk sürüm v0.2.0 hazırlanıyor.
 Temiz bir Windows sanal makinesinde kurulum, temizleme, geri yükleme ve kaldırma
 kabul testi henüz tamamlanmadı.
 
@@ -16,6 +17,10 @@ kabul testi henüz tamamlanmadı.
 | Disk haritası | Klasörlerin kullandığı alanı gösterir; alt klasörleri incelemeyi sağlar. |
 | Başlangıç uygulamaları | Desteklenen başlangıç girdilerini inceleme, devre dışı bırakma ve geri açma. Etki puanı bir tahmindir. |
 | Kapatma zamanlayıcısı | Kapatma, yeniden başlatma veya uyku; geri sayım, uyarılar ve iptal. |
+| Boş klasörler | Hiçbir derinlikte dosya içermeyen klasörleri bulur; seçilenler karantinaya taşınır. |
+| Dosya kilidi açıcı | Bir dosyayı hangi programın açık tuttuğunu gösterir; kapanmasını isteyebilir. |
+| Uyanık tut | Bilgisayarı (isteğe bağlı ekranı da) 24 saate kadar uyanık tutar. Hiçbir şey kaydedilmez. |
+| Geri yükleme noktası | Sistem Koruması durumunu gösterir, geri yükleme noktası oluşturur (UAC istemi). |
 
 ## Güvenlik ve gizlilik
 
