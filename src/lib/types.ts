@@ -511,15 +511,15 @@ export interface StartupEntry {
   command: string;
   target: string | null;
   enabled: boolean;
-  /** Windows owns it: the toggle is disabled and `os_reason` says why. */
-  os_owned: boolean;
-  os_reason: string | null;
+  /** Windows owns it: the toggle is disabled and `osReason` says why. */
+  osOwned: boolean;
+  osReason: string | null;
   publisher: string | null;
   signed: boolean;
-  signature_note: string;
+  signatureNote: string;
   impact: StartupImpact;
   /** How the estimate was arrived at, in words. */
-  impact_reason: string;
+  impactReason: string;
   verdict: StartupVerdict;
   category: string | null;
   note: string;

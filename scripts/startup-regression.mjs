@@ -32,7 +32,7 @@ source = source.replaceAll('"./execNotes"', JSON.stringify(execNotes));
 let code = compileModule(source, { filename: 'startup.svelte.js', generate: 'client' }).js.code;
 code = code.replace(/from ['"](svelte[^'"]*)['"]/g, (_, spec) => 'from ' + JSON.stringify(pathToFileURL(require.resolve(spec)).href));
 const { startupStore: store } = await import(moduleUrl(code));
-const entry = { id: 'entry', source: 'run', key: 'example', enabled: true, os_owned: false };
+const entry = { id: 'entry', source: 'run', key: 'example', enabled: true, osOwned: false };
 const result = id => ({ scanId: id, scan: { entries: [entry], unreadable: [] }, recommendations: [{ id: 'recommendation', justification: { kind: 'startupEntry', key: entry.key } }] });
 
 const initial = [store.load(), store.reload(), store.reload()];

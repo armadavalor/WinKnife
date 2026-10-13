@@ -51,7 +51,7 @@
   };
 
   function toggle(entry: StartupEntry): void {
-    if (entry.os_owned || store.busy !== null || store.status === "loading") {
+    if (entry.osOwned || store.busy !== null || store.status === "loading") {
       return;
     }
     if (entry.enabled) {
@@ -138,7 +138,7 @@
     <ul class="flex flex-col gap-2">
       {#each store.entries as entry (entry.id)}
         <li
-          class="flex flex-wrap items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-4 {entry.os_owned
+          class="flex flex-wrap items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-4 {entry.osOwned
             ? 'opacity-60'
             : ''}"
         >
@@ -148,14 +148,14 @@
               {#if entry.signed}
                 <span
                   class="rounded-md bg-surface-3 px-1.5 py-0.5 text-[0.65rem] text-ink-muted"
-                  title={entry.signature_note}
+                  title={entry.signatureNote}
                 >
                   ✓ {entry.publisher ?? t("startup.signed")}
                 </span>
               {:else}
                 <span
                   class="rounded-md border border-risk-warning/40 px-1.5 py-0.5 text-[0.65rem] text-risk-warning"
-                  title={entry.signature_note}
+                  title={entry.signatureNote}
                 >
                   {t("startup.unsigned")}
                 </span>
@@ -175,13 +175,13 @@
                 {t("startup.leftoverReason", { path: entry.leftoverShortcut })}
               </p>
             {/if}
-            {#if entry.os_owned && entry.os_reason}
-              <p class="mt-1.5 text-xs leading-relaxed text-ink-faint">{entry.os_reason}</p>
+            {#if entry.osOwned && entry.osReason && entry.osReason !== entry.note}
+              <p class="mt-1.5 text-xs leading-relaxed text-ink-faint">{entry.osReason}</p>
             {/if}
           </div>
 
           <div class="flex shrink-0 flex-col items-end gap-1.5">
-            <span class="text-[0.7rem] text-ink-faint" title={entry.impact_reason}>
+            <span class="text-[0.7rem] text-ink-faint" title={entry.impactReason}>
               {t("startup.impact", { tier: impactLabel[entry.impact] })}
             </span>
             <span class="text-[0.7rem] text-ink-faint">{verdictLabel[entry.verdict]}</span>
@@ -190,7 +190,7 @@
               role="switch"
               aria-checked={entry.enabled}
               aria-label={t("startup.toggleLabel", { name: entry.name })}
-              disabled={entry.os_owned || store.busy !== null}
+              disabled={entry.osOwned || store.busy !== null}
               class="rounded-lg px-3 py-1 text-xs font-medium transition-colors {entry.enabled
                 ? 'bg-accent-soft text-ink hover:bg-accent hover:text-surface-0'
                 : 'border border-surface-3 text-ink-muted hover:bg-surface-2'} disabled:cursor-not-allowed disabled:opacity-50"

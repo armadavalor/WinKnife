@@ -1799,6 +1799,29 @@ mod tests {
     }
 
     #[test]
+    fn the_wire_format_is_camel_case_as_the_ui_reads_it() {
+        let tasks = MapTaskScheduler::new().with_task(LogonTask {
+            path: "\\Microsoft\\Windows\\Defender\\Scan".to_owned(),
+            name: "Scan".to_owned(),
+            enabled: true,
+            command: None,
+            arguments: None,
+            author: None,
+        });
+        let world = world(MapRegistry::new(), tasks);
+        let scan = world.service.scan(&world.conn);
+        let json = serde_json::to_value(&scan.entries[0]).expect("serialises");
+
+        // `src/lib/types.ts` StartupEntry reads these names. A snake_case key
+        // arrives as `undefined` and the OS-owned toggle looks clickable.
+        assert_eq!(json["osOwned"], serde_json::Value::Bool(true));
+        for key in ["osReason", "signatureNote", "impactReason", "leftoverShortcut"] {
+            assert!(json.get(key).is_some(), "missing `{key}` in {json}");
+        }
+        assert!(json.get("os_owned").is_none());
+    }
+
+    #[test]
     fn an_unsigned_unknown_entry_says_so_in_words() {
         let registry = MapRegistry::new().with_key(
             Hive::CurrentUser,

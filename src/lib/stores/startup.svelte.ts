@@ -103,7 +103,7 @@ class StartupStore {
       const entry = this.entries.find(
         (candidate) =>
           candidate.enabled &&
-          !candidate.os_owned &&
+          !candidate.osOwned &&
           recommendation.justification.kind === "startupEntry" &&
           recommendation.justification.key === candidate.key,
       );
