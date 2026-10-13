@@ -459,13 +459,14 @@ const en = {
   "unlocker.outcome.refused": "{app} was not asked to close: {reason}",
   "unlocker.closeError": "Could not ask {app} to close.",
 
-  "status.phase": "Phase 3 — disk map + startup",
+  "status.version": "Version {version}",
 } as const;
 
 /** Turkish overrides. Missing keys fall back to English. */
 const tr: Partial<Record<TranslationKey, string>> = {
   "quarantine.removeNotMarked":
     "{path} kaldırılmadı: geri yüklemesi hiç reddedilmedi, bu yüzden elle kaldırılan bir öğe değil. Saklama süresi bitene kadar karantinada kalır ve hâlâ geri yükleyebilirsiniz.",
+  "status.version": "Sürüm {version}",
   "restorePoint.statusLabel": "Sistem Koruması",
   "restorePoint.statusLoading": "Sistem Koruması okunuyor…",
   "restorePoint.protection.on": "Açık görünüyor",

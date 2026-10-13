@@ -5,12 +5,13 @@
 [![CI](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml/badge.svg)](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A Windows utility that brings disk cleaning, duplicate finding, a disk map,
-startup management and a shutdown timer into one window.
+A Windows utility that brings disk cleaning, duplicate and empty-folder finding,
+a disk map, startup management, a file unlocker, keep-awake, restore points and
+a shutdown timer into one window.
 
 [ Türkçe ](README.tr.md)
 
-**Status:** five tools implemented; preparing the first v0.1.0 release.
+**Status:** nine tools implemented; preparing the first release, v0.2.0.
 Release acceptance, including a fresh Windows VM install/restore/uninstall check,
 is still pending. There is no promised release date.
 
@@ -21,6 +22,10 @@ is still pending. There is no promised release date.
 | Disk map | Folder sizes, drill-down and a treemap to investigate disk usage. |
 | Startup | Review login entries, disable and restore supported entries. Impact is estimated, not a measured boot time. |
 | Shutdown Timer | Schedule shutdown, restart or sleep; countdown, warnings and cancellation. |
+| Empty Folders | Folders with no file at any depth; selected ones move to quarantine. |
+| File Unlocker | Shows which program holds a file open; can ask it to close. |
+| Keep Awake | Keeps the PC (optionally the screen) awake for up to 24 hours. Nothing is persisted. |
+| Restore Point | Shows System Protection status and creates a restore point (UAC prompt). |
 
 ## Safety and privacy
 

@@ -9,6 +9,7 @@
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
   import { t, tModuleName } from "$lib/i18n";
   import type { ModuleManifest } from "$lib/types";
+  import { version as appVersion } from "../../../package.json";
 
   interface Props {
     /** Modules to list, in registry order. */
@@ -123,7 +124,7 @@
     </button>
 
     <p class="mt-2 px-3 text-[0.7rem] text-ink-faint">
-      {t("status.phase")}
+      {t("status.version", { version: appVersion })}
     </p>
   </div>
 </nav>
