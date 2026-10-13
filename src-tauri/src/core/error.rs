@@ -78,6 +78,14 @@ pub enum CoreError {
     #[error("no quarantine record for `{0}`")]
     UnknownQuarantineItem(String),
 
+    /// `quarantine_purge_item` was asked to remove a held item whose restore
+    /// was never refused. Such an item is left to its retention window; the
+    /// manual Remove is not a second delete button (issue #21).
+    #[error(
+        "`{0}` is removed by the retention window, not by hand; only an item whose restore was          refused can be removed this way"
+    )]
+    QuarantineItemNotMarked(String),
+
     /// The OS refused a power action.
     #[error("power action failed: {0}")]
     PowerAction(String),
@@ -131,6 +139,10 @@ pub enum CoreError {
     #[error("could not show this in File Explorer: {0}")]
     Explorer(String),
 
+    /// A restore point could not be requested, or the settings window opened.
+    #[error("restore point error: {0}")]
+    RestorePoint(String),
+
     /// The database was written by a newer build. Opening it here could
     /// purge items the newer build promised to keep (round 3).
     #[error(
@@ -157,6 +169,7 @@ impl CoreError {
             Self::Quarantine(_) => "quarantine",
             Self::VerifyFailed(_) => "verify_failed",
             Self::UnknownQuarantineItem(_) => "unknown_quarantine_item",
+            Self::QuarantineItemNotMarked(_) => "quarantine_item_not_marked",
             Self::PowerAction(_) => "power_action",
             Self::PowerActionBlocked(_) => "power_action_blocked",
             Self::RecycleBin(_) => "recycle_bin",
@@ -169,6 +182,7 @@ impl CoreError {
             Self::TaskSchedulerBlocked => "task_scheduler_blocked",
             Self::UnknownStartupEntry(_) => "unknown_startup_entry",
             Self::Explorer(_) => "explorer",
+            Self::RestorePoint(_) => "restore_point",
             Self::SchemaTooNew { .. } => "schema_too_new",
         }
     }
@@ -237,6 +251,10 @@ mod tests {
             "unknown_module"
         );
         assert_eq!(CoreError::AppDataDir("x".into()).code(), "app_data_dir");
+        assert_eq!(
+            CoreError::QuarantineItemNotMarked("x".into()).code(),
+            "quarantine_item_not_marked"
+        );
     }
 
     #[test]

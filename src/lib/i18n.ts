@@ -9,7 +9,7 @@
 import { APP_NAME, APP_TAGLINE } from "$lib/branding";
 
 /** Locales the app knows about. */
-export type Locale = "en";
+export type Locale = "en" | "tr";
 
 /** Fallback locale, used whenever a key is missing from the active one. */
 export const DEFAULT_LOCALE: Locale = "en";
@@ -205,6 +205,9 @@ const en = {
   "startup.verdictUnknown": "Not recognised",
   "startup.on": "On",
   "startup.off": "Off",
+  "startup.offLeftover": "Off — but its shortcut is still in the Startup folder",
+  "startup.leftoverReason":
+    "WinKnife holds this shortcut as switched off, but a shortcut with the same name is back at {path}, so it still runs at logon. Turning it on keeps that shortcut and moves WinKnife's copy to the quarantine if the two are identical; if they differ, nothing is changed and you decide which to keep.",
   "startup.working": "Working…",
   "startup.toggleLabel": "Run {name} at logon",
   "startup.confirmTitle": "Stop {name} running at logon?",
@@ -276,7 +279,9 @@ const en = {
   "quarantine.removeFailed":
     "{path} could not be removed: its file could not be deleted. It is still held, and the automatic purge never removes it; try again, or decrypt it there and restore it.",
   "quarantine.removeRefused":
-    "{path} was not removed: it is no longer held here, or it is not an item you remove by hand. Refresh the list to see where it stands.",
+    "{path} was not removed: it is no longer held here. Refresh the list to see where it stands.",
+  "quarantine.removeNotMarked":
+    "{path} was not removed: its restore was never refused, so it is not an item you remove by hand. It stays held until its retention window ends, and you can still restore it.",
   "quarantine.removeError": "{path} could not be removed: {error}.",
   "quarantine.refusedHeld":
     "Encrypted items kept after a refused restore: {count}, using {used}. They are not counted against the {cap} size limit, and nothing removes them but you: remove them here, or decrypt them and restore them.",
@@ -309,13 +314,308 @@ const en = {
   "shutdown.dryRunBanner":
     "This build was started with --dry-run: the timer counts down and warns you, but nothing is actually shut down. The action is written to the log instead.",
 
+  "restorePoint.statusLabel": "System Protection",
+  "restorePoint.statusLoading": "Reading System Protection…",
+  "restorePoint.protection.on": "Looks on",
+  "restorePoint.protection.off": "Looks off",
+  "restorePoint.protection.unknown": "Unknown",
+  "restorePoint.descriptionLabel": "Description (optional)",
+  "restorePoint.descriptionHint":
+    "Up to {max} characters. Left empty, the default name is used.",
+  "restorePoint.uacNotice":
+    "Creating a restore point needs administrator rights, so Windows will ask for permission (UAC) after you click. WinKnife does not change your System Protection settings.",
+  "restorePoint.create": "Create restore point",
+  "restorePoint.creating": "Waiting for Windows…",
+  "restorePoint.outcome.created": "Restore point created.",
+  "restorePoint.outcome.skipped":
+    "Windows skipped it: it allows only one restore point every 24 hours, and one was made recently.",
+  "restorePoint.outcome.maybeSkipped":
+    "Windows accepted the request but WinKnife could not confirm a new restore point. Windows may have skipped it (24-hour limit).",
+  "restorePoint.outcome.protectionOff":
+    "System Protection is off, so Windows cannot create restore points.",
+  "restorePoint.outcome.declined":
+    "No restore point was created: the administrator prompt was declined.",
+  "restorePoint.outcome.timedOut":
+    "Windows did not finish within 5 minutes. It may still be working; check again later.",
+  "restorePoint.outcome.failed": "Creating the restore point failed (error code {code}).",
+  "restorePoint.settingsHint":
+    "You can turn System Protection on in Windows' own settings. WinKnife only opens the dialog.",
+  "restorePoint.openSettings": "Open System Protection settings",
+  "startup.restorePointLink": "Create a restore point first",
+  // Same text as the Rust manifest; listed so Turkish can override it.
+  "module.restore-point.name": "Restore Point",
+  "module.restore-point.description":
+    "Create a Windows restore point before you change system settings.",
+  "module.empty-folders.name": "Empty Folders",
+  "module.empty-folders.description":
+    "Find folders that contain no files at any depth, and move them to quarantine.",
+
+  "keepAwake.presetsLabel": "For how long",
+  "keepAwake.preset30m": "30 minutes",
+  "keepAwake.preset1h": "1 hour",
+  "keepAwake.preset2h": "2 hours",
+  "keepAwake.preset4h": "4 hours",
+  "keepAwake.customLabel": "Or a custom number of minutes (1 to 1440)",
+  "keepAwake.start": "Keep awake",
+  "keepAwake.stop": "Stop",
+  "keepAwake.displayLabel": "Keep the screen on too",
+  "keepAwake.idle": "The PC may sleep as usual.",
+  "keepAwake.activeFor": "Staying awake for",
+  "keepAwake.until": "Until {time}",
+  "keepAwake.activeDisplay": "The screen stays on as well.",
+  "keepAwake.noPersist":
+    "Nothing is saved. Closing WinKnife, or restarting the PC, ends keep-awake; the longest session is 24 hours.",
+  "keepAwake.shutdownArmed":
+    "A shutdown timer is armed. Keep-awake does not cancel it: the PC will still shut down, restart or sleep when that timer ends.",
+  "keepAwake.invalidMinutes": "Enter a whole number from 1 to 1440.",
+
+  "emptyFolders.intro":
+    "Finds folders that hold no files at any depth. Nothing starts selected, and anything you remove goes to quarantine, where you can restore it.",
+  "emptyFolders.rootLabel": "Folder to scan",
+  "emptyFolders.rootHint": "Leave empty to scan your user profile.",
+  "emptyFolders.scan": "Find empty folders",
+  "emptyFolders.scanning": "Looking for empty folders…",
+  "emptyFolders.stop": "Stop",
+  "emptyFolders.stopping": "Stopping…",
+  "emptyFolders.scanAgain": "Scan again",
+  "emptyFolders.summary": "{count} empty folders found in {visited} folders.",
+  "emptyFolders.cancelled":
+    "The scan was stopped early, so this list is incomplete.",
+  "emptyFolders.unreadable":
+    "{count} folders could not be read and were left alone.",
+  "emptyFolders.skippedProtected":
+    "{count} protected locations were not entered.",
+  "emptyFolders.nested": "includes {count} empty folders inside",
+  "emptyFolders.empty": "No empty folders found.",
+  "emptyFolders.selectAll": "Select all",
+  "emptyFolders.selectNone": "Select none",
+  "emptyFolders.selection": "{count} folders selected",
+  "emptyFolders.remove": "Move folders to quarantine",
+  "emptyFolders.confirmTitle": "Move {count} empty folders to quarantine?",
+  "emptyFolders.confirmBody":
+    "Each folder is checked again first; one that is no longer empty is skipped.",
+  "emptyFolders.doneTitle": "Done",
+  "emptyFolders.doneBody": "{count} folders moved to quarantine.",
+  "unlocker.title": "File Unlocker",
+  "unlocker.subtitle":
+    "Find out which program is holding a file open. Checking is read-only; a program is only ever asked to close, never forced.",
+  "unlocker.pickFiles": "Choose files…",
+  "unlocker.pickFolder": "Choose a folder…",
+  "unlocker.dropHint": "Or drop files and folders anywhere on this window.",
+  "unlocker.dropActive": "Drop to check who holds these",
+  "unlocker.pathLabel": "Path",
+  "unlocker.pathPlaceholder": "C:\\path\\to\\file.docx",
+  "unlocker.addPath": "Add",
+  "unlocker.pickError": "The file picker could not open. Drop the files here or type a path instead.",
+  "unlocker.picked": "Checking {count} picked paths",
+  "unlocker.clear": "Clear",
+  "unlocker.recheck": "Check again",
+  "unlocker.checking": "Asking Windows who holds these files…",
+  "unlocker.queryError": "Windows could not answer the question.",
+  "unlocker.filesChecked": "{count} files checked",
+  "unlocker.capNote":
+    "This folder has more files than WinKnife checks at once: only the first {cap} files were checked.",
+  "unlocker.unreadable": "{count} entries inside the folder could not be read and were not checked.",
+  "unlocker.skippedTitle": "Not checked",
+  "unlocker.emptyTitle": "Nothing is holding these files open.",
+  "unlocker.emptyHint":
+    "If the file still cannot be changed, it may be read-only, or your account may not have permission to change it.",
+  "unlocker.pid": "PID {pid}",
+  "unlocker.service": "service {name}",
+  "unlocker.kind.window_app": "Window app",
+  "unlocker.kind.console": "Console",
+  "unlocker.kind.service": "Service",
+  "unlocker.kind.explorer": "Explorer",
+  "unlocker.kind.critical": "System-critical",
+  "unlocker.kind.unknown": "Unknown",
+  "unlocker.holdsSome": "Has {count} of these files open.",
+  "unlocker.holdsUnattributed": "Holds one or more of these files.",
+  "unlocker.heldMore": "and {count} more",
+  "unlocker.reason.window":
+    "Window app. It can be asked to close, the same way Windows asks when you sign out.",
+  "unlocker.reason.console":
+    "Console program. It can be asked to close; it may stop whatever it is running.",
+  "unlocker.reason.service": "Windows service — stop it from Services if you are sure.",
+  "unlocker.reason.explorer":
+    "Explorer — restarting it is safer than closing it; WinKnife does not do this for you.",
+  "unlocker.reason.critical":
+    "Critical system process — closing it could crash or restart Windows, so WinKnife never asks.",
+  "unlocker.reason.unknown":
+    "Windows could not say what kind of program this is, so WinKnife does not offer to close it.",
+  "unlocker.reason.system":
+    "Windows itself (the System process) holds this, often because the file is shared over the network or being indexed. It cannot be closed.",
+  "unlocker.reason.self": "This is WinKnife itself. Close the screen that is using the file instead.",
+  "unlocker.askClose": "Ask to close",
+  "unlocker.asking": "Asking…",
+  "unlocker.openLocation": "Open file location",
+  "unlocker.confirmTitle": "Ask {app} to close?",
+  "unlocker.confirmMessage":
+    "{app} will be asked to close. If it has unsaved work, it may ask you to save first.",
+  "unlocker.confirmNote": "WinKnife never forces a program to close or ends it.",
+  "unlocker.outcome.closed": "{app} closed.",
+  "unlocker.outcome.still_running":
+    "{app} is still running. It may be waiting for you to save, or it chose not to close.",
+  "unlocker.outcome.already_exited": "{app} had already closed.",
+  "unlocker.outcome.refused": "{app} was not asked to close: {reason}",
+  "unlocker.closeError": "Could not ask {app} to close.",
+
   "status.phase": "Phase 3 — disk map + startup",
 } as const;
+
+/** Turkish overrides. Missing keys fall back to English. */
+const tr: Partial<Record<TranslationKey, string>> = {
+  "quarantine.removeNotMarked":
+    "{path} kaldırılmadı: geri yüklemesi hiç reddedilmedi, bu yüzden elle kaldırılan bir öğe değil. Saklama süresi bitene kadar karantinada kalır ve hâlâ geri yükleyebilirsiniz.",
+  "restorePoint.statusLabel": "Sistem Koruması",
+  "restorePoint.statusLoading": "Sistem Koruması okunuyor…",
+  "restorePoint.protection.on": "Açık görünüyor",
+  "restorePoint.protection.off": "Kapalı görünüyor",
+  "restorePoint.protection.unknown": "Bilinmiyor",
+  "restorePoint.descriptionLabel": "Açıklama (isteğe bağlı)",
+  "restorePoint.descriptionHint":
+    "En fazla {max} karakter. Boş bırakılırsa varsayılan ad kullanılır.",
+  "restorePoint.uacNotice":
+    "Geri yükleme noktası oluşturmak yönetici izni gerektirir; tıkladıktan sonra Windows izin isteyecek (UAC). WinKnife Sistem Koruması ayarlarınızı değiştirmez.",
+  "restorePoint.create": "Geri yükleme noktası oluştur",
+  "restorePoint.creating": "Windows bekleniyor…",
+  "restorePoint.outcome.created": "Geri yükleme noktası oluşturuldu.",
+  "restorePoint.outcome.skipped":
+    "Windows atladı: 24 saatte yalnızca bir geri yükleme noktasına izin veriyor ve yakın zamanda bir tane oluşturulmuş.",
+  "restorePoint.outcome.maybeSkipped":
+    "Windows isteği kabul etti ama WinKnife yeni bir geri yükleme noktasını doğrulayamadı. Windows atlamış olabilir (24 saat sınırı).",
+  "restorePoint.outcome.protectionOff":
+    "Sistem Koruması kapalı, bu yüzden Windows geri yükleme noktası oluşturamıyor.",
+  "restorePoint.outcome.declined":
+    "Geri yükleme noktası oluşturulmadı: yönetici izni reddedildi.",
+  "restorePoint.outcome.timedOut":
+    "Windows 5 dakika içinde bitirmedi. Hâlâ çalışıyor olabilir; daha sonra yeniden kontrol edin.",
+  "restorePoint.outcome.failed": "Geri yükleme noktası oluşturulamadı (hata kodu {code}).",
+  "restorePoint.settingsHint":
+    "Sistem Korumasını Windows'un kendi ayarlarından açabilirsiniz. WinKnife yalnızca pencereyi açar.",
+  "restorePoint.openSettings": "Sistem Koruması ayarlarını aç",
+  "startup.restorePointLink": "Önce bir geri yükleme noktası oluşturun",
+  "module.restore-point.name": "Geri Yükleme Noktası",
+  "module.restore-point.description":
+    "Sistem ayarlarını değiştirmeden önce bir Windows geri yükleme noktası oluşturun.",
+  "startup.offLeftover": "Kapalı — ama kısayolu hâlâ Başlangıç klasöründe",
+  "startup.leftoverReason":
+    "WinKnife bu kısayolu kapalı olarak tutuyor, ancak aynı adlı bir kısayol {path} konumuna geri gelmiş; bu yüzden oturum açılışında hâlâ çalışıyor. Açtığınızda o kısayol kalır; ikisi aynıysa WinKnife'ın kopyası karantinaya taşınır, farklıysa hiçbir şey değişmez ve hangisini tutacağınıza siz karar verirsiniz.",
+  "module.empty-folders.name": "Boş klasörler",
+  "module.empty-folders.description":
+    "Hiçbir derinlikte dosya içermeyen klasörleri bulur ve karantinaya taşır.",
+  "emptyFolders.intro":
+    "Hiçbir derinlikte dosya içermeyen klasörleri bulur. Başlangıçta hiçbiri seçili değildir; kaldırdığınız her şey karantinaya gider ve geri alınabilir.",
+  "emptyFolders.rootLabel": "Taranacak klasör",
+  "emptyFolders.rootHint": "Boş bırakırsanız kullanıcı profiliniz taranır.",
+  "emptyFolders.scan": "Boş klasörleri bul",
+  "emptyFolders.scanning": "Boş klasörler aranıyor…",
+  "emptyFolders.stop": "Durdur",
+  "emptyFolders.stopping": "Durduruluyor…",
+  "emptyFolders.scanAgain": "Yeniden tara",
+  "emptyFolders.summary": "{visited} klasörde {count} boş klasör bulundu.",
+  "emptyFolders.cancelled": "Tarama erken durduruldu, bu liste eksik.",
+  "emptyFolders.unreadable": "{count} klasör okunamadı ve dokunulmadı.",
+  "emptyFolders.skippedProtected": "{count} korumalı konuma girilmedi.",
+  "emptyFolders.nested": "içinde {count} boş klasör daha var",
+  "emptyFolders.empty": "Boş klasör bulunamadı.",
+  "emptyFolders.selectAll": "Tümünü seç",
+  "emptyFolders.selectNone": "Seçimi kaldır",
+  "emptyFolders.selection": "{count} klasör seçili",
+  "emptyFolders.remove": "Klasörleri karantinaya taşı",
+  "emptyFolders.confirmTitle": "{count} boş klasör karantinaya taşınsın mı?",
+  "emptyFolders.confirmBody":
+    "Her klasör önce yeniden kontrol edilir; artık boş olmayan atlanır.",
+  "emptyFolders.doneTitle": "Tamamlandı",
+  "emptyFolders.doneBody": "{count} klasör karantinaya taşındı.",
+  "keepAwake.presetsLabel": "Ne kadar süreyle",
+  "keepAwake.preset30m": "30 dakika",
+  "keepAwake.preset1h": "1 saat",
+  "keepAwake.preset2h": "2 saat",
+  "keepAwake.preset4h": "4 saat",
+  "keepAwake.customLabel": "Veya özel dakika sayısı (1 ile 1440 arası)",
+  "keepAwake.start": "Uyanık tut",
+  "keepAwake.stop": "Durdur",
+  "keepAwake.displayLabel": "Ekran da açık kalsın",
+  "keepAwake.idle": "Bilgisayar her zamanki gibi uykuya geçebilir.",
+  "keepAwake.activeFor": "Uyanık kalma süresi",
+  "keepAwake.until": "Bitiş: {time}",
+  "keepAwake.activeDisplay": "Ekran da açık kalır.",
+  "keepAwake.noPersist":
+    "Hiçbir şey kaydedilmez. WinKnife'ı kapatmak ya da bilgisayarı yeniden başlatmak uyanık tutmayı sonlandırır; en uzun oturum 24 saattir.",
+  "keepAwake.shutdownArmed":
+    "Bir kapatma zamanlayıcısı kurulu. Uyanık tutma onu iptal etmez: zamanlayıcı bitince bilgisayar yine kapanır, yeniden başlar ya da uykuya geçer.",
+  "keepAwake.invalidMinutes": "1 ile 1440 arasında tam sayı girin.",
+  "unlocker.title": "Dosya Kilidi Açıcı",
+  "unlocker.subtitle":
+    "Bir dosyayı hangi programın açık tuttuğunu bulun. Kontrol salt okunurdur; bir programdan yalnızca kapanması istenir, asla zorlanmaz.",
+  "unlocker.pickFiles": "Dosya seç…",
+  "unlocker.pickFolder": "Klasör seç…",
+  "unlocker.dropHint": "Ya da dosya ve klasörleri bu pencerenin herhangi bir yerine bırakın.",
+  "unlocker.dropActive": "Kimin tuttuğunu görmek için bırakın",
+  "unlocker.pathLabel": "Yol",
+  "unlocker.pathPlaceholder": "C:\\yol\\dosya.docx",
+  "unlocker.addPath": "Ekle",
+  "unlocker.pickError": "Dosya seçici açılamadı. Dosyaları buraya bırakın ya da yolu yazın.",
+  "unlocker.picked": "Seçilen {count} yol kontrol ediliyor",
+  "unlocker.clear": "Temizle",
+  "unlocker.recheck": "Yeniden kontrol et",
+  "unlocker.checking": "Bu dosyaları kimin tuttuğu Windows'a soruluyor…",
+  "unlocker.queryError": "Windows bu soruyu yanıtlayamadı.",
+  "unlocker.filesChecked": "{count} dosya kontrol edildi",
+  "unlocker.capNote":
+    "Bu klasörde WinKnife'ın tek seferde kontrol ettiğinden fazla dosya var: yalnızca ilk {cap} dosya kontrol edildi.",
+  "unlocker.unreadable": "Klasördeki {count} öge okunamadı ve kontrol edilmedi.",
+  "unlocker.skippedTitle": "Kontrol edilmedi",
+  "unlocker.emptyTitle": "Bu dosyaları açık tutan bir şey yok.",
+  "unlocker.emptyHint":
+    "Dosya hâlâ değiştirilemiyorsa salt okunur olabilir ya da hesabınızın onu değiştirme izni olmayabilir.",
+  "unlocker.pid": "PID {pid}",
+  "unlocker.service": "hizmet {name}",
+  "unlocker.kind.window_app": "Pencereli uygulama",
+  "unlocker.kind.console": "Konsol",
+  "unlocker.kind.service": "Hizmet",
+  "unlocker.kind.explorer": "Gezgin",
+  "unlocker.kind.critical": "Sistem için kritik",
+  "unlocker.kind.unknown": "Bilinmiyor",
+  "unlocker.holdsSome": "Bu dosyalardan {count} tanesini açık tutuyor.",
+  "unlocker.holdsUnattributed": "Bu dosyalardan bir veya daha fazlasını tutuyor.",
+  "unlocker.heldMore": "ve {count} tane daha",
+  "unlocker.reason.window":
+    "Pencereli uygulama. Oturumu kapatırken Windows'un yaptığı gibi kapanması istenebilir.",
+  "unlocker.reason.console":
+    "Konsol programı. Kapanması istenebilir; çalıştırdığı işi durdurabilir.",
+  "unlocker.reason.service": "Windows hizmeti — eminseniz Hizmetler'den durdurun.",
+  "unlocker.reason.explorer":
+    "Gezgin — kapatmak yerine yeniden başlatmak daha güvenlidir; WinKnife bunu sizin yerinize yapmaz.",
+  "unlocker.reason.critical":
+    "Kritik sistem işlemi — kapatılması Windows'u çökertebilir ya da yeniden başlatabilir, bu yüzden WinKnife asla istemez.",
+  "unlocker.reason.unknown":
+    "Windows bunun ne tür bir program olduğunu söyleyemedi, bu yüzden WinKnife kapatmayı önermiyor.",
+  "unlocker.reason.system":
+    "Bunu Windows'un kendisi (System işlemi) tutuyor; genellikle dosya ağda paylaşıldığı ya da dizinlendiği için. Kapatılamaz.",
+  "unlocker.reason.self": "Bu WinKnife'ın kendisi. Dosyayı kullanan ekranı kapatın.",
+  "unlocker.askClose": "Kapanmasını iste",
+  "unlocker.asking": "İsteniyor…",
+  "unlocker.openLocation": "Dosya konumunu aç",
+  "unlocker.confirmTitle": "{app} kapanması istensin mi?",
+  "unlocker.confirmMessage":
+    "{app} uygulamasından kapanması istenecek. Kaydedilmemiş işi varsa önce kaydetmenizi isteyebilir.",
+  "unlocker.confirmNote": "WinKnife bir programı asla zorla kapatmaz ya da sonlandırmaz.",
+  "unlocker.outcome.closed": "{app} kapandı.",
+  "unlocker.outcome.still_running":
+    "{app} hâlâ çalışıyor. Kaydetmenizi bekliyor olabilir ya da kapanmamayı seçti.",
+  "unlocker.outcome.already_exited": "{app} zaten kapanmıştı.",
+  "unlocker.outcome.refused": "{app} uygulamasından kapanması istenmedi: {reason}",
+  "unlocker.closeError": "{app} uygulamasından kapanması istenemedi.",
+};
 
 /** Every key the dictionary knows. */
 export type TranslationKey = keyof typeof en;
 
-const dictionaries: Record<Locale, Partial<Record<string, string>>> = { en };
+const dictionaries: Record<Locale, Partial<Record<string, string>>> = {
+  en,
+  tr,
+};
 
 let activeLocale: Locale = DEFAULT_LOCALE;
 

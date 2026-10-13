@@ -116,6 +116,11 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "start_duplicate_scan",
             args: json!({ "roots": [&root] }),
         },
+        // An explicit root, or the command scans the developer's profile.
+        Probe {
+            command: "start_empty_folder_scan",
+            args: json!({ "root": &root }),
+        },
         Probe {
             command: "treemap_drives",
             args: json!({}),
@@ -220,6 +225,51 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
         Probe {
             command: "shutdown_cancel",
             args: json!({}),
+        },
+        Probe {
+            command: "take_launch_route",
+            args: json!({}),
+        },
+        // Read-only: the registry is only read.
+        Probe {
+            command: "restore_point_status",
+            args: json!({}),
+        },
+        // Refused: the real platform is not armed in a test process, so no UAC
+        // prompt and no elevated helper can ever come from this probe.
+        Probe {
+            command: "restore_point_create",
+            args: json!({ "description": "wiring probe" }),
+        },
+        // Refused for the same reason: no settings window opens.
+        Probe {
+            command: "restore_point_open_settings",
+            args: json!({}),
+        },
+        // `manage_state` is asked for a dry run, so the engine holds a
+        // recorder: started, observed, stopped, never touching the OS.
+        Probe {
+            command: "keep_awake_start",
+            args: json!({ "minutes": 1, "display": false }),
+        },
+        Probe {
+            command: "keep_awake_status",
+            args: json!({}),
+        },
+        Probe {
+            command: "keep_awake_stop",
+            args: json!({}),
+        },
+        // Read-only: asks the Restart Manager about an empty temp folder.
+        Probe {
+            command: "unlocker_query",
+            args: json!({ "paths": [&root] }),
+        },
+        // Closes nothing: PID 0 never matches a running process, and the real
+        // `RmShutdown` refuses in any build `run()` did not arm.
+        Probe {
+            command: "unlocker_request_close",
+            args: json!({ "pid": 0, "startTime": "0" }),
         },
     ]
 }

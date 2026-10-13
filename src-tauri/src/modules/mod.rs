@@ -36,7 +36,11 @@ register_modules! {
     treemap => treemap::TreemapModule,
     duplicates => duplicates::DuplicatesModule,
     startup => startup::StartupModule,
+    restore_point => restore_point::RestorePointModule,
     shutdown_timer => shutdown_timer::ShutdownTimerModule,
+    keep_awake => keep_awake::KeepAwakeModule,
+    empty_folders => empty_folders::EmptyFoldersModule,
+    file_unlocker => file_unlocker::FileUnlockerModule,
 }
 
 /// Build the application's module registry.
@@ -111,7 +115,11 @@ mod tests {
             "treemap",
             "duplicates",
             "startup",
+            "restore-point",
             "shutdown-timer",
+            "keep-awake",
+            "empty-folders",
+            "file-unlocker",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }

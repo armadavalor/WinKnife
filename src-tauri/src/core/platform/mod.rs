@@ -19,6 +19,7 @@
 //! only `lib.rs::run()` can do (security review H5).
 
 pub(crate) mod env;
+pub(crate) mod execution_state;
 pub(crate) mod explorer;
 pub(crate) mod file_id;
 pub(crate) mod guard;
@@ -29,6 +30,8 @@ pub(crate) mod power;
 pub(crate) mod process;
 pub(crate) mod recycle_bin;
 pub(crate) mod registry;
+pub(crate) mod restart_manager;
+pub(crate) mod restore_point;
 pub(crate) mod signature;
 pub(crate) mod tasks;
 pub(crate) mod volume;
@@ -36,6 +39,7 @@ pub(crate) mod volume;
 use std::sync::Arc;
 
 pub use env::{EnvResolver, MapEnv, SystemEnv};
+pub use execution_state::{AwakeRequest, ExecutionState, RecordedCall, RecordingExecutionState};
 pub use explorer::reveal_in_explorer;
 pub use file_id::{file_identity, try_file_identity, FileId};
 pub use guard::real_os_effects_armed;
@@ -47,6 +51,15 @@ pub use recycle_bin::{RecycleBin, RecycleBinStats, StubRecycleBin};
 pub use registry::{
     Hive, MapRegistry, RegValue, Registry, SystemRegistry, REG_TYPE_BINARY, REG_TYPE_EXPAND_SZ,
     REG_TYPE_SZ,
+};
+pub use restart_manager::{
+    close_policy, real_restart_manager, AppKind, CloseOutcome, ClosePolicy, LockInfo,
+    RestartManager, RmError, UniqueProcess,
+};
+pub use restore_point::{
+    create_in_helper, failed_exit_code, failure_from_exit_code, FakeRestorePointPlatform,
+    HelperRun, RestorePointPlatform, SystemRestorePoints, CREATE_RESTORE_POINT_FLAG, EXIT_CREATED,
+    EXIT_MAYBE_SKIPPED, EXIT_PROTECTION_OFF, EXIT_SKIPPED, WIN32_CANCELLED,
 };
 pub use signature::{MapSignatures, Signature, SignatureProbe, SystemSignatureProbe};
 pub use tasks::{LogonTask, MapTaskScheduler, SystemTaskScheduler, TaskScheduler};
@@ -70,6 +83,19 @@ pub fn real_power_controller() -> Arc<dyn PowerController> {
     {
         // No power API to reach off Windows; log instead of pretending.
         Arc::new(DryRunPower::new())
+    }
+}
+
+/// The execution-state API that talks to the OS (keep-awake).
+pub fn real_execution_state() -> Arc<dyn ExecutionState> {
+    #[cfg(windows)]
+    {
+        Arc::new(execution_state::SystemExecutionState)
+    }
+    #[cfg(not(windows))]
+    {
+        // No such API off Windows; record instead of pretending.
+        Arc::new(RecordingExecutionState::new())
     }
 }
 

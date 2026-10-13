@@ -100,6 +100,8 @@
           {t("quarantine.removeFailed", { path: store.removeFailed.path })}
         {:else if store.removeFailed.failure.kind === "notEligible"}
           {t("quarantine.removeRefused", { path: store.removeFailed.path })}
+        {:else if store.removeFailed.failure.kind === "notMarked"}
+          {t("quarantine.removeNotMarked", { path: store.removeFailed.path })}
         {:else}
           {t("quarantine.removeError", {
             path: store.removeFailed.path,

@@ -43,6 +43,9 @@ use crate::core::state::{CancelRegistry, ScanResult, ScanStore};
 use crate::core::types::ExecReport;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, DuplicateProgress, DuplicateScan};
+use crate::modules::empty_folders;
+use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
+use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
 use crate::modules::{startup, treemap};
 
@@ -472,6 +475,134 @@ pub async fn start_duplicate_scan<R: Runtime>(
         wasted_bytes: scan.wasted_bytes(),
         scan_id,
         scan,
+        recommendations,
+    })
+}
+
+/// What an empty-folder scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmptyFolderScanResult {
+    /// Id for `execute` and `cancel_scan`.
+    pub scan_id: Uuid,
+    /// The folder that was scanned.
+    pub root: PathBuf,
+    /// The topmost empty folders.
+    pub findings: Vec<crate::core::types::Finding>,
+    /// One explained recommendation per finding.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+    /// Folders that could not be read and were therefore treated as not empty.
+    pub unreadable: u64,
+    /// Protected trees that were deliberately not entered.
+    pub skipped_protected: u64,
+    /// Folders looked at.
+    pub folders_visited: u64,
+    /// Whether the scan was cancelled part-way.
+    pub cancelled: bool,
+}
+
+/// Scan `root` (default: the user profile) for folders with no files in them.
+///
+/// Blocking work; read-only.
+///
+/// # Errors
+/// Returns an error when the root is not a folder, is a protected location, or
+/// no default root can be determined.
+#[tauri::command]
+pub async fn start_empty_folder_scan<R: Runtime>(
+    app: AppHandle<R>,
+    root: Option<PathBuf>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+    cancels: State<'_, CancelRegistry>,
+) -> Result<EmptyFolderScanResult, ApiError> {
+    use crate::core::platform::EnvResolver;
+
+    let invalid = |message: String| {
+        CoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            message,
+        ))
+    };
+    let root = root
+        .or_else(|| {
+            crate::core::platform::SystemEnv
+                .var("USERPROFILE")
+                .map(PathBuf::from)
+        })
+        .ok_or_else(|| invalid("no folder was chosen and no user profile was found".to_owned()))?;
+    if !root.is_dir() {
+        return Err(invalid(format!("`{}` is not a folder", root.display())).into());
+    }
+    if let Some(refusal) = services.brain.path_refusal(&root) {
+        return Err(invalid(refusal.reason).into());
+    }
+
+    let scan_id = Uuid::new_v4();
+    let started_at = Utc::now();
+    let cancel = cancels.start(scan_id);
+    let mut throttle = ProgressThrottle::new();
+    let mut emit = |visited: u64, current: &Path| {
+        if !throttle.should_emit() {
+            return;
+        }
+        let payload = ScanProgress {
+            scan_id,
+            module: empty_folders::MODULE_ID.to_owned(),
+            items_scanned: visited,
+            current_path: Some(current.display().to_string()),
+            pct: None,
+        };
+        if let Err(err) = events::emit_scan_progress(&app, &payload) {
+            tracing::debug!(error = %err, "empty-folder progress event was not delivered");
+        }
+    };
+
+    let output = empty_folders::scan(
+        &empty_folders::ScanContext {
+            root: &root,
+            protected: services.brain.protected_paths(),
+            cancel: &cancel,
+        },
+        Some(&mut emit),
+    );
+    cancels.finish(scan_id);
+
+    let recommendations = empty_folders::analyze(&output.findings, &services.brain);
+    store.insert(ScanResult {
+        scan_id,
+        module: empty_folders::MODULE_ID.to_owned(),
+        findings: output.findings.clone(),
+        recommendations: recommendations.clone(),
+        skipped_rules: Vec::new(),
+    });
+    remember(
+        &db,
+        scan_id,
+        empty_folders::MODULE_ID,
+        started_at,
+        output.findings.len() as u64,
+        0,
+        output.cancelled,
+    );
+    let _ = events::emit_scan_done(
+        &app,
+        &ScanDone {
+            scan_id,
+            module: empty_folders::MODULE_ID.to_owned(),
+            finding_count: output.findings.len() as u64,
+        },
+    );
+
+    Ok(EmptyFolderScanResult {
+        scan_id,
+        root,
+        unreadable: output.unreadable.len() as u64,
+        skipped_protected: output.skipped_protected,
+        folders_visited: output.folders_visited,
+        cancelled: output.cancelled,
+        findings: output.findings,
         recommendations,
     })
 }
@@ -1099,6 +1230,7 @@ fn read_settings(
         .brain
         .packs()
         .iter()
+        .filter(|pack| pack.spec.module == cleaner::CLEANER_MODULE_ID)
         .map(|pack| PackView {
             id: pack.id().to_owned(),
             name: pack.spec.name.clone(),
@@ -1342,6 +1474,174 @@ pub fn shutdown_status(timer: State<'_, Arc<ShutdownTimer>>) -> Result<TimerStat
     Ok(timer.status(Utc::now()))
 }
 
+/* -------------------------------------------------------------------------
+ * Launch: `--module <id>` (phase 5, task 1)
+ * ---------------------------------------------------------------------- */
+
+/// The route a launch asked for, if the UI has not opened it yet.
+///
+/// Called by the shell once on mount (the first launch's `--module`) and again
+/// on every `launch:navigate` (a forwarded one). Taking it clears it, so a
+/// route is opened once. Already validated against the registry: an unknown id
+/// arrives here as the dashboard.
+///
+/// # Errors
+/// Infallible today; keeps the shared `Result` shape.
+#[tauri::command]
+pub fn take_launch_route(
+    pending: State<'_, crate::PendingLaunchRoute>,
+) -> Result<Option<String>, ApiError> {
+    Ok(pending.take())
+}
+
+/// Whether System Protection looks enabled. Read-only; `unknown` is a valid
+/// answer (module spec 09).
+///
+/// # Errors
+/// Infallible today; an unreadable registry is reported as `unknown`.
+#[tauri::command]
+pub fn restore_point_status(
+    service: State<'_, Arc<RestorePointService>>,
+) -> Result<RestorePointStatus, ApiError> {
+    Ok(service.status())
+}
+
+/// Ask Windows for a restore point through the elevated helper. Shows a UAC
+/// prompt and waits up to five minutes, off the UI thread.
+///
+/// # Errors
+/// Returns an error while another request is running, or when this build may
+/// not reach the OS. Every Windows answer, failure included, is an `Ok`
+/// outcome the page explains.
+#[tauri::command]
+pub async fn restore_point_create(
+    service: State<'_, Arc<RestorePointService>>,
+    description: String,
+) -> Result<CreateOutcome, ApiError> {
+    let service = Arc::clone(&service);
+    tauri::async_runtime::spawn_blocking(move || service.create(&description))
+        .await
+        .map_err(|err| CoreError::RestorePoint(format!("the request did not finish: {err}")))?
+        .map_err(ApiError::from)
+}
+
+/// Open Windows' System Protection settings. Only ever on a button click; it
+/// changes nothing by itself.
+///
+/// # Errors
+/// Returns an error when the window could not be opened.
+#[tauri::command]
+pub fn restore_point_open_settings(
+    service: State<'_, Arc<RestorePointService>>,
+) -> Result<(), ApiError> {
+    Ok(service.open_protection_settings()?)
+}
+
+/* -------------------------------------------------------------------------
+ * Keep awake
+ * ---------------------------------------------------------------------- */
+
+/// Start keep-awake, replacing any running session.
+///
+/// # Errors
+/// Returns [`CoreError::InvalidTimer`] for zero minutes or more than 24 hours.
+#[tauri::command]
+pub async fn keep_awake_start(
+    minutes: u32,
+    display: bool,
+    engine: State<'_, Arc<KeepAwake>>,
+) -> Result<KeepAwakeStatus, ApiError> {
+    // Joins the previous worker thread, so keep it off the async runtime.
+    let engine = Arc::clone(&engine);
+    tauri::async_runtime::spawn_blocking(move || engine.start(minutes, display, Utc::now()))
+        .await
+        .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")))?
+        .map_err(ApiError::from)
+}
+
+/// Stop keep-awake. Stopping when nothing runs is not an error.
+///
+/// # Errors
+/// Fails only if the background task cannot be joined.
+#[tauri::command]
+pub async fn keep_awake_stop(
+    engine: State<'_, Arc<KeepAwake>>,
+) -> Result<KeepAwakeStatus, ApiError> {
+    let engine = Arc::clone(&engine);
+    tauri::async_runtime::spawn_blocking(move || engine.stop())
+        .await
+        .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")).into())
+}
+
+/// Current keep-awake state.
+///
+/// # Errors
+/// Infallible today; keeps the shared `Result` shape.
+#[tauri::command]
+pub fn keep_awake_status(engine: State<'_, Arc<KeepAwake>>) -> Result<KeepAwakeStatus, ApiError> {
+    Ok(engine.status())
+}
+
+/* -------------------------------------------------------------------------
+ * File unlocker
+ * ---------------------------------------------------------------------- */
+
+fn unlocker_error(err: crate::core::platform::RmError) -> ApiError {
+    let code = match err {
+        crate::core::platform::RmError::NotArmed => "not_armed",
+        _ => "unlocker_failed",
+    };
+    ApiError::new(code, err.to_string())
+}
+
+/// Which programs have these files (or files inside these folders) open.
+/// Read-only (module spec 07).
+///
+/// # Errors
+/// Returns an error when the Restart Manager fails.
+#[tauri::command]
+pub async fn unlocker_query(
+    paths: Vec<PathBuf>,
+) -> Result<crate::modules::file_unlocker::UnlockerReport, ApiError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rm = crate::core::platform::real_restart_manager();
+        crate::modules::file_unlocker::query(rm.as_ref(), &paths).map_err(unlocker_error)
+    })
+    .await
+    .map_err(|err| {
+        ApiError::new("unlocker_failed", "the query did not finish").with_detail(err.to_string())
+    })?
+}
+
+/// Ask one window or console program to close, politely (`RmShutdown` with no
+/// force flag). `start_time` is the decimal text a query returned; a mismatch
+/// with the running process is refused.
+///
+/// # Errors
+/// Returns an error for a malformed start time, when the Restart Manager
+/// fails, or when this build may not reach the OS.
+#[tauri::command]
+pub async fn unlocker_request_close(
+    pid: u32,
+    start_time: String,
+) -> Result<crate::modules::file_unlocker::CloseReport, ApiError> {
+    let start_time: u64 = start_time.parse().map_err(|_| {
+        ApiError::new(
+            "invalid_start_time",
+            "the process start time is not a number",
+        )
+    })?;
+    let process = crate::core::platform::UniqueProcess { pid, start_time };
+    tauri::async_runtime::spawn_blocking(move || {
+        let rm = crate::core::platform::real_restart_manager();
+        crate::modules::file_unlocker::request_close(rm.as_ref(), process).map_err(unlocker_error)
+    })
+    .await
+    .map_err(|err| {
+        ApiError::new("unlocker_failed", "the request did not finish").with_detail(err.to_string())
+    })?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1523,6 +1823,7 @@ mod tests {
             verdict,
             category: Some("Games".to_owned()),
             note: "Starts itself when you open it.".to_owned(),
+            leftover_shortcut: None,
         }
     }
 

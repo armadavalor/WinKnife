@@ -523,6 +523,12 @@ export interface StartupEntry {
   verdict: StartupVerdict;
   category: string | null;
   note: string;
+  /**
+   * Set when WinKnife holds this shortcut as off while one by the same name is
+   * still in the Startup folder, so it still runs at logon (issue #21). The
+   * path of that shortcut.
+   */
+  leftoverShortcut?: string | null;
 }
 
 /** What one enumeration produced. */
@@ -701,6 +707,17 @@ export interface PurgeReport {
  * modules/shutdown_timer.rs
  * ---------------------------------------------------------------------- */
 
+/* modules/keep_awake.rs */
+
+/** Whether the machine is being kept awake, and until when. */
+export interface KeepAwakeStatus {
+  active: boolean;
+  /** Wall-clock end of the session (RFC 3339), or null when idle. */
+  deadline: string | null;
+  /** Whether the screen is kept on as well. */
+  display: boolean;
+}
+
 /** What happens when a timer reaches zero. */
 export type PowerAction = "shutdown" | "restart" | "sleep";
 
@@ -724,4 +741,115 @@ export interface TimerStatus {
   active: ActiveTimerView | null;
   /** True when this build logs power actions instead of performing them. */
   dryRun: boolean;
+}
+
+/** System Protection as far as WinKnife can read it, without changing it. */
+export type Protection = "on" | "off" | "unknown";
+
+/** `restore_point_status`: read-only, never touches System Protection. */
+export interface RestorePointStatus {
+  protection: Protection;
+  /** Why the status is what it is, in words. */
+  reason: string;
+  defaultDescription: string;
+  maxDescriptionChars: number;
+}
+
+/** What one `restore_point_create` came to. Each maps to one sentence. */
+export type CreateOutcome =
+  | { state: "created" }
+  | { state: "skipped" }
+  | { state: "maybeSkipped" }
+  | { state: "protectionOff" }
+  | { state: "declined" }
+  | { state: "timedOut" }
+  | { state: "failed"; code: number };
+/* -------------------------------------------------------------------------
+ * modules/empty_folders.rs
+ * ---------------------------------------------------------------------- */
+
+/** Metadata an empty-folder finding carries. */
+export interface EmptyFolderMeta {
+  /** How many empty folders are nested inside this one. */
+  nested: number;
+  /** True for a folder Windows marks as a system folder. */
+  system: boolean;
+}
+
+/** What `start_empty_folder_scan` hands back. */
+export interface EmptyFolderScanResult {
+  scanId: string;
+  root: string;
+  /** The topmost empty folders. */
+  findings: Finding[];
+  recommendations: Recommendation[];
+  unreadable: number;
+  skippedProtected: number;
+  foldersVisited: number;
+  cancelled: boolean;
+}
+
+/* -------------------------------------------------------------------------
+ * modules/file_unlocker.rs
+ * ---------------------------------------------------------------------- */
+
+/** What kind of program holds a file, as the Restart Manager reports it. */
+export type AppKind =
+  | "window_app"
+  | "console"
+  | "service"
+  | "explorer"
+  | "critical"
+  | "unknown";
+
+/** One program holding one or more of the picked files. */
+export interface LockRow {
+  pid: number;
+  /** Process start time as decimal text (too large for a JS number). */
+  start_time: string;
+  app_name: string;
+  exe_path: string | null;
+  kind: AppKind;
+  service_name: string | null;
+  /** Whether "Ask to close" may be offered (window and console apps only). */
+  can_close: boolean;
+  /** Stable reason code: window, console, service, explorer, critical, unknown, system, self. */
+  reason_code: string;
+  /** Human-readable reason, English, built in Rust. */
+  reason: string;
+  /** The first few held files (only when attributed). */
+  held_files: string[];
+  held_count: number;
+  /** False when too many files were queried to say which ones a program holds. */
+  attributed: boolean;
+}
+
+/** A picked path that was not checked. */
+export interface SkippedPath {
+  path: string;
+  reason: string;
+}
+
+/** Result of `unlocker_query`. */
+export interface UnlockerReport {
+  rows: LockRow[];
+  files_checked: number;
+  /** A folder had more files than `cap`; only the first `cap` were checked. */
+  capped: boolean;
+  cap: number;
+  skipped: SkippedPath[];
+  unreadable: number;
+}
+
+/** What happened after asking a program to close. */
+export type CloseOutcome =
+  | { status: "closed" }
+  | { status: "still_running" }
+  | { status: "already_exited" }
+  | { status: "refused"; reason: string };
+
+/** Result of `unlocker_request_close`. */
+export interface CloseReport {
+  outcome: CloseOutcome;
+  exe_path: string | null;
 }

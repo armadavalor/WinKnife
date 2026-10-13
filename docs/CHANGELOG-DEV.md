@@ -1453,3 +1453,207 @@ would make it robust. Setup errors after `db::open` still miss the log file.
 **Deferred.** The startup page still shows the known-app label rather than
 the rating (DECISIONS-NEEDED, note 3). Clean-VM acceptance before the v0.1.0
 tag.
+
+---
+
+## 2026-10-12 — Phase 5 task 0: issue #21 follow-ups
+
+**Built.**
+- **Startup "both kept" arm, option (b).** A held shortcut whose original name
+  is occupied again is listed once (no duplicate id), as off, with a new
+  `leftoverShortcut` field; the page labels it "Off — but its shortcut is still
+  in the Startup folder" with a reason naming the path (EN + TR). Re-enable
+  compares the two files with `content_hash::full_hash`: byte-equal → the held
+  copy goes to the quarantine and the row is forgotten, so the entry reads as
+  enabled; different or unreadable → the Occupied refusal, now saying which.
+  `StartupService` takes the `Quarantine` to do this. Tests for both arms and
+  for the single, flagged listing.
+- **`quarantine_item_not_marked`.** `purge_item` on an unmarked item has its own
+  error code; the drawer maps it to its own message.
+- **Log guard.** `manage_state` puts the appender guard into managed state
+  before `db::open`, so setup errors after it reach the log file
+  (`tests/log_guard_survives_setup_error.rs`).
+- **Turkish.** A partial `tr` dictionary for the phase 5 strings (fallback to
+  English, no switcher yet).
+
+**Decisions.** EFS cap (round 4) closed with no code change; downgrade
+mitigation closed as won't-fix. Recorded in `DECISIONS-NEEDED.md`, plus a
+pre-existing camelCase/snake_case mismatch in the `StartupEntry` TS mirror,
+found in passing and not fixed.
+
+## 2026-10-12 — Phase 5 task 1: single instance and `--module`
+
+**Built.**
+- **`tauri-plugin-single-instance`**, registered first. A second launch
+  forwards its argv to the running app and exits before any `setup`, so it never
+  opens the database or re-arms the persisted timer. The running app's
+  `handle_second_instance` shows, un-minimises and focuses `main` (also out of
+  the tray), then opens the requested module.
+- **`--module <id>` / `--module=<id>`.** `parse_launch_args` (pure, next to
+  `is_dry_run`) and `launch_route` (registry-validated; unknown or empty id ->
+  warn log + `/dashboard`, no dialog). The route is parked in
+  `PendingLaunchRoute` and pulled by the shell with `take_launch_route` on mount
+  and on each `launch:navigate`, so the first launch's route is not lost before
+  the WebView listens, and a route opens once.
+- **Issue #3 regression** (`tests/single_instance.rs`): a timer persisted
+  before start is re-armed once by `manage_state`; repeated forwarded launches
+  leave the armed timer and the stored row untouched.
+
+**Not verifiable here.** The plugin's cross-process forwarding (a real second
+`winknife.exe`) needs a manual run; the tests drive `handle_second_instance`
+directly on a mock app.
+
+## 2026-10-12 — Phase 5 task 5: restore point module
+
+**Built.**
+- **Elevated helper** (`core/platform/restore_point.rs`). The app re-launches
+  its own exe through `ShellExecuteExW` (`runas`) with
+  `--create-restore-point "<desc>"` and waits up to 5 minutes for the exit
+  code. The helper is recognised at the top of `run()` (`launch_mode`), before
+  the database, logging-to-DB, the Tauri builder and the single-instance
+  plugin, so it never forwards to or blocks on the running app. It calls
+  `SRSetRestorePointW` (`BEGIN_SYSTEM_CHANGE` / `MODIFY_SETTINGS`, then
+  `END_SYSTEM_CHANGE`) and compares the newest WMI `SystemRestore` sequence
+  before and after to tell created / skipped (24h) / may-have-skipped. Exit
+  codes are shared constants. No PowerShell; System Protection and
+  `SystemRestorePointCreationFrequency` are never touched.
+- **Module** (`modules/restore_point.rs`, `has_scan: false`). Read-only
+  protection status (on / off / unknown, with a reason), description sanitising
+  (printable only, 64 chars, default "WinKnife — before changes"), exit-code to
+  outcome mapping, `RestorePointPlatform` trait with a fake; test processes can
+  never reach the real helper. Commands `restore_point_status`,
+  `restore_point_create`, `restore_point_open_settings`, all covered by
+  `tests/command_wiring.rs`.
+- **UI.** `/restore-point` page (status, description, UAC notice before the
+  button, one sentence per result, System Protection button only when it is
+  off), sidebar icon, EN + TR strings, and a plain "Create a restore point
+  first" link on the startup page.
+
+**Not verifiable here (manual, admin VM or local).** Create succeeds; a second
+create within 24h reports skipped; answering "No" to UAC reports declined. None
+of these has been run: the UAC prompt and `SRSetRestorePointW` cannot be
+exercised from the test suite.
+## 2026-10-12 — Phase 5 task 2: keep-awake
+
+**Built.** Module `keep-awake`: hold the PC awake for 1 to 1440 minutes,
+optionally with the screen on.
+
+- `core/platform/execution_state.rs`: `ExecutionState` trait,
+  `RecordingExecutionState` fake and the crate-private `SystemExecutionState`
+  (`SetThreadExecutionState`, refused unless `real_os_effects_armed()`).
+- `modules/keep_awake.rs`: one dedicated worker thread per session (the OS flag
+  is per thread), wall-clock deadline re-checked every 30 s so a sleep/wake
+  cannot stretch the session, stop joins the thread, replacing a session starts
+  a fresh thread. Max 24 h, no forever mode, nothing persisted. Commands
+  `keep_awake_start/stop/status`, event `keep-awake:changed` (no payload).
+- UI `src/routes/keep-awake/`: presets 30m/1h/2h/4h plus custom, screen toggle,
+  always-visible Stop, countdown from the deadline, "nothing persisted" line,
+  hint when a shutdown timer is armed. Sidebar icon `coffee`. EN keys and the
+  first `tr` dictionary (keep-awake keys only so far; the rest falls back to EN).
+- Wiring test probes cover the three commands (dry run: recorder, no OS call).
+
+**Decisions.** Validation errors reuse `CoreError::InvalidTimer`.
+
+**Deferred / unverified.** The manual `powercfg /requests` check on a real
+Windows session was not run. 5 pre-existing tests fail in this environment
+because creating symlinks needs Developer Mode or elevation (executor,
+quarantine x2, scanner, cleaner); none involve this module.
+
+## Phase 5 - empty-folders module (spec 08)
+
+**Built.**
+- `src-tauri/src/modules/empty_folders.rs`, rule pack `rules/empty-folders.json`.
+  A folder is empty only when it holds no file at any depth (even `desktop.ini`
+  counts). Only the topmost empty folder of each subtree is reported, with the
+  nested count in `meta`. Reparse points, cloud placeholders, unreadable folders
+  and protected trees are never traversed or reported (the last two are counted).
+  A drive root may be scanned but is never a finding. Cancellable, with progress.
+- Analysis: hard gates first (`path_refusal`, protected-below, system folder),
+  then the rule pack via the Brain. Savings are 0. Execute is `Quarantine`; the
+  executor re-checks emptiness (`recheck_refusal`) and skips with a reason.
+- Command `start_empty_folder_scan(root?)` (default root: user profile).
+- UI `src/routes/empty-folders/` plus `stores/emptyFolders.svelte.ts`, `folder`
+  icon, EN + TR keys, typed wrappers and mirrored types. Nothing starts selected.
+- Brain: `FindingKind::Directory` branch; executor: lock probe skipped for
+  directories. Cleaner now only loads its own pack (`CLEANER_MODULE_ID`), and
+  `read_settings` filters packs by module.
+
+**Decisions.** See DECISIONS-NEEDED.md (2026-10-12 phase 5 entries).
+
+**Deferred / unverified.** The access-denied test returns early when the
+`icacls` deny is ineffective (e.g. elevated token), so it may not exercise that
+path on every machine. The same 5 environmental symlink test failures apply.
+## 2026-10-12 — Phase 5 task 3: File Unlocker (`file-unlocker`)
+
+**Built.** "Which program is holding this file open?", read-only, with one
+polite action.
+
+- **Restart Manager wrapper** (`core/platform/restart_manager.rs`). An
+  `RmApi` trait (the real `SystemRmApi`, plus `FakeRmApi` for unit tests)
+  under `RmSessions`, which implements the module-facing `RestartManager`
+  trait. `RmEndSession` always runs through a `Session` drop guard, also
+  after a failed registration. `RmGetList` retries `ERROR_MORE_DATA` at
+  most 3 times. Files are registered in batches of 500.
+- **Module** (`modules/file_unlocker.rs`). Files and folders expand to at
+  most 5 000 files. The scanner walker does not follow links or reparse
+  points, and a link given as a root is skipped with a reason. `capped`
+  drives the "only the first 5 000 files were checked" note. Every row
+  carries a reason and a stable `reason_code`.
+- **Attribution choice.** With 50 files or fewer, the query runs one RM
+  session per file, so each row lists what it holds (the first 3 plus a
+  count). Above 50, it runs one session over all the files and the row
+  says "holds one or more of these files". Per-file sessions for thousands
+  of files would be slow, and a wrong attribution is worse than none.
+- **Ask to close** (`unlocker_request_close(pid, start_time)`).
+  - Offered only for window and console apps.
+  - Info-only, with a reason and no button: services, Explorer,
+    `RmCritical`, unknown kinds, PID 4 and WinKnife's own PID. Rust
+    refuses them again server-side.
+  - A start-time mismatch (PID reuse) is refused.
+  - The close opens a fresh session that registers only that
+    `RM_UNIQUE_PROCESS` and calls `RmShutdown` with flags = 0. It never
+    uses `RmForceShutdown`, `TerminateProcess` or handle closing.
+  - Afterwards the process is checked again: closed, still running,
+    already exited or refused. Every request is logged with the exe path
+    and the outcome.
+  - The real `RmShutdown` is gated on `real_os_effects_armed()`, so no
+    test can close anything.
+- **UI** (`routes/file-unlocker`).
+  - File and folder pickers (`tauri-plugin-dialog`, open only), window-wide
+    drag-drop and a typed path.
+  - Confirm dialog: "<App> will be asked to close. If it has unsaved work,
+    it may ask you to save first."
+  - The query runs again after a close.
+  - "Open file location", and an empty state with the
+    read-only/permissions hint.
+  - EN keys plus a partial TR dictionary.
+  - The start time travels as a decimal string, because it does not fit a
+    JS number.
+- **Tests.**
+  - Fake-driven unit tests: classification, batching, bounded retry, the
+    guard on failure, fresh-session close, PID reuse, server-side refusals.
+  - `tests/unlocker_query.rs`: a PowerShell child holds a temp file with
+    no sharing, and the test asserts that the real query names its PID.
+  - The command-wiring test probes both commands.
+
+**Deferred / unverified.** The manual check against Word with unsaved work
+(the save prompt and the "still running" path) has not been done. There is
+no language picker for TR yet (see DECISIONS-NEEDED).
+
+---
+
+## 2026-10-12 — v0.2.0 integration
+
+**Built.** Merged `feat/v0.2.0-core` (#21 follow-ups, single instance +
+`--module`, restore point), `feat/v0.2.0-tools` (keep-awake, empty folders) and
+`feat/v0.2.0-unlocker` (file unlocker) into `feat/v0.2.0`.
+
+- **Folder gate.** The executor now refuses a `Directory` finding from any
+  module other than empty-folders: folders skip the lock probe, and only that
+  module re-checks emptiness right before the move. Test:
+  `a_folder_finding_from_another_module_is_refused`.
+- **EFS tests are opt-in.** The three quarantine tests that run `cipher /e`
+  make Windows create an EFS key and show a "back up your key" notification on
+  a contributor's machine. They now run only with `WINKNIFE_EFS_TESTS=1` and
+  print a visible skip line otherwise; `ci.yml` and `release.yml` set it.
+- `cargo fmt` over the merged tree.

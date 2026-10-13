@@ -1,0 +1,295 @@
+<!--
+  Empty-folders route: Scan → Review → Execute, as in module spec 08.
+
+  Only the topmost empty folder of each empty subtree is listed, with a count
+  of what is nested inside. Nothing starts selected, and removal is a move to
+  quarantine, so it can always be undone.
+-->
+<script lang="ts">
+  import { onMount } from "svelte";
+
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import ProgressBar from "$lib/components/ProgressBar.svelte";
+  import RiskBadge from "$lib/components/RiskBadge.svelte";
+  import { truncatePath } from "$lib/format";
+  import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { emptyFoldersStore } from "$lib/stores/emptyFolders.svelte";
+  import { itemsToReport, warningsOf } from "$lib/stores/execNotes";
+  import { moduleStore } from "$lib/stores/modules.svelte";
+  import { quarantineStore } from "$lib/stores/quarantine.svelte";
+  import { settingsStore } from "$lib/stores/settings.svelte";
+
+  const MODULE_ID = "empty-folders";
+
+  const manifest = $derived(moduleStore.find(MODULE_ID));
+  const store = emptyFoldersStore;
+  const result = $derived(store.result);
+
+  let confirming = $state(false);
+
+  const retentionDays = $derived(
+    settingsStore.settings?.quarantine.retentionDays ?? 7,
+  );
+
+  onMount(() => {
+    void settingsStore.load();
+  });
+
+  async function confirmExecute(): Promise<void> {
+    confirming = false;
+    await store.execute();
+    await quarantineStore.reload();
+  }
+
+  const succeeded = $derived(
+    store.report?.items.filter((item) => item.outcome.status === "succeeded")
+      .length ?? 0,
+  );
+</script>
+
+<div class="mx-auto flex max-w-4xl flex-col gap-8 px-8 py-10">
+  <header class="flex flex-col gap-2">
+    <h1 class="text-2xl font-semibold tracking-tight">
+      {manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
+    </h1>
+    {#if manifest}
+      <p class="max-w-2xl text-sm leading-relaxed text-ink-muted">
+        {tModuleDescription(manifest.id, manifest.description)}
+      </p>
+    {/if}
+  </header>
+
+  {#if store.error}
+    <p
+      class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger"
+    >
+      {store.error}
+    </p>
+  {/if}
+
+  {#if store.step === "idle"}
+    <section
+      class="flex flex-col items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-6"
+    >
+      <p class="max-w-xl text-sm leading-relaxed text-ink-muted">
+        {t("emptyFolders.intro")}
+      </p>
+      <label class="flex w-full max-w-xl flex-col gap-1 text-sm">
+        <span class="text-ink-muted">{t("emptyFolders.rootLabel")}</span>
+        <input
+          type="text"
+          class="rounded-lg border border-surface-2 bg-surface-0 px-3 py-2 font-mono text-xs"
+          placeholder="C:\Users\…"
+          bind:value={store.root}
+        />
+        <span class="text-xs text-ink-faint">{t("emptyFolders.rootHint")}</span>
+      </label>
+      <button
+        type="button"
+        class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+        onclick={() => store.scan()}
+      >
+        {t("emptyFolders.scan")}
+      </button>
+    </section>
+  {:else if store.step === "scanning"}
+    <section
+      class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-6"
+    >
+      <p class="text-sm">{t("emptyFolders.scanning")}</p>
+      <ProgressBar label={t("emptyFolders.scanning")} pct={store.pct} />
+      <p class="font-mono text-xs text-ink-faint">
+        {store.currentPath ? truncatePath(store.currentPath, 70) : "…"}
+      </p>
+      <button
+        type="button"
+        class="self-start rounded-lg px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+        disabled={store.stopping}
+        onclick={() => store.stop()}
+      >
+        {store.stopping ? t("emptyFolders.stopping") : t("emptyFolders.stop")}
+      </button>
+    </section>
+  {:else if store.step === "executing"}
+    <section
+      class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-6"
+    >
+      <p class="text-sm">{t("cleaner.executing")}</p>
+      <ProgressBar label={t("cleaner.executing")} />
+    </section>
+  {:else if store.step === "done" && store.report}
+    <section
+      class="flex flex-col items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-6"
+    >
+      <h2 class="text-lg font-semibold tracking-tight">
+        {t("emptyFolders.doneTitle")}
+      </h2>
+      <p class="text-sm text-ink-muted">
+        {t("emptyFolders.doneBody", { count: succeeded })}
+      </p>
+      {#each itemsToReport(store.report.items) as item (item.findingId)}
+        {#if item.outcome.status !== "succeeded"}
+          <p class="text-xs text-ink-faint">
+            <span class="font-mono">{truncatePath(item.path, 48)}</span> —
+            {item.outcome.status === "skipped"
+              ? item.outcome.reason
+              : item.outcome.error}
+          </p>
+        {/if}
+        {#each warningsOf(item) as warning, index (index)}
+          <p class="text-xs text-risk-review">
+            <span class="font-mono">{truncatePath(warning.path, 48)}</span> —
+            {warning.reason}
+          </p>
+        {/each}
+      {/each}
+      <div class="flex gap-2">
+        <button
+          type="button"
+          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+          onclick={() => quarantineStore.show()}
+        >
+          {t("cleaner.openQuarantine")}
+        </button>
+        <button
+          type="button"
+          class="rounded-lg px-4 py-2 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          onclick={() => store.reset()}
+        >
+          {t("emptyFolders.scanAgain")}
+        </button>
+      </div>
+    </section>
+  {:else if store.step === "review" && result}
+    <section
+      class="flex flex-wrap items-center gap-4 rounded-xl border border-surface-2 bg-surface-1 px-5 py-4"
+    >
+      <p class="flex-1 text-sm leading-relaxed">
+        {t("emptyFolders.summary", {
+          count: result.findings.length,
+          visited: result.foldersVisited,
+        })}
+      </p>
+      <button
+        type="button"
+        class="rounded-lg px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        onclick={() => store.reset()}
+      >
+        {t("emptyFolders.scanAgain")}
+      </button>
+    </section>
+
+    {#if result.cancelled}
+      <p class="rounded-xl border border-surface-2 p-4 text-xs text-ink-faint">
+        {t("emptyFolders.cancelled")}
+      </p>
+    {/if}
+    {#if result.unreadable > 0}
+      <p class="rounded-xl border border-surface-2 p-4 text-xs text-ink-faint">
+        {t("emptyFolders.unreadable", { count: result.unreadable })}
+      </p>
+    {/if}
+    {#if result.skippedProtected > 0}
+      <p class="rounded-xl border border-surface-2 p-4 text-xs text-ink-faint">
+        {t("emptyFolders.skippedProtected", { count: result.skippedProtected })}
+      </p>
+    {/if}
+
+    {#if result.findings.length === 0}
+      <p
+        class="rounded-xl border border-dashed border-surface-3 p-5 text-sm text-ink-faint"
+      >
+        {t("emptyFolders.empty")}
+      </p>
+    {:else}
+      <div class="flex gap-2 text-xs">
+        <button
+          type="button"
+          class="rounded-lg px-3 py-1.5 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          onclick={() => store.selectAll()}
+        >
+          {t("emptyFolders.selectAll")}
+        </button>
+        <button
+          type="button"
+          class="rounded-lg px-3 py-1.5 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          onclick={() => store.selectNone()}
+        >
+          {t("emptyFolders.selectNone")}
+        </button>
+      </div>
+
+      <ul
+        class="divide-y divide-surface-2 rounded-xl border border-surface-2 bg-surface-1"
+      >
+        {#each result.findings as finding (finding.id)}
+          {@const rec = store.recommendationFor(finding)}
+          {@const nested = store.nestedOf(finding)}
+          <li class="flex items-start gap-3 px-4 py-3">
+            {#if store.isSelectable(rec)}
+              <input
+                type="checkbox"
+                class="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+                checked={store.selected.has(rec.id)}
+                aria-label={finding.path}
+                onchange={(event) =>
+                  store.toggle(rec.id, event.currentTarget.checked)}
+              />
+            {:else}
+              <span class="mt-1 size-4 shrink-0" aria-hidden="true"></span>
+            {/if}
+            <span class="min-w-0 flex-1">
+              <span class="flex items-center gap-2">
+                <span
+                  class="min-w-0 flex-1 truncate font-mono text-xs text-ink"
+                  title={finding.path}
+                >
+                  {truncatePath(finding.path)}
+                </span>
+                {#if rec}
+                  <RiskBadge risk={rec.risk} />
+                {/if}
+              </span>
+              {#if rec}
+                <span class="mt-1 block text-xs leading-relaxed text-ink-muted">
+                  {rec.reason}
+                </span>
+              {/if}
+              {#if nested > 0}
+                <span class="mt-1 block text-[0.7rem] text-ink-faint">
+                  {t("emptyFolders.nested", { count: nested })}
+                </span>
+              {/if}
+            </span>
+          </li>
+        {/each}
+      </ul>
+
+      <div
+        class="sticky bottom-0 -mx-8 flex items-center gap-4 border-t border-surface-2 bg-surface-0/95 px-8 py-4 backdrop-blur"
+      >
+        <p class="flex-1 text-sm">
+          {t("emptyFolders.selection", { count: store.selected.size })}
+        </p>
+        <button
+          type="button"
+          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={store.selected.size === 0}
+          onclick={() => (confirming = true)}
+        >
+          {t("emptyFolders.remove")}
+        </button>
+      </div>
+    {/if}
+  {/if}
+</div>
+
+<ConfirmDialog
+  open={confirming}
+  title={t("emptyFolders.confirmTitle", { count: store.selected.size })}
+  message={t("emptyFolders.confirmBody")}
+  note={t("cleaner.confirmNote", { days: retentionDays })}
+  confirmLabel={t("emptyFolders.remove")}
+  onconfirm={confirmExecute}
+  oncancel={() => (confirming = false)}
+/>

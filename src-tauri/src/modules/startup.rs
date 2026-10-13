@@ -48,8 +48,10 @@ use uuid::Uuid;
 
 use crate::core::error::{CoreError, Result};
 use crate::core::executor::{LiveStartupEntry, StartupControl};
+use crate::core::content_hash::full_hash;
 use crate::core::ledger;
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::quarantine::Quarantine;
 use crate::core::platform::{
     EnvResolver, Hive, RegValue, Registry, Signature, SignatureProbe, TaskScheduler,
     REG_TYPE_BINARY,
@@ -260,6 +262,11 @@ pub struct StartupEntry {
     pub category: Option<String>,
     /// The known-app note, or the "unsigned, unknown publisher" line.
     pub note: String,
+    /// Set on a Startup-folder entry this app holds as switched off while a
+    /// shortcut by the same name is still in the Startup folder, so it still
+    /// runs at logon (the "both kept" arm of a stash, issue #21 option b).
+    /// Holds that shortcut's path, so the UI can say where it is.
+    pub leftover_shortcut: Option<String>,
 }
 
 /// Everything one enumeration produced.
@@ -316,6 +323,9 @@ pub struct StartupService {
     known: KnownApps,
     paths: StartupPaths,
     windows_dir: Option<PathBuf>,
+    /// Where a stored copy goes when re-enable finds a byte-equal original
+    /// still in the Startup folder (issue #21): quarantined, never deleted.
+    quarantine: Quarantine,
 }
 
 impl std::fmt::Debug for StartupService {
@@ -336,6 +346,7 @@ impl StartupService {
         known: KnownApps,
         paths: StartupPaths,
         windows_dir: Option<PathBuf>,
+        quarantine: Quarantine,
     ) -> Self {
         Self {
             registry,
@@ -344,6 +355,7 @@ impl StartupService {
             known,
             paths,
             windows_dir,
+            quarantine,
         }
     }
 
@@ -440,74 +452,118 @@ impl StartupService {
                 unreadable.push(format!("{label}: the folder could not be located"));
                 continue;
             };
-            if !folder.is_dir() {
-                // A machine with no Startup folder is ordinary, not broken.
+            // Shortcuts this app holds are read first, so one that is both held
+            // and still in the folder (the "both kept" arm, issue #21) is listed
+            // once, as held and flagged, instead of twice under the same id.
+            let held = disabled_links(conn, source);
+            let held_names: Vec<String> = held
+                .as_ref()
+                .map(|h| h.links.iter().map(|l| l.file_name.to_lowercase()).collect())
+                .unwrap_or_default();
+            // A machine with no Startup folder is ordinary, not broken.
+            if folder.is_dir() {
+                self.collect_folder_files(source, label, folder, &held_names, out, unreadable);
+            }
+            self.collect_held_links(source, label, held, out, unreadable);
+        }
+    }
+
+    /// The shortcuts sitting in one Startup folder, minus the ones this app
+    /// holds (those are listed by [`Self::collect_held_links`]).
+    fn collect_folder_files(
+        &self,
+        source: StartupSource,
+        label: &str,
+        folder: &Path,
+        held_names: &[String],
+        out: &mut Vec<StartupEntry>,
+        unreadable: &mut Vec<String>,
+    ) {
+        let listing = match std::fs::read_dir(folder) {
+            Ok(listing) => listing,
+            Err(err) => {
+                unreadable.push(format!("{label}: {err}"));
+                return;
+            }
+        };
+        for entry in listing.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
                 continue;
             }
-            match std::fs::read_dir(folder) {
-                Ok(listing) => {
-                    for entry in listing.flatten() {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            continue;
-                        }
-                        let file_name = entry.file_name().to_string_lossy().into_owned();
-                        // `desktop.ini` is Explorer's own folder metadata, not a
-                        // program.
-                        if file_name.eq_ignore_ascii_case("desktop.ini") {
-                            continue;
-                        }
-                        let display = path
-                            .file_stem()
-                            .map(|s| s.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| file_name.clone());
-                        out.push(self.describe(
-                            source,
-                            file_name,
-                            display,
-                            label.to_owned(),
-                            path.to_string_lossy().into_owned(),
-                            true,
-                        ));
-                    }
-                }
-                Err(err) => unreadable.push(format!("{label}: {err}")),
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            // `desktop.ini` is Explorer's own folder metadata, not a program.
+            if file_name.eq_ignore_ascii_case("desktop.ini")
+                || held_names.contains(&file_name.to_lowercase())
+            {
+                continue;
             }
+            let display = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| file_name.clone());
+            out.push(self.describe(
+                source,
+                file_name,
+                display,
+                label.to_owned(),
+                path.to_string_lossy().into_owned(),
+                true,
+            ));
+        }
+    }
 
-            // Shortcuts this app has moved out are still entries — they are just
-            // switched off, and they have to be listed or the user cannot put
-            // them back.
-            match disabled_links(conn, source) {
-                Ok(held) => {
-                    // A row nobody can parse is a shortcut this app is holding
-                    // and cannot name. Saying so is the whole difference between
-                    // a skip and a disappearance (security review H11).
-                    if held.unreadable_rows > 0 {
-                        unreadable.push(format!(
-                            "{label} (disabled list): {} ledger row(s) could not be read, so \
-                             the shortcut(s) they describe are still switched off and are not \
-                             listed below. The files themselves are untouched in WinKnife's \
-                             `{DISABLED_LINKS_DIR}` folder.",
-                            held.unreadable_rows
-                        ));
-                    }
-                    for row in held.links {
-                        let display = Path::new(&row.file_name)
-                            .file_stem()
-                            .map(|s| s.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| row.file_name.clone());
-                        out.push(self.describe(
-                            source,
-                            row.file_name,
-                            display,
-                            label.to_owned(),
-                            row.original_path,
-                            false,
-                        ));
-                    }
-                }
-                Err(err) => unreadable.push(format!("{label} (disabled list): {err}")),
+    /// Shortcuts this app has moved out are still entries — they are just
+    /// switched off, and they have to be listed or the user cannot put them
+    /// back. One whose original name is occupied again says so (issue #21,
+    /// option b): "off" is not the whole truth while that shortcut runs.
+    fn collect_held_links(
+        &self,
+        source: StartupSource,
+        label: &str,
+        held: Result<DisabledLinks>,
+        out: &mut Vec<StartupEntry>,
+        unreadable: &mut Vec<String>,
+    ) {
+        let held = match held {
+            Ok(held) => held,
+            Err(err) => {
+                unreadable.push(format!("{label} (disabled list): {err}"));
+                return;
             }
+        };
+        // A row nobody can parse is a shortcut this app is holding and cannot
+        // name. Saying so is the whole difference between a skip and a
+        // disappearance (security review H11).
+        if held.unreadable_rows > 0 {
+            unreadable.push(format!(
+                "{label} (disabled list): {} ledger row(s) could not be read, so \
+                 the shortcut(s) they describe are still switched off and are not \
+                 listed below. The files themselves are untouched in WinKnife's \
+                 `{DISABLED_LINKS_DIR}` folder.",
+                held.unreadable_rows
+            ));
+        }
+        for row in held.links {
+            let display = Path::new(&row.file_name)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| row.file_name.clone());
+            let leftover = Path::new(&row.original_path)
+                .is_file()
+                .then(|| row.original_path.clone());
+            let entry = self.describe(
+                source,
+                row.file_name,
+                display,
+                label.to_owned(),
+                row.original_path,
+                false,
+            );
+            out.push(StartupEntry {
+                leftover_shortcut: leftover,
+                ..entry
+            });
         }
     }
 
@@ -609,6 +665,7 @@ impl StartupService {
             verdict: known.map_or(Verdict::Unknown, |app| app.verdict),
             category: known.map(|app| app.category.clone()),
             note,
+            leftover_shortcut: None,
         }
     }
 
@@ -1266,6 +1323,11 @@ impl StartupService {
     ) -> Result<Vec<MoveWarning>> {
         let link = find_disabled_link(conn, source, file_name)?
             .ok_or_else(|| CoreError::UnknownStartupEntry(file_name.to_owned()))?;
+        let original = Path::new(&link.original_path);
+        let stored = Path::new(&link.stored_path);
+        if original.is_file() {
+            return self.settle_both_kept(conn, &link, original, stored);
+        }
 
         let mut write = |tx: &Connection| forget_disabled_link(tx, link.id);
         ledger::ledgered_move(
@@ -1273,13 +1335,57 @@ impl StartupService {
             "startup restore",
             ledger::LedgerStep::Retire { write: &mut write },
             |recorded| {
-                ledger::move_user_file(
-                    recorded,
-                    Path::new(&link.stored_path),
-                    Path::new(&link.original_path),
-                )
+                ledger::move_user_file(recorded, stored, original)
             },
         )
+    }
+
+    /// Re-enable a shortcut whose original name is occupied again: the "both
+    /// kept" arm of a stash (issue #21).
+    ///
+    /// When the shortcut in the Startup folder has the same bytes as the copy
+    /// this app holds, the entry is already running as it was, so the held copy
+    /// is redundant: it goes to the quarantine (reversible, never deleted) and
+    /// the row is forgotten. Anything else — different contents, or contents
+    /// that could not be read to compare — keeps both files and refuses, saying
+    /// which, because only the user can tell which shortcut they want.
+    fn settle_both_kept(
+        &self,
+        conn: &Connection,
+        link: &DisabledLink,
+        original: &Path,
+        stored: &Path,
+    ) -> Result<Vec<MoveWarning>> {
+        let same = match (full_hash(original), full_hash(stored)) {
+            (Ok(a), Ok(b)) => a == b,
+            (Err(err), _) | (_, Err(err)) => {
+                return Err(CoreError::Quarantine(format!(
+                    "cannot move `{}` to `{}`: something is already there, and the two \
+                     shortcuts could not be compared ({err}). Nothing was changed.",
+                    stored.display(),
+                    original.display()
+                )));
+            }
+        };
+        if !same {
+            return Err(CoreError::Quarantine(format!(
+                "cannot move `{}` to `{}`: something is already there, and it differs from the \
+                 shortcut WinKnife holds. Nothing was changed; both are kept.",
+                stored.display(),
+                original.display()
+            )));
+        }
+        // Quarantine first, then forget: a row left by a failure in between
+        // points at a stored file that is gone, which `ledger::reconcile`
+        // already treats as settled.
+        self.quarantine
+            .take(conn, self.quarantine.start_batch(), stored)?;
+        forget_disabled_link(conn, link.id)?;
+        tracing::info!(
+            original = %original.display(),
+            "held startup shortcut matched the one in the Startup folder; held copy quarantined"
+        );
+        Ok(Vec::new())
     }
 }
 
@@ -1390,6 +1496,7 @@ pub fn group_by_source(scan: &StartupScan) -> BTreeMap<&'static str, Vec<&Startu
 mod tests {
     use super::*;
     use crate::core::db;
+    use crate::core::quarantine::RetentionPolicy;
     use crate::core::platform::{
         LogonTask, MapEnv, MapRegistry, MapSignatures, MapTaskScheduler, REG_TYPE_EXPAND_SZ,
         REG_TYPE_SZ,
@@ -1433,6 +1540,7 @@ mod tests {
             known(),
             StartupPaths::from_env(&env, &app_data),
             Some(dir.path().join("Windows")),
+            Quarantine::with_root(app_data.join("quarantine"), RetentionPolicy::default()),
         );
 
         World {
@@ -1645,6 +1753,7 @@ mod tests {
             KnownApps::default(),
             StartupPaths::from_env(&MapEnv::new(), dir.path()),
             None,
+            Quarantine::with_root(dir.path().join("quarantine"), RetentionPolicy::default()),
         );
         let conn = db::open_in_memory().expect("db");
         let scan = service.scan(&conn);
@@ -1881,6 +1990,115 @@ mod tests {
             .pop()
             .expect("the ledger row survives");
         assert!(Path::new(&stashed.stored_path).is_file(), "the copy stays");
+    }
+
+    /// Put `Vendor.lnk` in the "both kept" state of issue #21: held by this
+    /// app, and a shortcut with `contents` back at its original name.
+    fn both_kept(world: &World, contents: &[u8]) -> (PathBuf, PathBuf) {
+        let shortcut = world.user_startup.join("Vendor.lnk");
+        std::fs::write(&shortcut, b"link").expect("write");
+        world
+            .service
+            .set_enabled(
+                &world.conn,
+                StartupSource::UserStartupFolder,
+                "Vendor.lnk",
+                false,
+                Utc::now(),
+            )
+            .expect("disable");
+        std::fs::write(&shortcut, contents).expect("rewrite the original");
+        let stored = disabled_links(&world.conn, StartupSource::UserStartupFolder)
+            .expect("ledger")
+            .links
+            .pop()
+            .expect("a recorded row")
+            .stored_path;
+        (shortcut, PathBuf::from(stored))
+    }
+
+    /// Issue #21, option (b): a held shortcut whose original is still in the
+    /// Startup folder is listed once, as off, and flagged with that path.
+    #[test]
+    fn a_held_shortcut_still_in_the_folder_is_listed_once_and_flagged() {
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        let (shortcut, _) = both_kept(&world, b"link");
+
+        let scan = world.service.scan(&world.conn);
+        let vendor: Vec<_> = scan
+            .entries
+            .iter()
+            .filter(|e| e.key == "Vendor.lnk")
+            .collect();
+        assert_eq!(vendor.len(), 1, "{vendor:?}");
+        assert!(!vendor[0].enabled);
+        assert_eq!(
+            vendor[0].leftover_shortcut.as_deref(),
+            Some(shortcut.to_string_lossy().as_ref())
+        );
+    }
+
+    /// Issue #21: same bytes -> the held copy goes to the quarantine (never
+    /// deleted), the row is forgotten, and the entry reads as enabled.
+    #[test]
+    fn re_enabling_with_an_identical_original_quarantines_the_held_copy() {
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        let (shortcut, stored) = both_kept(&world, b"link");
+
+        let warnings = world
+            .service
+            .set_enabled(
+                &world.conn,
+                StartupSource::UserStartupFolder,
+                "Vendor.lnk",
+                true,
+                Utc::now(),
+            )
+            .expect("identical contents settle");
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(std::fs::read(&shortcut).expect("original"), b"link");
+        assert!(!stored.exists(), "the held copy left the managed folder");
+        let held = disabled_links(&world.conn, StartupSource::UserStartupFolder).expect("ledger");
+        assert!(held.links.is_empty(), "{:?}", held.links);
+        let quarantined: i64 = world
+            .conn
+            .query_row("SELECT COUNT(*) FROM quarantine", [], |row| row.get(0))
+            .expect("quarantine ledger");
+        assert_eq!(quarantined, 1, "the held copy is in the quarantine, not deleted");
+        let live = world
+            .service
+            .read_entry(&world.conn, StartupSource::UserStartupFolder, "Vendor.lnk")
+            .expect("read")
+            .expect("present");
+        assert!(live.enabled);
+    }
+
+    /// Issue #21: different bytes -> today's refusal, said plainly, and both
+    /// files stay exactly where they are.
+    #[test]
+    fn re_enabling_with_a_different_original_refuses_and_keeps_both() {
+        let world = world(MapRegistry::new(), MapTaskScheduler::new());
+        let (shortcut, stored) = both_kept(&world, b"another link");
+
+        let err = world
+            .service
+            .set_enabled(
+                &world.conn,
+                StartupSource::UserStartupFolder,
+                "Vendor.lnk",
+                true,
+                Utc::now(),
+            )
+            .expect_err("different contents are refused");
+
+        assert_eq!(err.code(), "quarantine");
+        assert!(err.to_string().contains("already there"), "{err}");
+        assert!(err.to_string().contains("differs"), "{err}");
+        assert_eq!(std::fs::read(&shortcut).expect("original"), b"another link");
+        assert_eq!(std::fs::read(&stored).expect("held copy"), b"link");
+        let held = disabled_links(&world.conn, StartupSource::UserStartupFolder).expect("ledger");
+        assert_eq!(held.links.len(), 1);
     }
 
     /// Round-2 review, MEDIUM: a restore's warnings reach the caller too.

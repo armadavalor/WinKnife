@@ -8,14 +8,19 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 import type {
   AppSettings,
   CachedScan,
   CleanerSummary,
+  CreateOutcome,
+  CloseReport,
   DashboardSummary,
   DriveInfo,
   DuplicateScanResult,
+  EmptyFolderScanResult,
   ExecProgress,
   ExecReport,
   ModuleManifest,
@@ -27,17 +32,20 @@ import type {
   QuarantineItem,
   QuarantineStats,
   RestoreOutcome,
+  RestorePointStatus,
   RestoreReport,
   ScanDone,
   ScanProgress,
   ScanResult,
   ScheduleMode,
+  KeepAwakeStatus,
   ShutdownTick,
   StartupScanResult,
   StartupSource,
   TimerStatus,
   TreeLevel,
   TreemapScanResult,
+  UnlockerReport,
 } from "$lib/types";
 
 /** Event names, mirroring the constants in `core/events.rs` and `lib.rs`. */
@@ -47,6 +55,8 @@ export const EVENTS = {
   execProgress: "exec:progress",
   quarantineChanged: "quarantine:changed",
   shutdownTick: "shutdown:tick",
+  launchNavigate: "launch:navigate",
+  keepAwakeChanged: "keep-awake:changed",
 } as const;
 
 /* -------------------------------------------------------------------------
@@ -100,6 +110,21 @@ export function startDuplicateScan(
   roots?: string[],
 ): Promise<DuplicateScanResult> {
   return invoke<DuplicateScanResult>("start_duplicate_scan", { roots });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — empty folders
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Run a read-only scan for empty folders under `root` (the user profile when
+ * omitted). Cancellable with {@link cancelScan}; progress arrives on
+ * `scan:progress`.
+ */
+export function startEmptyFolderScan(
+  root?: string,
+): Promise<EmptyFolderScanResult> {
+  return invoke<EmptyFolderScanResult>("start_empty_folder_scan", { root });
 }
 
 /* -------------------------------------------------------------------------
@@ -289,6 +314,128 @@ export function shutdownStatus(): Promise<TimerStatus> {
 }
 
 /* -------------------------------------------------------------------------
+ * Commands — restore point (module spec 09)
+ * ---------------------------------------------------------------------- */
+
+/** System Protection status. Read-only. */
+export function restorePointStatus(): Promise<RestorePointStatus> {
+  return invoke<RestorePointStatus>("restore_point_status");
+}
+
+/**
+ * Create a restore point through the elevated helper. Windows shows a UAC
+ * prompt; the promise settles when the helper exits (or after 5 minutes).
+ */
+export function restorePointCreate(description: string): Promise<CreateOutcome> {
+  return invoke<CreateOutcome>("restore_point_create", { description });
+}
+
+/** Open Windows' own System Protection dialog. Only on a button click. */
+export function restorePointOpenSettings(): Promise<void> {
+  return invoke<void>("restore_point_open_settings");
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — launch (`--module <id>`)
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The route a launch asked for and the UI has not opened yet, or `null`.
+ * Taking it clears it. Already validated: an unknown id arrives as the
+ * dashboard.
+ */
+export function takeLaunchRoute(): Promise<string | null> {
+  return invoke<string | null>("take_launch_route");
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — keep awake
+ * ---------------------------------------------------------------------- */
+
+/** Keep the machine awake for `minutes` (1 to 1440), replacing any session. */
+export function keepAwakeStart(
+  minutes: number,
+  display: boolean,
+): Promise<KeepAwakeStatus> {
+  return invoke<KeepAwakeStatus>("keep_awake_start", { minutes, display });
+}
+
+/** Stop keeping the machine awake. Stopping when idle is not an error. */
+export function keepAwakeStop(): Promise<KeepAwakeStatus> {
+  return invoke<KeepAwakeStatus>("keep_awake_stop");
+}
+
+/** Current keep-awake state. */
+export function keepAwakeStatus(): Promise<KeepAwakeStatus> {
+  return invoke<KeepAwakeStatus>("keep_awake_status");
+}
+
+/* -------------------------------------------------------------------------
+ * modules/file_unlocker.rs
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Which programs hold `paths` open. Read-only: nothing is closed or changed.
+ * Folders are walked (links not followed) up to the module's file cap.
+ */
+export function unlockerQuery(paths: string[]): Promise<UnlockerReport> {
+  return invoke<UnlockerReport>("unlocker_query", { paths });
+}
+
+/**
+ * Politely ask one program to close (the same request Windows sends at
+ * logoff). Never forces: the program may ask to save, or decline. Rust
+ * refuses services, Explorer, system-critical processes and a PID whose
+ * start time no longer matches.
+ */
+export function unlockerRequestClose(
+  pid: number,
+  startTime: string,
+): Promise<CloseReport> {
+  return invoke<CloseReport>("unlocker_request_close", { pid, startTime });
+}
+
+/** Native picker for one or more files. Resolves to `[]` when cancelled. */
+export async function pickFiles(): Promise<string[]> {
+  const picked = await openDialog({ multiple: true, directory: false });
+  return normalisePicked(picked);
+}
+
+/** Native picker for one folder. Resolves to `[]` when cancelled. */
+export async function pickFolder(): Promise<string[]> {
+  const picked = await openDialog({ multiple: false, directory: true });
+  return normalisePicked(picked);
+}
+
+function normalisePicked(picked: string | string[] | null): string[] {
+  if (picked === null) {
+    return [];
+  }
+  return Array.isArray(picked) ? picked : [picked];
+}
+
+/** Drag-and-drop over the window: hover state and dropped paths. */
+export interface DropHandlers {
+  onHover: (hovering: boolean) => void;
+  onDrop: (paths: string[]) => void;
+}
+
+/** Subscribe to files dropped on the window. Resolves with the unsubscribe function. */
+export function onFileDrop(handlers: DropHandlers): Promise<UnlistenFn> {
+  return getCurrentWebview().onDragDropEvent((event) => {
+    const payload = event.payload;
+    if (payload.type === "enter" || payload.type === "over") {
+      handlers.onHover(true);
+    } else if (payload.type === "leave") {
+      handlers.onHover(false);
+    } else if (payload.type === "drop") {
+      handlers.onHover(false);
+      handlers.onDrop(payload.paths);
+    }
+  });
+}
+
+/* -------------------------------------------------------------------------
  * Events
  * ---------------------------------------------------------------------- */
 
@@ -327,9 +474,22 @@ export function onQuarantineChanged(
   return subscribe(EVENTS.quarantineChanged, handler);
 }
 
+/** Subscribe to keep-awake start, stop and expiry. */
+export function onKeepAwakeChanged(handler: () => void): Promise<UnlistenFn> {
+  return subscribe(EVENTS.keepAwakeChanged, handler);
+}
+
 /** Subscribe to the once-a-second shutdown countdown. */
 export function onShutdownTick(
   handler: (payload: ShutdownTick) => void,
 ): Promise<UnlistenFn> {
   return subscribe(EVENTS.shutdownTick, handler);
+}
+
+/**
+ * A second launch forwarded a `--module`: call {@link takeLaunchRoute}.
+ * No payload; the route is pulled so it is opened once.
+ */
+export function onLaunchNavigate(handler: () => void): Promise<UnlistenFn> {
+  return subscribe<null>(EVENTS.launchNavigate, () => handler());
 }
