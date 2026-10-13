@@ -1710,3 +1710,13 @@ the bug.
 
 **Deferred.** Fresh-VM acceptance, VirusTotal and the demo GIF stay manual
 maintainer steps (`docs/RELEASING.md`).
+
+## 2026-10-13 — Startup: `%windir%` commands read as unsigned
+
+**Built.** `executable_of` expands `%NAME%` variables before looking for the
+program, as Windows does for `REG_EXPAND_SZ` commands. `SecurityHealth`
+(`%windir%\system32\SecurityHealthSystray.exe`) now resolves, so its signature
+reads "Microsoft Windows" instead of "unsigned", and the resolved path reaches
+the OS-owned and protected-path checks. Unknown names, `%%` and an unclosed `%`
+stay as written. Pure `expand_env_with` with unit tests, plus one test that
+`%windir%\system32\cmd.exe` resolves. Verified live over CDP.
