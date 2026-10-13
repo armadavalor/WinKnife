@@ -34,7 +34,8 @@ First public release. (0.1.0 was never tagged; its contents ship here.)
   point through an elevated helper (UAC prompt).
 - A second launch focuses the running window; `--module <id>` opens a tool
   directly.
-- English and Turkish interface; info tooltips, card-grid dashboard and compact
+- English interface (Turkish strings exist for the newer tools but there is no
+  language switch yet); info tooltips, card-grid dashboard and compact
   empty states.
 
 ### Security
