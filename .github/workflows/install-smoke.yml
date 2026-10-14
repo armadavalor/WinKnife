@@ -1,0 +1,86 @@
+name: install smoke
+
+# Installs a published release on a fresh Windows runner: silent NSIS install,
+# launch and uninstall, then validates the winget manifest in packaging/winget.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v
+        required: true
+        default: "0.2.0"
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ inputs.version || '0.2.0' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and verify installer
+        shell: pwsh
+        run: |
+          gh release download "v$env:VERSION" -R $env:GITHUB_REPOSITORY -p "*-setup.exe" -p SHA256SUMS.txt -D dl
+          $exe = Get-ChildItem dl -Filter *-setup.exe | Select-Object -First 1
+          $want = (Select-String -Path dl/SHA256SUMS.txt -Pattern $exe.Name).Line.Split(' ')[0]
+          $got = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          if ($got -ne $want.ToUpper()) { throw "SHA256 mismatch: $got vs $want" }
+          "SETUP=$($exe.FullName)" >> $env:GITHUB_ENV
+
+      - name: Silent install
+        shell: pwsh
+        run: |
+          Start-Process $env:SETUP -ArgumentList '/S' -Wait
+          $dir = Join-Path $env:LOCALAPPDATA 'WinKnife'
+          if (-not (Test-Path "$dir\winknife.exe")) { Get-ChildItem $env:LOCALAPPDATA; throw "winknife.exe not found in $dir" }
+          if (-not (Test-Path "$dir\rules")) { throw "rules folder missing" }
+          $arp = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\WinKnife'
+          if ($arp.DisplayVersion -ne $env:VERSION) { throw "ARP version $($arp.DisplayVersion)" }
+          "DIR=$dir" >> $env:GITHUB_ENV
+
+      - name: Launch and screenshot
+        shell: pwsh
+        run: |
+          $p = Start-Process "$env:DIR\winknife.exe" -PassThru
+          Start-Sleep 15
+          if ($p.HasExited) { throw "winknife.exe exited with $($p.ExitCode)" }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD\first-launch.png")
+          Stop-Process -Id $p.Id
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: first-launch
+          path: first-launch.png
+
+      - name: Silent uninstall
+        shell: pwsh
+        run: |
+          Start-Process "$env:DIR\uninstall.exe" -ArgumentList '/S' -Wait
+          Start-Sleep 5
+          if (Test-Path "$env:DIR\winknife.exe") { throw "winknife.exe still present after uninstall" }
+          if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\WinKnife') { throw "ARP key still present" }
+
+      # A winget install cannot run here: winget marks its download with the
+      # Mark of the Web and SmartScreen holds the unsigned installer at the
+      # "Windows protected your PC" prompt, which no one can click on CI.
+      # The direct install above covers the installer itself; the manifest
+      # gets a full install test in the winget-pkgs validation pipeline.
+      - name: winget manifest validation
+        shell: pwsh
+        run: |
+          winget settings --enable LocalManifestFiles
+          # "succeeded with warnings" exits non-zero; the runner's winget may not
+          # know the newest schema header yet, so judge by the result line.
+          $out = winget validate --manifest "packaging/winget/manifests/a/armadavalor/WinKnife/$env:VERSION" --disable-interactivity | Out-String
+          Write-Host $out
+          if ($out -notmatch 'Manifest validation succeeded') { throw "winget validate failed" }
+          exit 0
