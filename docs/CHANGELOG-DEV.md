@@ -1746,3 +1746,13 @@ declared as a package dependency.
 
 **Deferred.** Local `winget install --manifest` test (needs the admin-only
 LocalManifestFiles setting) and the PR to microsoft/winget-pkgs.
+
+## 2026-10-14 — Cleaner confirm title placeholder
+
+**Fixed.** The Disk Cleaner confirm dialog title rendered the literal
+"Move {count} items to quarantine?" because `t("cleaner.confirmTitle")` passed
+no params. It now passes `store.selected.size`, the same number the footer and
+the dialog body show. Audit of every `{placeholder}` key against its `t()` call
+sites found no other bare call (`cleaner.groupCount` has no call site at all).
+Regression test `i18n-params.test.ts` fails if a placeholder key is ever called
+without params.

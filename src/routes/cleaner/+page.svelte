@@ -278,7 +278,7 @@
 
 <ConfirmDialog
   open={confirming}
-  title={t("cleaner.confirmTitle")}
+  title={t("cleaner.confirmTitle", { count: store.selected.size })}
   message={t("cleaner.confirmBody", {
     count: store.selected.size,
     size: formatBytes(store.selectedBytes),
