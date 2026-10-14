@@ -6,6 +6,10 @@ Two GIFs for the README. Short beats a complete tour: the main GIF proves the pr
 ## Recording setup
 - 1280×800 window, dark theme, English UI, 100% DPI scaling. Hide the taskbar clock and notifications (Focus Assist on).
 - Tool: ScreenToGif (free). 15 fps, then trim the waits in the editor. Target < 5 MB per GIF.
+- GIF 1 is recorded automatically instead: run the `demo recording` workflow (`gh workflow run demo.yml -f version=0.2.0`). It installs the release on a throwaway runner, seeds junk into a fake `C:\Users\Demo` profile, drives the app over CDP with `scripts/demo/record.mjs` and uploads the PNG frames plus an ffmpeg concat list as the `demo-frames` artifact. Build `assets/demo.gif` from inside the frames folder (about 21 s, under 1 MB):
+  ```
+  ffmpeg -f concat -safe 0 -i frames.txt -vf "setpts=0.75*PTS,fps=12,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" demo.gif
+  ```
 - Prepared data: a throwaway user profile or VM with about 1–3 GB of real junk (browser cache, `%TEMP%`, Windows Update leftovers). No real names in paths, no personal files on screen.
 - Before recording: start `winknife.exe` once so the first scan is warm, empty the quarantine, close the other apps.
 - Mouse: slow and deliberate, pause ~0.5 s on each button before clicking. No typing on camera except the restore-point description.
