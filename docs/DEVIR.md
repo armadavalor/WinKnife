@@ -29,5 +29,5 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - 5 symlink testi lokal Developer Mode olmadan düşer (CI'da geçer). EFS testleri `WINKNIFE_EFS_TESTS=1` ile.
 - CI yalnız main'e push/PR'da tetiklenir; başka base'li PR için `gh workflow run ci.yml --ref <dal>`.
 - `src-tauri/target-review/` (eski derleme önbelleği) ve `chatgpt Pocketknife addon.txt` kullanıcının; dokunma.
-- Repo PUBLIC: Armada'nın otomatik "Son oturum" bloğu (`<!-- oto:başla -->`) kullanıcı isteklerini DEVIR'e yazar; commit'e girmeden sil.
+- Repo PUBLIC: Armada'nın otomatik "Son oturum" bloğu (`oto:başla` işaretli) kullanıcı isteklerini DEVIR'e yazar; commit'e girmeden sil.
 - winget kurulumu CI'da SmartScreen'de takılır (imzasız installer); CI yalnız `winget validate` yapar.

@@ -1787,3 +1787,13 @@ usernames or paths can reach the frames. WebView2 on the elevated runner ignores
 **Noticed.** The v0.2.0 cleanup confirm dialog shows the literal title
 "Move {count} items to quarantine?" (visible in the GIF); the placeholder is not
 filled.
+
+## 2026-10-14 — Cleaner confirm title placeholder
+
+**Fixed.** The Disk Cleaner confirm dialog title rendered the literal
+"Move {count} items to quarantine?" because `t("cleaner.confirmTitle")` passed
+no params. It now passes `store.selected.size`, the same number the footer and
+the dialog body show. Audit of every `{placeholder}` key against its `t()` call
+sites found no other bare call (`cleaner.groupCount` has no call site at all).
+Regression test `i18n-params.test.ts` fails if a placeholder key is ever called
+without params.
