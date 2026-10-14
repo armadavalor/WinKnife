@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Development changelog
 
 Append-only log of completed tasks: date, what was built, notable decisions,

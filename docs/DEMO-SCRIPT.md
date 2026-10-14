@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Demo GIF script
 
 Two GIFs for the README. Short beats a complete tour: the main GIF proves the promise "analyze first, nothing is deleted without consent, everything is reversible". The second one shows the v0.2.0 tools.

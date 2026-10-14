@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Phase 2 — Brain + duplicates
 
 Prereq: Phase 1 accepted. Read ARCHITECTURE §4 fully, `modules/02-cleaner-core.md` (full), `modules/03-duplicate-finder.md`.

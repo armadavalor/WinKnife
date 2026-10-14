@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Release checklist
 
 The current work prepares v0.2.0. It does not declare Phase 4 complete.

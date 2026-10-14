@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module: keep-awake (Phase 5)
 
 Purpose: "do not sleep for the next N minutes" with a visible countdown. Small, demo-able, zero risk: nothing is written to disk or registry.

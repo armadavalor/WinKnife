@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module: cleaner (the flagship)
 
 Purpose: find reclaimable junk, present it in 3 risk buckets with reasons, clean via quarantine.

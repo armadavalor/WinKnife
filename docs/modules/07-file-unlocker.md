@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module: file-unlocker (Phase 5)
 
 Purpose: answer "who is locking this file?" and let the user ask that app to close. Never force anything.

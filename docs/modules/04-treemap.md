@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module: treemap (disk visualization)
 
 Purpose: answer "where did my disk space go?" visually; funnel discoveries into cleaner/duplicates.

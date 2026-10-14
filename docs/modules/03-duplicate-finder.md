@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module: duplicates
 
 Purpose: find true duplicate files, recommend which copy to keep, quarantine the rest.

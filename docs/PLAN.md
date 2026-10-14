@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Proje Planı — Windows İsviçre Çakısı (kod adı: WinKnife)
 
 > Açık kaynak, kâr amacı gütmeyen (Buy Me a Coffee), portfolyo değeri yüksek bir Windows yardımcı aracı.

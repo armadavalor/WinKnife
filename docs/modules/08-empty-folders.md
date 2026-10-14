@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module: empty-folders (Phase 5)
 
 Purpose: find folders that contain no files at all and move them to quarantine. Uses the full Scan → Review → Execute pattern; good first-issue material afterwards.

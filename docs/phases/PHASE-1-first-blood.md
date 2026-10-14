@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Phase 1 — First blood (shutdown timer + green-bucket cleaner + quarantine)
 
 Prereq: Phase 0 accepted. Read `modules/01-shutdown-timer.md`, `modules/02-cleaner-core.md` (green scope only), ARCHITECTURE §4 (gates only), §6.

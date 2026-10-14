@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Rule Pack Format (`rules/*.json`)
 
 Community-editable data that drives the brain's Layer 1. Parser must reject malformed packs with a clear error listing pack name + field (loud failure beats silent skip).

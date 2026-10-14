@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Phase 0 — Skeleton (compiles from day one)
 
 Goal: a running Tauri v2 app with the module architecture in place and zero features.

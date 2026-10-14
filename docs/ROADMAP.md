@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Roadmap
 
 WinKnife grows one tool at a time. A tool is admitted when it solves a real,

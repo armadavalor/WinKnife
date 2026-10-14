@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Phase 3 — Treemap + startup + polish
 
 Prereq: Phase 2 accepted. Read `modules/04-treemap.md`, `modules/05-startup-manager.md`.

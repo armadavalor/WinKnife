@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Phase 5 — "everyday companion" (v0.2.0)
 
 Prereq: PR #1 merged (2026-10-12). Read ARCHITECTURE §2, §6, §7 and the module specs named below. Work lands on branch `feat/v0.2.0` in the order listed; each task is its own commit (or small series) and must pass the definition of done on its own.

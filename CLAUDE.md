@@ -34,3 +34,9 @@ Open-source Windows "Swiss army knife" utility. Tauri v2 (Rust backend) + Svelte
 ## When uncertain
 
 Prefer the boring, reversible option. Record the dilemma in `docs/DECISIONS-NEEDED.md` and continue with the safest interpretation. Do not block waiting for answers unless the ambiguity is destructive-action-related — those you always escalate.
+
+## Hafıza ve arşiv (docs/)
+- Oturum başında "Proje hafızası" bloğu gelir (Armada of Claude modu). Gelmediyse önce `docs/DEVIR.md` oku.
+- `docs/DEVIR.md`: nerede kaldık (iş bitince `/devir`). `docs/KARARLAR.md`: yalnız AKTİF satırlar geçerli. `docs/KANONIK.md`: varlıkların tek geçerli yolu. `docs/DERSLER.md`: yanlış-sandıklar ve dersler. `docs/LISANSLAR.md`: dışarıdan gelen her varlık/paketin kaynağı ve lisansı (eklerken satır).
+- `_arsiv/` ve `<!-- durum: arşiv -->` taşıyan dosyalar geçersiz: okuma, kopyalama, örnek alma. Glob sonucunda çıkarsa yok say.
+- Yön değişince: KARARLAR'a satır, eski varlık `_arsiv/YYYY-MM-ad/` (+NEDEN.md), KANONIK güncelle; tek commit. Temizlik, pivot, dondurma, tatbikat: `/temizlik`. Pre-commit hafıza kapısı `.githooks/` (bypass yalnız kullanıcı isterse: `--no-verify`).

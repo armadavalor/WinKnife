@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module: shutdown-timer (Phase 1 — first end-to-end win)
 
 Purpose: schedule shutdown / restart / sleep with a friendly countdown. Small, demo-able, exercises the module registry + settings + tray without any risk.
