@@ -46,6 +46,50 @@ jobs:
       - run: npm run check
       - run: npm run test:ui
       - run: npm run tauri build -- --bundles nsis
+      # Optional SignPath signing (docs/SIGNING.md). Every step below is skipped
+      # unless the SIGNPATH_API_TOKEN secret exists, so without it the workflow
+      # packages the unsigned installer exactly as before. Signing happens before
+      # packaging so SHA256SUMS.txt is computed over the signed installer.
+      - name: Upload unsigned installer for signing
+        id: upload-unsigned
+        if: env.SIGNPATH_API_TOKEN != ''
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: winknife-unsigned-installer
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+      - name: Submit signing request to SignPath
+        if: env.SIGNPATH_API_TOKEN != ''
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          # A human approves each request in SignPath; allow time for that.
+          wait-for-completion-timeout-in-seconds: 7200
+          output-artifact-directory: signpath-signed
+      - name: Replace unsigned installer with the signed one
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          $signed = @(Get-ChildItem signpath-signed -Filter '*-setup.exe' -File)
+          if ($signed.Count -ne 1) { throw 'Expected exactly one signed installer from SignPath.' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $signed[0].FullName
+          if ($signature.Status -ne 'Valid') { throw "Signed installer has an invalid signature: $($signature.Status)" }
+          $target = @(Get-ChildItem src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' -File)
+          if ($target.Count -ne 1) { throw 'Expected exactly one unsigned installer to replace.' }
+          Copy-Item -LiteralPath $signed[0].FullName -Destination $target[0].FullName -Force
+          "Signed: $($signature.SignerCertificate.Subject)"
       - name: Package portable app, installer and checksums
         shell: pwsh
         run: ./scripts/package-release.ps1 -Version $env:WINKNIFE_VERSION

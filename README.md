@@ -36,6 +36,20 @@ is still pending. There is no promised release date.
 - The current app uses local rules. The optional LLM layer is planned and **not implemented** in this release preparation.
 - WinKnife is not a registry cleaner, driver updater, antivirus or a promise of more FPS. See [module backlog](docs/modules/BACKLOG.md).
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+Only the installer built from this repository by the GitHub Actions workflow `.github/workflows/release.yml` on GitHub-hosted runners is submitted for signing, and every signing request is approved manually. Releases up to and including v0.2.0 are unsigned. Details: [signing notes](docs/SIGNING.md).
+
+| Role | Members |
+| --- | --- |
+| Authors (may change source without further review) | [@armadavalor](https://github.com/armadavalor) |
+| Reviewers (review every change from non-committers) | [@armadavalor](https://github.com/armadavalor) |
+| Approvers (approve each signing request) | [@armadavalor](https://github.com/armadavalor) |
+
+Privacy: WinKnife does not transfer any information to other networked systems.
+
 ## Build and run
 
 Windows development requires Rust stable with the MSVC toolchain, Visual Studio

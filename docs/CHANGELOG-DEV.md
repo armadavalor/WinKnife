@@ -1746,3 +1746,21 @@ declared as a package dependency.
 
 **Deferred.** Local `winget install --manifest` test (needs the admin-only
 LocalManifestFiles setting) and the PR to microsoft/winget-pkgs.
+
+## 2026-10-14 — Optional SignPath signing in the release workflow
+
+**Built.** `release.yml` gains three steps after the NSIS build: upload the
+unsigned setup.exe, submit it with `signpath/github-action-submit-signing-request@v3`
+(waits for manual approval), and overwrite the installer with the signed file
+after an Authenticode `Valid` check. Packaging runs afterwards, so the release
+asset and `SHA256SUMS.txt` carry the signed installer. `docs/SIGNING.md` holds
+the eligibility checklist, application text and the owner's manual steps;
+README gets a short "Code signing policy" section.
+
+**Decisions.** All signing steps are gated on the `SIGNPATH_API_TOKEN` secret;
+without it the workflow is unchanged. Organization and slugs come from repository
+variables. Only the installer is signed.
+
+**Deferred.** The SignPath application itself, MFA, secret and variables (owner
+steps), signing `winknife.exe` inside the bundle, the Turkish README section,
+and an `actionlint` run.
