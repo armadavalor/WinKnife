@@ -17,6 +17,7 @@ Bir şey değişince: eski dosya `_arsiv/`e, bu tablo güncellenir, KARARLAR'a s
 | Uygulama ikonları | src-tauri/icons/ , static/favicon.png | `tauri icon assets/logo.png` ile üretilir, elle düzenlenmez |
 | Temizlik kuralları | rules/*.json | Biçim docs/RULES-FORMAT.md |
 | Sürüm yayın akışı | docs/RELEASING.md + .github/workflows/release.yml | |
+| winget manifesti | packaging/winget/manifests/ (yeni sürüm adımları packaging/winget/README.md) | |
 | Codex sınırları | AGENTS.md | |
 
 ## İstisna
