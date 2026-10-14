@@ -1746,3 +1746,25 @@ declared as a package dependency.
 
 **Deferred.** Local `winget install --manifest` test (needs the admin-only
 LocalManifestFiles setting) and the PR to microsoft/winget-pkgs.
+
+## 2026-10-14 — Install smoke workflow and release acceptance
+
+**Built.** `.github/workflows/install-smoke.yml` (manual, with a `version` input):
+on a fresh windows-latest runner it downloads the release setup.exe, checks it
+against `SHA256SUMS`, installs it silently, launches the app for 15 s and keeps
+a screenshot as an artifact, uninstalls it silently, and validates the winget
+manifest. v0.2.0 passed every step.
+
+**Decisions.** No `winget install` on CI: winget marks its download with the Mark
+of the Web, and SmartScreen holds the unsigned installer at "Windows protected
+your PC" (seen in a hang screenshot). The winget-pkgs pipeline ran the full
+install test instead and passed (microsoft/winget-pkgs#452789). `winget validate`
+on the runner "succeeds with warnings" and exits non-zero because its winget
+(1.11) does not know the 1.12 schema header, so the step checks the result line.
+
+**Found.** VirusTotal on the v0.2.0 setup.exe: 3/71, all generic ML detections
+(Arctic Wolf, DeepInstinct, SecureAge); Microsoft and the other major engines
+clean. Every user who downloads the installer meets SmartScreen until it is
+code-signed.
+
+**Deferred.** Code signing; the demo GIF.
