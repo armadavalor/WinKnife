@@ -1733,3 +1733,16 @@ stay as written. Pure `expand_env_with` with unit tests, plus one test that
 cleaner page and for the empty-folders summary: "2530292 found" now reads
 "2,530,292 found". Not applied inside `t()`, because `{pid}`, `{id}` and
 `{code}` must stay ungrouped. Unit test `format.test.ts`.
+
+## 2026-10-14 — winget manifest for v0.2.0
+
+**Built.** `packaging/winget/` with version, installer and en-US locale manifests
+(schema 1.9.0) for `armadavalor.WinKnife` 0.2.0, pointing at the release's NSIS
+setup.exe. `winget validate` passes.
+
+**Decisions.** Per-user scope and `ProductCode: WinKnife` match the uninstall key
+Tauri's NSIS installer writes (checked on a local 0.1.0 install). WebView2 runtime
+declared as a package dependency.
+
+**Deferred.** Local `winget install --manifest` test (needs the admin-only
+LocalManifestFiles setting) and the PR to microsoft/winget-pkgs.
