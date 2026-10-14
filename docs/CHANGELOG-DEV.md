@@ -573,8 +573,8 @@ one path.
 
 **Verification.** The diagnosis was proven by execution, not by reading. Before
 the fix, a list built from a real 8.3 path missed the canonical probe:
-registered `C:\Users\ARMADA~1\...\PROTEC~1`, probed
-`C:\Users\ARMADA-L5-PRO\...\Protected Program Files\kernel.sys` → not protected.
+registered `C:\Users\USERNA~1\...\PROTEC~1`, probed
+`C:\Users\USERNAME\...\Protected Program Files\kernel.sys` → not protected.
 Because the two CI failures need a reparse point and this machine cannot create
 symlinks, both were then reproduced locally with a *junction* (`mklink /J`,
 which needs no privilege and which `canonicalize` resolves the same way): with
@@ -614,7 +614,7 @@ on the GitHub runner.
 `compile_spec` (`brain/rules.rs`) asks whether a rule's expanded walk root sits
 inside `%USERPROFILE%`, and refuses to load the pack when it does not. Windows
 hands `%TEMP%` over in 8.3 form on any account whose name does not fit 8.3 —
-`C:\Users\ARMADA~1\AppData\Local\Temp` here, `C:\Users\RUNNER~1\...` on CI —
+`C:\Users\USERNA~1\AppData\Local\Temp` here, `C:\Users\RUNNER~1\...` on CI —
 while `%USERPROFILE%` arrives in full. `is_inside` compared the two as component
 text, judged the temp folder to be outside the profile, and refused every
 shipped pack. `lib.rs` treats a rules-load failure as fatal by design and
@@ -704,8 +704,8 @@ mixed-spelling shape on real directories (`lib.rs`, `rules.rs`).
 literal pre-fix tree, then re-run after — and the pre-fix run was repeated by
 stashing the whole change set, to be sure. Before: `*** LOAD FAILED *** rule
 pack windows-temp is invalid at rules.user-temp-files.requires_admin:
-%TEMP%\** expands to C:\Users\ARMADA~1\AppData\Local\Temp, which is outside the
-user profile C:\Users\ARMADA-L5-PRO`. After: passes. The nine attack spellings
+%TEMP%\** expands to C:\Users\USERNA~1\AppData\Local\Temp, which is outside the
+user profile C:\Users\USERNAME`. After: passes. The nine attack spellings
 were re-probed against the final tree and are REFUSED at all four surfaces
 (`gate_path`, the lexical list, `path_refusal`, and the `classify` rating) —
 `every_attack_spelling_is_refused_by_every_surface` prints the table under
