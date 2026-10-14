@@ -94,6 +94,8 @@ jobs:
             "app exited: $($p.HasExited) code: $($p.ExitCode)"
             Get-Process winknife, msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, SessionId
             $wv = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+            Get-CimInstance Win32_Process -Filter "name='msedgewebview2.exe'" | ForEach-Object { $_.CommandLine.Substring(0, [Math]::Min(400, $_.CommandLine.Length)) }
+            netstat -ano | Select-String LISTENING | Select-String '127.0.0.1|\[::1\]'
             "WebView2 runtime: $((Get-ItemProperty $wv -ErrorAction SilentlyContinue).pv)"
           }
           Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
