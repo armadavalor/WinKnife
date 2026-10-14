@@ -90,6 +90,12 @@ jobs:
           Start-Sleep 10
           node scripts/demo/record.mjs frames
           $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            "app exited: $($p.HasExited) code: $($p.ExitCode)"
+            Get-Process winknife, msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, SessionId
+            $wv = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+            "WebView2 runtime: $((Get-ItemProperty $wv -ErrorAction SilentlyContinue).pv)"
+          }
           Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
           exit $code
 

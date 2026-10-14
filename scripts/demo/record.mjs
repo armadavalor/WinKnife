@@ -30,17 +30,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function pageTarget() {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  let last = "no response";
   while (Date.now() < deadline) {
     try {
       const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
       const page = list.find((t) => t.type === "page" && !t.url.startsWith("about:"));
       if (page) return page.webSocketDebuggerUrl;
-    } catch {
+      last = JSON.stringify(list.map((t) => [t.type, t.url]));
+    } catch (err) {
       // DevTools endpoint not up yet.
+      last = String(err.cause?.code ?? err.message);
     }
     await sleep(1000);
   }
-  throw new Error("no WebView2 page target on port " + PORT);
+  throw new Error(`no WebView2 page target on port ${PORT} (last: ${last})`);
 }
 
 function connect(url) {
