@@ -1,0 +1,8 @@
+#!/bin/sh
+# Armada of Claude: hafıza kapısı (hafiza.ps1 kontrol -Kapi).
+# Durdurur: koddan _arsiv/ referansı, kopya/geçici adlı dosya, Durum'suz KARARLAR satırı.
+# Bilerek geçmek için: git commit --no-verify
+H="$HOME/.claude/hafiza/hafiza.ps1"
+[ -n "$CLAUDE_CONFIG_DIR" ] && [ -f "$CLAUDE_CONFIG_DIR/hafiza/hafiza.ps1" ] && H="$CLAUDE_CONFIG_DIR/hafiza/hafiza.ps1"
+if [ ! -f "$H" ] || ! command -v pwsh >/dev/null 2>&1; then exit 0; fi
+exec pwsh -NoProfile -File "$H" kontrol "$(git rev-parse --show-toplevel)" -Kapi

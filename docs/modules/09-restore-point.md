@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module: restore-point (Phase 5)
 
 Purpose: one button to create a Windows restore point, offered before system changes. WinKnife's own actions are already reversible; this is an extra safety net for users who want one.

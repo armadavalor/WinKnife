@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module: startup
 
 Purpose: show everything that runs at boot, estimate impact, disable safely (reversibly).

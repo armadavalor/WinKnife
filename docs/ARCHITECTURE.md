@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Architecture
 
 Tauri v2 desktop app. Rust does all filesystem/registry/system work; the WebView (Svelte 5 + TS + Tailwind) only renders and collects consent.

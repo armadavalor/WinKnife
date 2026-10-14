@@ -27,3 +27,8 @@ vite.config.ts.timestamp-*
 
 # Internal orchestration notes stay local
 ORKESTRA.md
+
+# Local build caches / agent worktrees
+/src-tauri/target-*/
+/.claude/worktrees/
+/.claude/handoff/

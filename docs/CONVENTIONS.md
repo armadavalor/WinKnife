@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Conventions
 
 ## Rust

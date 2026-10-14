@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Module Backlog (post-V1, branch-and-grow)
 
 Rule for admission: solves a real, recurring Windows annoyance; fits scan→review→execute or a single obvious screen; no settings jungle. Each entry below is a seed spec — promote to a full `NN-name.md` before implementation.

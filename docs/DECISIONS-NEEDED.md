@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Decisions needed
 
 Open scope questions and contradictions found while implementing. Format:

@@ -1,3 +1,4 @@
+<!-- durum: aktif -->
 # Phase 4 — LLM option + release
 
 Prereq: Phase 3 accepted. Read ARCHITECTURE §4 Layer 2.
