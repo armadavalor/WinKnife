@@ -1,0 +1,112 @@
+name: demo recording
+
+# Records the frames for the README demo GIF (docs/DEMO-SCRIPT.md, GIF 1) on a
+# throwaway runner: installs a published release, seeds junk into a fake
+# C:\Users\Demo profile, points the app at it through the environment and
+# drives it with scripts/demo/record.mjs. Nobody's real profile is on screen.
+# Build the GIF from the frames artifact with the command in docs/DEMO-SCRIPT.md.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v
+        required: true
+        default: "0.2.0"
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ inputs.version || '0.2.0' }}
+      GH_TOKEN: ${{ github.token }}
+      DEMO_HOME: C:\Users\Demo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download, verify and install
+        shell: pwsh
+        run: |
+          gh release download "v$env:VERSION" -R $env:GITHUB_REPOSITORY -p "*-setup.exe" -p SHA256SUMS.txt -D dl
+          $exe = Get-ChildItem dl -Filter *-setup.exe | Select-Object -First 1
+          $want = (Select-String -Path dl/SHA256SUMS.txt -Pattern $exe.Name).Line.Split(' ')[0]
+          $got = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          if ($got -ne $want.ToUpper()) { throw "SHA256 mismatch: $got vs $want" }
+          Start-Process $exe.FullName -ArgumentList '/S' -Wait
+          $app = Join-Path $env:LOCALAPPDATA 'WinKnife\winknife.exe'
+          if (-not (Test-Path $app)) { throw "winknife.exe not installed" }
+          "APP=$app" >> $env:GITHUB_ENV
+
+      - name: Seed junk into the demo profile
+        shell: pwsh
+        run: |
+          $la = "$env:DEMO_HOME\AppData\Local"
+          function Seed($dir, $name, $mb, $days) {
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            $path = Join-Path $dir $name
+            fsutil file createnew $path ([int64]$mb * 1MB) | Out-Null
+            $when = (Get-Date).AddDays(-$days)
+            (Get-Item $path).CreationTime = $when
+            (Get-Item $path).LastWriteTime = $when
+          }
+          New-Item -ItemType Directory -Force "$env:DEMO_HOME\AppData\Roaming", "$env:DEMO_HOME\Documents" | Out-Null
+          # Safe: temp files, browser cache, crash dumps.
+          Seed "$la\Temp" 'tmp8B21.tmp' 184 9
+          Seed "$la\Temp" '~DF3A1C.tmp' 96 12
+          Seed "$la\Temp" 'MSI4f2a1.LOG' 3 21
+          Seed "$la\Temp\7zS4E21" 'payload.dat' 212 16
+          Seed "$la\Temp\{8C1E0F6A-31B2-4C55-9A7E-2D04B6E1F3A9}" 'setup.cache' 75 26
+          1..24 | ForEach-Object { Seed "$la\Microsoft\Edge\User Data\Default\Cache\Cache_Data" ('f_{0:x6}' -f (0x1a20 + $_)) (6 + $_ % 7) (2 + $_ % 5) }
+          1..12 | ForEach-Object { Seed "$la\Microsoft\Edge\User Data\Default\Code Cache\js" ('{0:x16}_0' -f (0x5e1f00 * $_)) 4 3 }
+          Seed "$la\CrashDumps" 'explorer.exe.4312.dmp' 118 5
+          Seed "$la\CrashDumps" 'SearchHost.exe.9020.dmp' 64 11
+          # Needs review: an old installer in temp and old downloads.
+          Seed "$la\Temp" 'setup-7.2.1.msi' 146 45
+          Seed "$env:DEMO_HOME\Downloads" 'driver-pack-2025.zip' 388 210
+          Seed "$env:DEMO_HOME\Downloads" 'tool-installer-4.0.exe' 92 240
+          (Get-ChildItem -Recurse -File $env:DEMO_HOME | Measure-Object Length -Sum).Sum / 1MB
+
+      - name: Record
+        shell: pwsh
+        run: |
+          $env:USERPROFILE = $env:DEMO_HOME
+          $env:HOMEPATH = '\Users\Demo'
+          $env:LOCALAPPDATA = "$env:DEMO_HOME\AppData\Local"
+          $env:APPDATA = "$env:DEMO_HOME\AppData\Roaming"
+          $env:TEMP = "$env:DEMO_HOME\AppData\Local\Temp"
+          $env:TMP = $env:TEMP
+          $env:USERNAME = 'Demo'
+          # The elevated runner's WebView2 ignores
+          # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS and the HKCU policy; only the
+          # machine-wide per-app policy key opens the DevTools port.
+          # Throwaway runner only.
+          $key = 'HKLM:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+          New-Item -Force $key | Out-Null
+          New-ItemProperty -Force $key -Name 'winknife.exe' -Value '--remote-debugging-port=9222' | Out-Null
+          $p = Start-Process $env:APP -PassThru
+          Start-Sleep 10
+          node scripts/demo/record.mjs frames
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            "app exited: $($p.HasExited) code: $($p.ExitCode)"
+            Get-Process winknife, msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, SessionId
+            $wv = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+            Get-CimInstance Win32_Process -Filter "name='msedgewebview2.exe'" | ForEach-Object { [regex]::Matches($_.CommandLine, '--(remote|disable-features|enable-features)[^ ]*|--type=[^ ]*').Value -join ' ' }
+            netstat -ano | Select-String LISTENING | Select-String '127.0.0.1|\[::1\]'
+            "WebView2 runtime: $((Get-ItemProperty $wv -ErrorAction SilentlyContinue).pv)"
+          }
+          Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
+          exit $code
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: demo-frames
+          path: frames
+          if-no-files-found: ignore

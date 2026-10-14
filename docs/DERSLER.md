@@ -13,3 +13,4 @@ Oturuma otomatik verilmez; `/temizlik` ve büyük kararlar öncesi okunur. Aynı
 - 2026-10-13 | YANLIŞ-SANDIK | "Backend OS-owned toggle'ı reddetmiyor" sanıyorduk, aslında Rust camelCase serileştiriyor, TS snake_case okuyordu | PR #24, canlı CDP 26/26 disabled
 - 2026-10-13 | DERS | Tauri npm paketi crate minor'undan ileri gidince `tauri build` reddediyor → npm sürümünü crate'e kilitle (K-010)
 - 2026-10-03 | DERS | Worker'ın "yeşil" raporu kanıt değil → adversarial review + probe; karantina yaması ancak 4 turda SHIP aldı
+- 2026-10-14 | DERS | `git commit -a` Armada'nın otomatik DEVIR bloğunu (kullanıcı istekleri, araç kimlikleri) public dala taşıdı → public repoda yalnız adlandırılmış dosyaları stage et, push öncesi `git show --stat` bak
