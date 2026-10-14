@@ -889,7 +889,7 @@ mod tests {
     /// fabricated values, so until this one existed nothing had ever loaded the
     /// shipped packs against the environment the app actually boots in — and
     /// that is precisely where it did not boot. Windows hands `%TEMP%` over in
-    /// 8.3 form on a great many accounts (`C:\Users\ARMADA~1\AppData\Local\Temp`,
+    /// 8.3 form on a great many accounts (`C:\Users\USERNA~1\AppData\Local\Temp`,
     /// `C:\Users\RUNNER~1\…` on the GitHub runner) while `%USERPROFILE%` arrives
     /// in full. Compared as text those are two different places, the profile
     /// containment check said the temp rules reach outside the profile, and

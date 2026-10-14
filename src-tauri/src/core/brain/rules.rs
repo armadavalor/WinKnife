@@ -379,7 +379,7 @@ pub fn compile_spec(spec: RulePackSpec, env: &dyn EnvResolver) -> Result<RulePac
                     //
                     // Through `path_compare`, because the two variables need not
                     // arrive in the same spelling: Windows hands `%TEMP%` over as
-                    // `C:\Users\ARMADA~1\AppData\Local\Temp` on any account whose
+                    // `C:\Users\USERNA~1\AppData\Local\Temp` on any account whose
                     // name does not fit 8.3, while `%USERPROFILE%` comes back in
                     // full. Compared as text that is outside the profile, every
                     // shipped pack was refused, and a rules-load failure is fatal

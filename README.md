@@ -11,6 +11,8 @@ a shutdown timer into one window.
 
 [ Türkçe ](README.tr.md)
 
+![Scan, review, clean up into quarantine, then restore everything](assets/demo.gif)
+
 **Status:** nine tools implemented; preparing the first release, v0.2.0.
 Release acceptance, including a fresh Windows VM install/restore/uninstall check,
 is still pending. There is no promised release date.
