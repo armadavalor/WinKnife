@@ -86,11 +86,14 @@ jobs:
           $env:TMP = $env:TEMP
           $env:USERNAME = 'Demo'
           $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
-          # The runner's WebView2 ignores the variable above; the per-app
-          # policy key is the documented fallback (throwaway runner only).
-          $key = 'HKCU:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
-          New-Item -Force $key | Out-Null
-          New-ItemProperty -Force $key -Name 'winknife.exe' -Value '--remote-debugging-port=9222' | Out-Null
+          # The runner's WebView2 ignores the variable above (the runner
+          # account is elevated); the per-app policy key is the documented
+          # fallback. Throwaway runner only.
+          foreach ($hive in 'HKLM', 'HKCU') {
+            $key = "${hive}:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments"
+            New-Item -Force $key | Out-Null
+            New-ItemProperty -Force $key -Name 'winknife.exe' -Value '--remote-debugging-port=9222' | Out-Null
+          }
           $p = Start-Process $env:APP -PassThru
           Start-Sleep 10
           node scripts/demo/record.mjs frames
@@ -99,7 +102,7 @@ jobs:
             "app exited: $($p.HasExited) code: $($p.ExitCode)"
             Get-Process winknife, msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, SessionId
             $wv = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
-            Get-CimInstance Win32_Process -Filter "name='msedgewebview2.exe'" | ForEach-Object { [regex]::Matches($_.CommandLine, '--(remote|disable-features|enable-features)[^ ]*').Value -join ' ' }
+            Get-CimInstance Win32_Process -Filter "name='msedgewebview2.exe'" | ForEach-Object { [regex]::Matches($_.CommandLine, '--(remote|disable-features|enable-features)[^ ]*|--type=[^ ]*').Value -join ' ' }
             netstat -ano | Select-String LISTENING | Select-String '127.0.0.1|\[::1\]'
             "WebView2 runtime: $((Get-ItemProperty $wv -ErrorAction SilentlyContinue).pv)"
           }
