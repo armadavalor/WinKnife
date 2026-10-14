@@ -12,9 +12,6 @@ on:
         description: Release version without the leading v
         required: true
         default: "0.2.0"
-  push:
-    branches: [docs/demo-gif]
-    paths: [".github/workflows/demo.yml", "scripts/demo/**"]
 
 permissions:
   contents: read
@@ -85,15 +82,13 @@ jobs:
           $env:TEMP = "$env:DEMO_HOME\AppData\Local\Temp"
           $env:TMP = $env:TEMP
           $env:USERNAME = 'Demo'
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
-          # The runner's WebView2 ignores the variable above (the runner
-          # account is elevated); the per-app policy key is the documented
-          # fallback. Throwaway runner only.
-          foreach ($hive in 'HKLM', 'HKCU') {
-            $key = "${hive}:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments"
-            New-Item -Force $key | Out-Null
-            New-ItemProperty -Force $key -Name 'winknife.exe' -Value '--remote-debugging-port=9222' | Out-Null
-          }
+          # The elevated runner's WebView2 ignores
+          # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS and the HKCU policy; only the
+          # machine-wide per-app policy key opens the DevTools port.
+          # Throwaway runner only.
+          $key = 'HKLM:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+          New-Item -Force $key | Out-Null
+          New-ItemProperty -Force $key -Name 'winknife.exe' -Value '--remote-debugging-port=9222' | Out-Null
           $p = Start-Process $env:APP -PassThru
           Start-Sleep 10
           node scripts/demo/record.mjs frames

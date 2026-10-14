@@ -1746,3 +1746,22 @@ declared as a package dependency.
 
 **Deferred.** Local `winget install --manifest` test (needs the admin-only
 LocalManifestFiles setting) and the PR to microsoft/winget-pkgs.
+
+## 2026-10-14 — README demo GIF
+
+**Built.** `assets/demo.gif` (GIF 1 of `docs/DEMO-SCRIPT.md`: scan, review,
+clean up into quarantine, restore), embedded at the top of the README. Recorded
+by the new `demo recording` workflow (`.github/workflows/demo.yml`): it installs
+the published v0.2.0 setup.exe after a SHA-256 check, seeds about 1.6 GB of junk
+into a fake `C:\Users\Demo` profile, starts the app with the profile variables
+pointing there and drives it over CDP with `scripts/demo/record.mjs`. The GIF is
+built locally from the frames artifact with ffmpeg (command in DEMO-SCRIPT).
+
+**Decisions.** Recorded on a GitHub runner, not on a real profile, so no real
+usernames or paths can reach the frames. WebView2 on the elevated runner ignores
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` and the HKCU policy; the HKLM per-app
+`AdditionalBrowserArguments` policy key opens the DevTools port.
+
+**Noticed.** The v0.2.0 cleanup confirm dialog shows the literal title
+"Move {count} items to quarantine?" (visible in the GIF); the placeholder is not
+filled.
