@@ -88,14 +88,19 @@
   />
 
   {#if cameFrom}
-    <p class="rounded-xl bg-surface-2 p-4 text-sm leading-relaxed text-ink-muted">
-      {t("cleaner.cameFrom", { path: truncatePath(cameFrom, 56) })}
-    </p>
+    <details class="group">
+      <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
+        {t("cleaner.cameFromSummary")}
+      </summary>
+      <p class="mt-2 rounded-xl bg-surface-2/60 p-4 text-sm leading-relaxed text-ink-muted">
+        {t("cleaner.cameFrom", { path: truncatePath(cameFrom, 56) })}
+      </p>
+    </details>
   {/if}
 
   {#if store.error}
     <p
-      class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger"
+      class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger"
     >
       {store.error}
     </p>
@@ -119,7 +124,7 @@
       <div class="flex items-center gap-2" class:ml-auto={!!lastScan}>
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+          class="btn-primary"
           onclick={() => store.scan(MODULE_ID)}
         >
           {t("cleaner.scan")}
@@ -174,14 +179,14 @@
       <div class="flex gap-2">
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+          class="btn-primary"
           onclick={() => quarantineStore.show()}
         >
           {t("cleaner.openQuarantine")}
         </button>
         <button
           type="button"
-          class="rounded-lg px-4 py-2 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          class="btn-ghost"
           onclick={resetScan}
         >
           {t("cleaner.scanAgain")}
@@ -198,7 +203,7 @@
       </p>
       <button
         type="button"
-        class="rounded-lg px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-ghost px-3! py-1.5!"
         onclick={resetScan}
       >
         {t("cleaner.scanAgain")}
@@ -206,11 +211,15 @@
     </section>
 
     {#if store.result && store.result.skippedRules.length > 0}
-      <p class="rounded-xl border border-surface-2 p-4 text-xs text-ink-faint">
-        {t("cleaner.skippedRules", {
-          rules: store.result.skippedRules.join(", "),
-        })}
-      </p>
+      <details class="group">
+        <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
+          {t("cleaner.skippedRules")}
+          <span class="underline">{t("cleaner.skippedRulesDetails")}</span>
+        </summary>
+        <p class="mt-2 rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
+          {store.result.skippedRules.join(", ")}
+        </p>
+      </details>
     {/if}
 
     <section class="flex flex-col gap-3">
@@ -266,7 +275,7 @@
       </p>
       <button
         type="button"
-        class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0 disabled:cursor-not-allowed disabled:opacity-40"
+        class="btn-primary"
         disabled={store.selected.size === 0}
         onclick={() => (confirming = true)}
       >

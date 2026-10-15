@@ -11,8 +11,9 @@
 
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes } from "$lib/format";
-  import { t } from "$lib/i18n";
+  import { t, type TranslationKey } from "$lib/i18n";
   import { settingsStore } from "$lib/stores/settings.svelte";
+  import { THEMES, theme } from "$lib/stores/theme.svelte";
 
   const store = settingsStore;
 
@@ -37,6 +38,17 @@
     { value: 64 * 1024 * 1024 * 1024, label: "64 GB" },
   ];
 
+  /**
+   * Preview colours per theme (page, card, accent). Hardcoded on purpose: the
+   * live CSS variables only reflect the active theme, and each card must show
+   * its own.
+   */
+  const SWATCHES = {
+    graphite: ["oklch(16% 0.006 265)", "oklch(25% 0.008 265)", "oklch(72% 0.13 205)"],
+    forest: ["oklch(15% 0.014 158)", "oklch(24% 0.018 158)", "oklch(76% 0.11 182)"],
+    mist: ["oklch(96% 0.004 265)", "oklch(87.5% 0.007 265)", "oklch(48% 0.12 205)"],
+  } as const;
+
   // Run-once mounting, deliberately not reactive: as an effect this subscribed
   // to the store's own `status` and reloaded on every transition it caused.
   onMount(() => {
@@ -47,9 +59,50 @@
 <div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
   <PageHeader title={t("settings.title")} info={t("settings.subtitle")} />
 
+  <section class="rounded-xl border border-surface-2 bg-surface-1 p-6">
+    <h2 class="text-sm font-medium">{t("settings.appearanceTitle")}</h2>
+    <p class="mt-1 text-xs text-ink-muted">{t("settings.appearanceSubtitle")}</p>
+
+    <div
+      class="mt-4 grid gap-3 sm:grid-cols-3"
+      role="radiogroup"
+      aria-label={t("settings.themeLabel")}
+    >
+      {#each THEMES as id (id)}
+        {@const [page, card, accent] = SWATCHES[id]}
+        <label
+          class="flex cursor-pointer items-center gap-3 rounded-xl border border-surface-2 p-3 transition-colors hover:bg-surface-2 has-[:checked]:border-accent has-[:checked]:bg-accent-soft/40 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+        >
+          <input
+            type="radio"
+            name="theme"
+            value={id}
+            class="sr-only"
+            checked={theme.current === id}
+            onchange={() => theme.set(id)}
+          />
+          <span
+            class="size-10 shrink-0 rounded-lg border border-ink/15"
+            style="background: linear-gradient(135deg, {page} 0 50%, {card} 50% 75%, {accent} 75%)"
+            aria-hidden="true"
+          ></span>
+          <span class="min-w-0">
+            <span class="block text-sm text-ink">
+              {t(`settings.theme.${id}` as TranslationKey)}
+            </span>
+            <span class="block text-xs text-ink-faint">
+              {t(`settings.themeHint.${id}` as TranslationKey)}
+            </span>
+          </span>
+        </label>
+      {/each}
+    </div>
+    <p class="mt-3 text-xs text-ink-faint">{t("settings.themeNote")}</p>
+  </section>
+
   {#if store.error}
     <p
-      class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger"
+      class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger"
     >
       {store.error}
     </p>
@@ -175,7 +228,7 @@
     <div class="flex items-center gap-3">
       <button
         type="button"
-        class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0 disabled:opacity-40"
+        class="btn-primary"
         disabled={store.status === "saving"}
         onclick={() => store.save()}
       >

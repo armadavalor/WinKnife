@@ -9,7 +9,6 @@
   import { onMount } from "svelte";
 
   import { restorePointCreate, restorePointOpenSettings, restorePointStatus } from "$lib/api";
-  import InfoTip from "$lib/components/InfoTip.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
@@ -81,12 +80,12 @@
   function outcomeTone(result: CreateOutcome): string {
     switch (result.state) {
       case "created":
-        return "border-risk-safe/30 text-risk-safe";
+        return "border-risk-safe/30 bg-surface-1 text-risk-safe";
       case "failed":
       case "timedOut":
-        return "border-risk-danger/30 text-risk-danger";
+        return "border-risk-danger/30 bg-surface-1 text-risk-danger";
       default:
-        return "border-risk-review/30 text-risk-review";
+        return "border-risk-review/30 bg-surface-1 text-risk-review";
     }
   }
 </script>
@@ -98,7 +97,7 @@
   />
 
   {#if error}
-    <p class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger">
+    <p class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger">
       {error}
     </p>
   {/if}
@@ -140,17 +139,25 @@
     <div class="flex items-center gap-2">
       <button
         type="button"
-        class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0 disabled:cursor-not-allowed disabled:opacity-40"
+        class="btn-primary"
         disabled={creating}
         onclick={create}
       >
         {creating ? t("restorePoint.creating") : t("restorePoint.create")}
       </button>
-      <InfoTip text={t("restorePoint.uacNotice")} />
     </div>
 
+    <details class="group">
+      <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
+        {t("restorePoint.uacSummary")}
+      </summary>
+      <p class="mt-2 rounded-xl bg-surface-2/60 p-4 text-sm leading-relaxed text-ink-muted">
+        {t("restorePoint.uacNotice")}
+      </p>
+    </details>
+
     {#if outcome}
-      <p class="rounded-lg border p-3 text-sm leading-relaxed {outcomeTone(outcome)}" role="status">
+      <p class="rounded-xl border p-4 text-sm leading-relaxed {outcomeTone(outcome)}" role="status">
         {outcomeText(outcome)}
       </p>
     {/if}
@@ -160,7 +167,7 @@
         <p class="text-xs leading-relaxed text-ink-muted">{t("restorePoint.settingsHint")}</p>
         <button
           type="button"
-          class="rounded-lg border border-surface-3 px-3 py-1.5 text-sm transition-colors hover:bg-surface-2"
+          class="btn-outline px-3! py-1.5!"
           onclick={openSettings}
         >
           {t("restorePoint.openSettings")}

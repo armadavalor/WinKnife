@@ -405,7 +405,7 @@
       {#if store.scanning}
         <button
           type="button"
-          class="rounded-lg border border-surface-3 px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          class="btn-outline px-3! py-1.5!"
           onclick={() => store.stop()}
         >
           {t("treemap.stop")}
@@ -413,7 +413,7 @@
       {:else}
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent hover:text-surface-0"
+          class="btn-primary px-3! py-1.5!"
           onclick={() => store.scan()}
         >
           {store.cached ? t("treemap.rescan") : t("treemap.scan")}
@@ -483,7 +483,7 @@
             {#snippet action()}
               <button
                 type="button"
-                class="rounded-lg bg-accent-soft px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent hover:text-surface-0"
+                class="btn-primary px-3! py-1.5!"
                 onclick={() => store.scan()}
               >
                 {t("treemap.scan")}

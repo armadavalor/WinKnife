@@ -43,7 +43,7 @@
       </div>
       <button
         type="button"
-        class="rounded-lg px-2 py-1 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-ghost px-2! py-1!"
         onclick={() => store.hide()}
       >
         {t("action.close")}
@@ -59,7 +59,7 @@
       </span>
       <button
         type="button"
-        class="rounded-lg bg-surface-2 px-2.5 py-1 text-xs text-ink-muted transition-colors hover:bg-surface-3 hover:text-ink"
+        class="btn-secondary px-2.5! py-1! text-xs!"
         onclick={() => store.purge()}
       >
         {t("quarantine.purgeNow")}
@@ -74,11 +74,14 @@
       lose part of itself. Factual tone, no alarm — these are notes, not errors.
     -->
     {#if store.stats.unreadableRows > 0}
-      <p
-        class="border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-ink-muted"
-      >
-        {t("quarantine.unreadableRows", { count: store.stats.unreadableRows })}
-      </p>
+      <details class="group border-b border-surface-2 bg-surface-2/60 px-5 py-3">
+        <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
+          {t("quarantine.detailsSummary")}
+        </summary>
+        <p class="mt-2 text-xs leading-relaxed text-ink-muted">
+          {t("quarantine.unreadableRows", { count: store.stats.unreadableRows })}
+        </p>
+      </details>
     {/if}
 
     {#if refusedHeld(store.stats)}
@@ -160,7 +163,7 @@
                 <div class="flex shrink-0 flex-col gap-1">
                   <button
                     type="button"
-                    class="rounded-lg bg-accent-soft px-2.5 py-1 text-xs font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+                    class="btn-primary px-2.5! py-1! text-xs!"
                     onclick={() => store.restore(batch.batchId)}
                   >
                     {t("quarantine.restore")}

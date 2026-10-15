@@ -94,7 +94,7 @@
   </a>
 
   {#if store.error}
-    <p class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger">
+    <p class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger">
       {store.error}
     </p>
   {/if}
@@ -106,7 +106,7 @@
       <p class="text-sm">{t("startup.loadError")}</p>
       <button
         type="button"
-        class="rounded-lg bg-surface-3 px-3 py-1.5 text-sm transition-colors hover:bg-accent-soft"
+        class="btn-secondary px-3! py-1.5!"
         disabled={store.busy !== null}
         onclick={() => store.reload()}
       >
@@ -120,7 +120,7 @@
       <span>{t("startup.summary", { total: store.entries.length, on: store.enabledCount })}</span>
       <button
         type="button"
-        class="rounded-lg border border-surface-3 px-2.5 py-1 text-xs transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-outline px-2.5! py-1! text-xs!"
         disabled={store.busy !== null}
         onclick={() => store.reload()}
       >
@@ -171,9 +171,14 @@
             </p>
             <p class="mt-1.5 text-xs leading-relaxed text-ink-muted">{entry.note}</p>
             {#if entry.leftoverShortcut}
-              <p class="mt-1.5 text-xs leading-relaxed text-risk-warning">
-                {t("startup.leftoverReason", { path: entry.leftoverShortcut })}
-              </p>
+              <details class="group mt-1.5">
+                <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
+                  {t("startup.leftoverSummary")}
+                </summary>
+                <p class="mt-1 text-xs leading-relaxed text-risk-warning">
+                  {t("startup.leftoverReason", { path: entry.leftoverShortcut })}
+                </p>
+              </details>
             {/if}
             {#if entry.osOwned && entry.osReason && entry.osReason !== entry.note}
               <p class="mt-1.5 text-xs leading-relaxed text-ink-faint">{entry.osReason}</p>
@@ -192,7 +197,7 @@
               aria-label={t("startup.toggleLabel", { name: entry.name })}
               disabled={entry.osOwned || store.busy !== null}
               class="rounded-lg px-3 py-1 text-xs font-medium transition-colors {entry.enabled
-                ? 'bg-accent-soft text-ink hover:bg-accent hover:text-surface-0'
+                ? 'bg-accent-soft text-ink hover:bg-accent hover:text-on-accent'
                 : 'border border-surface-3 text-ink-muted hover:bg-surface-2'} disabled:cursor-not-allowed disabled:opacity-50"
               onclick={() => toggle(entry)}
               onkeydown={(event) => onRowKey(event, entry)}
@@ -211,7 +216,7 @@
     </ul>
 
     {#if store.lastReport}
-      <p class="rounded-xl border border-surface-2 bg-surface-0 p-4 text-sm text-ink-muted">
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
         {store.lastReport}
       </p>
     {/if}

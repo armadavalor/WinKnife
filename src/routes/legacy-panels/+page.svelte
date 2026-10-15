@@ -69,10 +69,10 @@
     info={manifest ? tModuleDescription(manifest.id, manifest.description) : undefined}
   />
 
-  <p class="text-xs leading-relaxed text-ink-muted">{t("legacyPanels.notice")}</p>
+  <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">{t("legacyPanels.notice")}</p>
 
   {#if error}
-    <p class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger" role="alert">
+    <p class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger" role="alert">
       {error}
     </p>
   {/if}
@@ -100,7 +100,7 @@
             </div>
             <button
               type="button"
-              class="shrink-0 rounded-lg border border-surface-3 px-3 py-1.5 text-sm transition-colors hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+              class="shrink-0 btn-outline px-3! py-1.5!"
               disabled={!panel.available || opening !== null}
               onclick={() => open(panel.id)}
             >

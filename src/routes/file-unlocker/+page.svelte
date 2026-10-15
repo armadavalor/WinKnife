@@ -155,7 +155,7 @@
     <div class="flex flex-wrap items-center gap-2">
       <button
         type="button"
-        class="rounded-lg bg-surface-3 px-3 py-1.5 text-sm transition-colors hover:bg-accent-soft"
+        class="btn-secondary px-3! py-1.5!"
         disabled={status === "checking"}
         onclick={() => void pick("files")}
       >
@@ -163,7 +163,7 @@
       </button>
       <button
         type="button"
-        class="rounded-lg bg-surface-3 px-3 py-1.5 text-sm transition-colors hover:bg-accent-soft"
+        class="btn-secondary px-3! py-1.5!"
         disabled={status === "checking"}
         onclick={() => void pick("folder")}
       >
@@ -180,7 +180,7 @@
         />
         <button
           type="submit"
-          class="rounded-lg border border-surface-3 px-3 py-1.5 text-sm transition-colors hover:bg-surface-2"
+          class="btn-outline px-3! py-1.5!"
           disabled={status === "checking" || typedPath.trim().length === 0}
         >
           {t("unlocker.addPath")}
@@ -198,7 +198,7 @@
       <span>{t("unlocker.picked", { count: paths.length })}</span>
       <button
         type="button"
-        class="rounded-lg border border-surface-3 px-2.5 py-1 text-xs transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-outline px-2.5! py-1! text-xs!"
         disabled={status === "checking"}
         onclick={() => void check(paths)}
       >
@@ -206,7 +206,7 @@
       </button>
       <button
         type="button"
-        class="rounded-lg border border-surface-3 px-2.5 py-1 text-xs transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-outline px-2.5! py-1! text-xs!"
         disabled={status === "checking"}
         onclick={clear}
       >
@@ -222,7 +222,7 @@
   {#if status === "checking"}
     <p class="text-sm text-ink-faint">{t("unlocker.checking")}</p>
   {:else if status === "error"}
-    <div class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger" role="alert">
+    <div class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger" role="alert">
       <p>{t("unlocker.queryError")}</p>
       {#if errorText}<p class="mt-1 font-mono text-xs">{errorText}</p>{/if}
     </div>
@@ -310,7 +310,7 @@
             {#if row.can_close}
               <button
                 type="button"
-                class="shrink-0 rounded-lg bg-surface-3 px-3 py-1 text-xs font-medium transition-colors hover:bg-accent-soft"
+                class="shrink-0 btn-secondary px-3! py-1! text-xs!"
                 disabled={closingPid !== null}
                 onclick={() => (pending = row)}
               >

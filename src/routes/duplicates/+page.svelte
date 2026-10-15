@@ -13,7 +13,6 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
-  import InfoTip from "$lib/components/InfoTip.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
@@ -65,7 +64,7 @@
   ];
 
   const MIN_SIZES = [
-    { value: 0, label: "any size" },
+    { value: 0, label: t("duplicates.minSize.any") },
     { value: 1024 * 1024, label: "1 MB" },
     { value: 10 * 1024 * 1024, label: "10 MB" },
     { value: 100 * 1024 * 1024, label: "100 MB" },
@@ -97,7 +96,7 @@
 
   {#if store.error}
     <p
-      class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger"
+      class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger"
     >
       {store.error}
     </p>
@@ -124,13 +123,19 @@
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+          class="btn-primary"
           onclick={() => store.scan()}
         >
           {t("duplicates.scan")}
         </button>
-        <InfoTip text={t("duplicates.intro")} />
       </div>
+      <p class="text-sm text-ink-muted">{t("duplicates.intro")}</p>
+      <details class="group">
+        <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
+          {t("duplicates.how")}
+        </summary>
+        <p class="mt-2 text-xs leading-relaxed text-ink-muted">{t("duplicates.howBody")}</p>
+      </details>
     </section>
   {:else if store.step === "scanning"}
     <section
@@ -146,7 +151,7 @@
       </p>
       <button
         type="button"
-        class="self-start rounded-lg px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+        class="self-start btn-ghost px-3! py-1.5!"
         disabled={store.stopping}
         onclick={() => store.stop()}
       >
@@ -191,14 +196,14 @@
       <div class="flex gap-2">
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+          class="btn-primary"
           onclick={() => quarantineStore.show()}
         >
           {t("cleaner.openQuarantine")}
         </button>
         <button
           type="button"
-          class="rounded-lg px-4 py-2 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          class="btn-ghost"
           onclick={() => store.reset()}
         >
           {t("duplicates.scanAgain")}
@@ -220,7 +225,7 @@
       </p>
       <button
         type="button"
-        class="rounded-lg px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-ghost px-3! py-1.5!"
         onclick={() => store.reset()}
       >
         {t("duplicates.scanAgain")}
@@ -228,13 +233,13 @@
     </section>
 
     {#if scan.cancelled}
-      <p class="rounded-xl border border-surface-2 p-4 text-xs text-ink-faint">
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
         {t("duplicates.cancelled")}
       </p>
     {/if}
 
     {#if scan.skippedRoots.length > 0}
-      <p class="rounded-xl border border-surface-2 p-4 text-xs text-ink-faint">
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
         {t("duplicates.skippedRoots", { roots: scan.skippedRoots.join(" · ") })}
       </p>
     {/if}
@@ -243,7 +248,7 @@
       <label class="flex items-center gap-2">
         <span class="text-ink-muted">{t("duplicates.filterClass")}</span>
         <select
-          class="rounded-lg border border-surface-2 bg-surface-1 px-2 py-1 text-sm"
+          class="rounded-lg border border-surface-3 bg-surface-0 px-2 py-1 text-sm"
           bind:value={store.filterClass}
         >
           {#each CLASSES as option (option.value)}
@@ -255,7 +260,7 @@
       <label class="flex items-center gap-2">
         <span class="text-ink-muted">{t("duplicates.filterMinSize")}</span>
         <select
-          class="rounded-lg border border-surface-2 bg-surface-1 px-2 py-1 text-sm"
+          class="rounded-lg border border-surface-3 bg-surface-0 px-2 py-1 text-sm"
           bind:value={store.filterMinBytes}
         >
           {#each MIN_SIZES as option (option.value)}
@@ -268,28 +273,28 @@
 
       <button
         type="button"
-        class="rounded-lg px-3 py-1.5 text-xs text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-ghost px-3! py-1.5! text-xs!"
         onclick={() => store.keepBy("oldest")}
       >
         {t("duplicates.keepOldest")}
       </button>
       <button
         type="button"
-        class="rounded-lg px-3 py-1.5 text-xs text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-ghost px-3! py-1.5! text-xs!"
         onclick={() => store.keepBy("newest")}
       >
         {t("duplicates.keepNewest")}
       </button>
       <button
         type="button"
-        class="rounded-lg px-3 py-1.5 text-xs text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-ghost px-3! py-1.5! text-xs!"
         onclick={() => store.selectAllNonKeepers()}
       >
         {t("duplicates.selectAll")}
       </button>
       <button
         type="button"
-        class="rounded-lg px-3 py-1.5 text-xs text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-ghost px-3! py-1.5! text-xs!"
         onclick={() => store.selectNone()}
       >
         {t("duplicates.selectNone")}
@@ -394,7 +399,7 @@
                     <span class="mt-1 block text-[0.7rem] text-ink-faint">
                       {copy.modified
                         ? formatDateTime(copy.modified)
-                        : "no date"}
+                        : t("duplicates.noDate")}
                       {#if !keeper}
                         ·
                         <button
@@ -435,7 +440,7 @@
       </p>
       <button
         type="button"
-        class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0 disabled:cursor-not-allowed disabled:opacity-40"
+        class="btn-primary"
         disabled={store.selected.size === 0}
         onclick={() => (confirming = true)}
       >
