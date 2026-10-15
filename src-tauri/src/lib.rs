@@ -324,6 +324,13 @@ pub fn manage_state<R: tauri::Runtime>(
         Arc::new(core::platform::SystemRegistry),
     )));
 
+    // Legacy panels: only opens Windows' own windows, gated like Explorer
+    // (module spec 10).
+    app.manage(Arc::new(modules::legacy_panels::LegacyPanelsService::new(
+        Arc::new(core::platform::SystemPanelLauncher),
+        SystemEnv.var("SystemRoot").map(std::path::PathBuf::from),
+    )));
+
     app.manage(commands::Services {
         quarantine,
         brain,
@@ -385,6 +392,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::restore_point_status,
         commands::restore_point_create,
         commands::restore_point_open_settings,
+        commands::legacy_panels_list,
+        commands::legacy_panels_open,
         commands::keep_awake_start,
         commands::keep_awake_stop,
         commands::keep_awake_status,

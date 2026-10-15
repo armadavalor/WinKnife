@@ -143,6 +143,14 @@ pub enum CoreError {
     #[error("restore point error: {0}")]
     RestorePoint(String),
 
+    /// A legacy Windows panel could not be opened.
+    #[error("could not open this Windows panel: {0}")]
+    LegacyPanel(String),
+
+    /// A legacy panel id the UI sent is not in the catalogue.
+    #[error("unknown Windows panel: {0}")]
+    UnknownLegacyPanel(String),
+
     /// The database was written by a newer build. Opening it here could
     /// purge items the newer build promised to keep (round 3).
     #[error(
@@ -183,6 +191,8 @@ impl CoreError {
             Self::UnknownStartupEntry(_) => "unknown_startup_entry",
             Self::Explorer(_) => "explorer",
             Self::RestorePoint(_) => "restore_point",
+            Self::LegacyPanel(_) => "legacy_panel",
+            Self::UnknownLegacyPanel(_) => "unknown_legacy_panel",
             Self::SchemaTooNew { .. } => "schema_too_new",
         }
     }

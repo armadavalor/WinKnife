@@ -1815,3 +1815,25 @@ variables. Only the installer is signed.
 **Deferred.** The SignPath application itself, MFA, secret and variables (owner
 steps), signing `winknife.exe` inside the bundle, the Turkish README section,
 and an `actionlint` run.
+
+## 2026-10-15 — Legacy panels launcher (module spec 10, issue #13)
+
+**Built.** A `legacy-panels` module: one page of 22 shortcuts to Windows' own
+classic windows (System Properties, Device Manager, Network Connections,
+Services, Event Viewer, …) in five groups. The catalogue lives in
+`modules/legacy_panels.rs`; the UI asks for it and opens entries by id only.
+Every target is an absolute path under `%SystemRoot%\System32`
+(`control.exe x.cpl`, `mmc.exe x.msc` or a bare exe). A missing file shows the
+entry with a disabled button and "Not on this edition of Windows".
+`core/platform/panels.rs` adds the `PanelLauncher` trait: `ShellExecuteExW`,
+gated on `real_os_effects_armed()`, with UAC "No" treated as success, plus a
+recording fake. 11 unit tests.
+
+**Decisions.** WinKnife writes nothing here: no registry, no files, no network.
+The shell (not `CreateProcess`) launches each window so Windows shows its own
+UAC prompt.
+
+**Verified.** In `tauri dev`, the page rendered and Device Manager opened.
+
+**Deferred.** The manual check of every button on Windows 11 and of UAC "No"
+on an MMC entry. Turkish strings.
