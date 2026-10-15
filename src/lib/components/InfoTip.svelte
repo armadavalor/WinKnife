@@ -4,6 +4,7 @@
   nothing hidden here is hidden from assistive tech.
 -->
 <script lang="ts">
+  import Icon from "$lib/components/Icon.svelte";
   interface Props {
     /** The text shown in the popover. */
     text: string;
@@ -50,20 +51,7 @@
     }}
     {onkeydown}
   >
-    <svg
-      class="size-4"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 11v5" />
-      <path d="M12 8h.01" />
-    </svg>
+    <Icon name="info" class="size-4" />
   </button>
   {#if open}
     <span

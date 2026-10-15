@@ -9,3 +9,4 @@
 | Tauri v2 (crate + @tauri-apps/*) | tauri.app | MIT / Apache-2.0 | Evet | |
 | Svelte 5 / SvelteKit | svelte.dev | MIT | Evet | |
 | Tailwind CSS 4 | tailwindcss.com | MIT | Evet | |
+| Lucide ikonları (vendored, `src/lib/icons.ts`) | lucide.dev, lucide-static 1.57.0 | ISC (power/chevron-right/info: Feather MIT) | Evet | 2026-10-15 |
