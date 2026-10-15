@@ -1837,3 +1837,29 @@ UAC prompt.
 
 **Deferred.** The manual check of every button on Windows 11 and of UAC "No"
 on an MMC entry. Turkish strings.
+
+## 2026-10-15 — UI polish: themes, grain, copy, consistency
+
+**Built.** Frontend-only pass; no backend or safety-rule changes.
+
+- **Themes.** Three themes as CSS variables in `src/app.css`: Graphite (default,
+  no attribute), Forest (deep green) and Mist (light near-grey,
+  `color-scheme: light`). `src/lib/stores/theme.svelte.ts` sets
+  `data-theme` on `<html>` and persists the choice to localStorage
+  (`winknife.theme`). Settings gets an Appearance picker with three swatch
+  cards. The treemap canvas switches to a light palette on Mist.
+- **Background.** Inline SVG feTurbulence grain plus a soft accent glow in the
+  root layout. No network or image assets, so the CSP stays unchanged.
+- **Sidebar brand.** Logo, name and the runtime version (`getVersion()`) at the
+  top left, linking to the dashboard; the old bottom version line is gone.
+- **Copy.** About 95 English and 13 Turkish strings rewritten for a
+  non-developer reader. Dashboard cards show a per-module status and action
+  instead of the generic "Nothing to scan" text.
+- **Consistency.** Shared `btn-primary/secondary/outline/ghost` utilities,
+  unified inputs and notices, and a `bg-scrim` dialog overlay. Secondary detail
+  (skipped rules, UAC note, startup leftover reason, duplicate-check method,
+  unreadable quarantine rows) moved behind `<details>`.
+
+**Deferred.** `quarantine.affectedBatches` is not yet behind `<details>`; the
+keep-awake presets have no `aria-pressed`. Turkish coverage is unchanged in
+scope (no language picker, K-011).
