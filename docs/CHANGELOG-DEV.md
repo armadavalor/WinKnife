@@ -1863,3 +1863,18 @@ on an MMC entry. Turkish strings.
 **Deferred.** `quarantine.affectedBatches` is not yet behind `<details>`; the
 keep-awake presets have no `aria-pressed`. Turkish coverage is unchanged in
 scope (no language picker, K-011).
+
+## 2026-10-15 — Icon set (Lucide)
+
+**Built.** Every small UI icon now comes from one vendored set: 18 Lucide
+glyphs (ISC; `power`, `chevron-right`, `info` via Feather, MIT) stored as data
+in `src/lib/icons.ts` and drawn by `Icon.svelte` on a 24px grid,
+`stroke-width` 1.75, round caps/joins, `currentColor`, so all three themes
+tint them. `ModuleIcon` maps manifest icon names onto the set; the hand-drawn
+chevrons (FindingList, duplicates), the InfoTip glyph and the EmptyState
+fallback use `<Icon>`.
+
+**Decisions.** Vendored as data instead of an npm dependency: no runtime
+package, offline, CSP `img-src 'self'` untouched. Legacy panels use
+`app-window` (`monitor-cog` was too busy at 20px); empty folders use
+`folder-search`. Licence row added to `docs/LISANSLAR.md`.

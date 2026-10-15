@@ -7,6 +7,7 @@
   about a pair, and only a person can make it.
 -->
 <script lang="ts">
+  import Icon from "$lib/components/Icon.svelte";
   import { page } from "$app/state";
   import { onMount } from "svelte";
 
@@ -316,19 +317,11 @@
                 aria-controls="set-{set.id}"
                 onclick={() => toggleExpanded(set.id)}
               >
-                <svg
-                  class="size-3.5 shrink-0 text-ink-faint transition-transform"
-                  style:transform={open ? "rotate(90deg)" : "none"}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M9 6l6 6-6 6" />
-                </svg>
+                <Icon
+              name="chevron-right"
+              class=""
+              style={open ? "transform: rotate(90deg)" : undefined}
+            />
                 <span class="min-w-0 flex-1">
                   <span class="block truncate font-mono text-xs text-ink">
                     {truncatePath(set.copies[0]?.path ?? "", 56)}
