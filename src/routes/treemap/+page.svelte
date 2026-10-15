@@ -24,6 +24,7 @@
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
   import { t } from "$lib/i18n";
+  import { theme } from "$lib/stores/theme.svelte";
   import { treemapStore } from "$lib/stores/treemap.svelte";
   import { hitTest, squarify, type Placed } from "$lib/treemap/squarify";
   import type { TreeChild, TreemapCategory } from "$lib/types";
@@ -31,7 +32,7 @@
   const store = treemapStore;
 
   /** Category colours. Muted on purpose — this is a map, not an alarm. */
-  const COLOURS: Record<TreemapCategory, string> = {
+  const COLOURS_DARK: Record<TreemapCategory, string> = {
     directory: "#4b5c74",
     video: "#7d5ba6",
     image: "#3f8f7a",
@@ -42,6 +43,42 @@
     document: "#5a7d55",
     other: "#5b6270",
   };
+
+  /** Same hues, lifted for the light theme so dark labels stay readable. */
+  const COLOURS_LIGHT: Record<TreemapCategory, string> = {
+    directory: "#b9c6d9",
+    video: "#cdb8e6",
+    image: "#a9d9cb",
+    audio: "#ead3a8",
+    archive: "#dcc9a4",
+    code: "#b3cbe6",
+    app: "#e3b5ae",
+    document: "#bfd6b9",
+    other: "#c5c9d2",
+  };
+
+  /** Canvas strokes and label colours; the canvas cannot read CSS classes. */
+  const INK_DARK = {
+    link: "#6b7280",
+    hatch: "rgba(255,255,255,0.28)",
+    edge: "rgba(0,0,0,0.35)",
+    focus: "#e8eaf0",
+    label: "rgba(255,255,255,0.94)",
+    sublabel: "rgba(255,255,255,0.7)",
+  };
+
+  const INK_LIGHT = {
+    link: "#8b93a1",
+    hatch: "rgba(0,0,0,0.18)",
+    edge: "rgba(255,255,255,0.6)",
+    focus: "#1f2430",
+    label: "rgba(20,24,32,0.92)",
+    sublabel: "rgba(20,24,32,0.66)",
+  };
+
+  const isLight = $derived(theme.current === "mist");
+  const COLOURS = $derived(isLight ? COLOURS_LIGHT : COLOURS_DARK);
+  const INK = $derived(isLight ? INK_LIGHT : INK_DARK);
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let box = $state<HTMLDivElement | null>(null);
@@ -82,8 +119,9 @@
     return () => observer.disconnect();
   });
 
-  // Repaint whenever the level, the size or the selection changes.
+  // Repaint whenever the level, the size, the selection or the theme changes.
   $effect(() => {
+    void COLOURS;
     const level = store.level;
     const w = width;
     const h = height;
@@ -138,7 +176,7 @@
 
     if (item.isLink) {
       // Hollow: it exists, it is not counted, and it is not empty either.
-      ctx.strokeStyle = "#6b7280";
+      ctx.strokeStyle = INK.link;
       ctx.setLineDash([4, 3]);
       ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
       ctx.setLineDash([]);
@@ -151,7 +189,7 @@
         ctx.beginPath();
         ctx.rect(x, y, w, h);
         ctx.clip();
-        ctx.strokeStyle = "rgba(255,255,255,0.28)";
+        ctx.strokeStyle = INK.hatch;
         ctx.lineWidth = 1;
         for (let offset = -h; offset < w; offset += 7) {
           ctx.beginPath();
@@ -161,20 +199,20 @@
         }
         ctx.restore();
       }
-      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.strokeStyle = INK.edge;
       ctx.lineWidth = 1;
       ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
     }
 
     if (isFocused) {
-      ctx.strokeStyle = "#e8eaf0";
+      ctx.strokeStyle = INK.focus;
       ctx.lineWidth = 2;
       ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
     }
 
     // Labels only where one fits; a clipped label is worse than none.
     if (w > 64 && h > 22) {
-      ctx.fillStyle = "rgba(255,255,255,0.94)";
+      ctx.fillStyle = INK.label;
       ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
       ctx.textBaseline = "top";
       ctx.save();
@@ -183,7 +221,7 @@
       ctx.clip();
       ctx.fillText(item.name, x + 6, y + 5);
       if (h > 38) {
-        ctx.fillStyle = "rgba(255,255,255,0.7)";
+        ctx.fillStyle = INK.sublabel;
         ctx.fillText(
           item.sized ? formatBytes(item.sizeBytes) : t("treemap.sizeUnknown"),
           x + 6,
