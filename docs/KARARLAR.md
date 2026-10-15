@@ -20,3 +20,4 @@ Ayrıntılı mimar gerekçeleri: `docs/DECISIONS-NEEDED.md` ("Architect resoluti
 | K-011 | 2026-10-13 | AKTİF | İlk public sürüm 0.2.0 (0.1.0 hiç tag'lenmedi). Türkçe arayüz iddia edilmez (seçici yok). | - | kullanıcı |
 | K-012 | 2026-10-13 | AKTİF | CI GitHub windows-latest'te kalır (public repo = ücretsiz); ev sunucusu runner kullanılmaz. | - | kullanıcı |
 | K-013 | 2026-10-13 | AKTİF | Merge dışı her adım ajan için serbest; merge yalnız kullanıcı onayıyla. | - | kullanıcı |
+| K-014 | 2026-10-15 | AKTİF | SignPath Foundation başvurusu reddedildi (yıldız/fork/dış referans yetersiz). Ücretli SignPath alınmaz; sürümler şimdilik imzasız, SmartScreen/VT için README'de dürüst not + SHA256. Görünürlük artınca yeniden başvurulur. | - | kullanıcı, SignPath e-postası |

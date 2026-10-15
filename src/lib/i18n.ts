@@ -346,6 +346,19 @@ const en = {
   "module.restore-point.name": "Restore Point",
   "module.restore-point.description":
     "Create a Windows restore point before you change system settings.",
+  "legacyPanels.loading": "Reading the list of panels…",
+  "legacyPanels.group.system": "System",
+  "legacyPanels.group.hardware": "Hardware & devices",
+  "legacyPanels.group.network": "Network",
+  "legacyPanels.group.apps": "Apps & accounts",
+  "legacyPanels.group.diagnostics": "Diagnostics",
+  "legacyPanels.open": "Open",
+  "legacyPanels.unavailable": "Not on this edition of Windows.",
+  "legacyPanels.notice":
+    "These are Windows' own windows. WinKnife only opens them; some ask for administrator rights themselves.",
+  "module.legacy-panels.name": "Legacy Panels",
+  "module.legacy-panels.description":
+    "Open the classic Windows windows that Settings hides: Device Manager, Network Connections, Services and more.",
   "module.empty-folders.name": "Empty Folders",
   "module.empty-folders.description":
     "Find folders that contain no files at any depth, and move them to quarantine.",

@@ -764,6 +764,23 @@ export type CreateOutcome =
   | { state: "declined" }
   | { state: "timedOut" }
   | { state: "failed"; code: number };
+
+/* -------------------------------------------------------------------------
+ * modules/legacy_panels.rs
+ * ---------------------------------------------------------------------- */
+
+/** Section a legacy panel sits in. */
+export type PanelGroup = "system" | "hardware" | "network" | "apps" | "diagnostics";
+
+/** One `legacy_panels_list` entry. The UI sends back only the id. */
+export interface PanelInfo {
+  id: string;
+  group: PanelGroup;
+  name: string;
+  description: string;
+  /** False when the window is not on this edition of Windows. */
+  available: boolean;
+}
 /* -------------------------------------------------------------------------
  * modules/empty_folders.rs
  * ---------------------------------------------------------------------- */

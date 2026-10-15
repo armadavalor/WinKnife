@@ -25,6 +25,7 @@ import type {
   ExecReport,
   ModuleManifest,
   MoveWarning,
+  PanelInfo,
   PowerAction,
   PurgeReport,
   QuarantineBatch,
@@ -333,6 +334,20 @@ export function restorePointCreate(description: string): Promise<CreateOutcome> 
 /** Open Windows' own System Protection dialog. Only on a button click. */
 export function restorePointOpenSettings(): Promise<void> {
   return invoke<void>("restore_point_open_settings");
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — legacy panels (module spec 10)
+ * ---------------------------------------------------------------------- */
+
+/** The fixed catalogue with each entry's availability. Read-only. */
+export function legacyPanelsList(): Promise<PanelInfo[]> {
+  return invoke<PanelInfo[]>("legacy_panels_list");
+}
+
+/** Open one of Windows' own windows by id. Only on a button click. */
+export function legacyPanelsOpen(id: string): Promise<void> {
+  return invoke<void>("legacy_panels_open", { id });
 }
 
 /* -------------------------------------------------------------------------

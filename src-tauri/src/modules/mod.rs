@@ -41,6 +41,7 @@ register_modules! {
     keep_awake => keep_awake::KeepAwakeModule,
     empty_folders => empty_folders::EmptyFoldersModule,
     file_unlocker => file_unlocker::FileUnlockerModule,
+    legacy_panels => legacy_panels::LegacyPanelsModule,
 }
 
 /// Build the application's module registry.
@@ -120,6 +121,7 @@ mod tests {
             "keep-awake",
             "empty-folders",
             "file-unlocker",
+            "legacy-panels",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }

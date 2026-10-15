@@ -246,6 +246,17 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "restore_point_open_settings",
             args: json!({}),
         },
+        // Read-only: checks which System32 files exist.
+        Probe {
+            command: "legacy_panels_list",
+            args: json!({}),
+        },
+        // An unknown id is refused before the launcher is reached, and the
+        // real launcher is disarmed in this process anyway.
+        Probe {
+            command: "legacy_panels_open",
+            args: json!({ "id": "__wiring_probe__" }),
+        },
         // `manage_state` is asked for a dry run, so the engine holds a
         // recorder: started, observed, stopped, never touching the OS.
         Probe {

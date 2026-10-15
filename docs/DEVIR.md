@@ -23,7 +23,7 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 ## Sıradaki adım
 1. Demo GIF, sonra Codex for OSS başvurusu.
 2. winget PR'ı Microsoft onaylayınca birleşir; sonraki sürümler için `packaging/winget/README.md`.
-3. Kod imzalama (SmartScreen uyarısı + VT ML tespitleri), ör. SignPath Foundation (OSS ücretsiz).
+3. Kod imzalama (SmartScreen uyarısı + VT ML tespitleri): SignPath Foundation 2026-10-15 reddetti (görünürlük yetersiz, K-014). Şimdilik imzasız; görünürlük artınca yeniden başvur. Ücretli/ucuz yol: Certum Open Source sertifikası.
 
 ## Bilinen tuzaklar
 - 5 symlink testi lokal Developer Mode olmadan düşer (CI'da geçer). EFS testleri `WINKNIFE_EFS_TESTS=1` ile.

@@ -35,6 +35,7 @@
     unlock: "M5 11h14v10H5zM8 11V7a4 4 0 0 1 7.5-2M12 15v2",
     rocket:
       "M5 15l-2 6 6-2M9 19a7 7 0 0 1-4-4l7-7a9 9 0 0 1 8-3 9 9 0 0 1-3 8zM14.5 9.5h.01",
+    panels: "M3 4h18v16H3zM3 9h18M7 13h4M7 16h4M15 13h2M15 16h2",
     restore: "M3 12a9 9 0 1 0 2.6-6.4L3 8M3 3v5h5M12 7v5l3 2",
   };
 </script>

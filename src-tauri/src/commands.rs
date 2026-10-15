@@ -45,6 +45,7 @@ use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, DuplicateProgress, DuplicateScan};
 use crate::modules::empty_folders;
 use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
+use crate::modules::legacy_panels::{LegacyPanelsService, PanelInfo};
 use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
 use crate::modules::{startup, treemap};
@@ -1535,6 +1536,36 @@ pub fn restore_point_open_settings(
     service: State<'_, Arc<RestorePointService>>,
 ) -> Result<(), ApiError> {
     Ok(service.open_protection_settings()?)
+}
+
+/* -------------------------------------------------------------------------
+ * Legacy panels
+ * ---------------------------------------------------------------------- */
+
+/// The legacy-panels catalogue with each entry's availability. Read-only
+/// (module spec 10).
+///
+/// # Errors
+/// Infallible today.
+#[tauri::command]
+pub fn legacy_panels_list(
+    service: State<'_, Arc<LegacyPanelsService>>,
+) -> Result<Vec<PanelInfo>, ApiError> {
+    Ok(service.list())
+}
+
+/// Open one of Windows' own windows by catalogue id. Only ever on a button
+/// click; it changes nothing by itself.
+///
+/// # Errors
+/// Returns an error for an unknown id, a window missing on this edition, or a
+/// shell failure. Saying No at a UAC prompt is not an error.
+#[tauri::command]
+pub fn legacy_panels_open(
+    service: State<'_, Arc<LegacyPanelsService>>,
+    id: String,
+) -> Result<(), ApiError> {
+    Ok(service.open(&id)?)
 }
 
 /* -------------------------------------------------------------------------
