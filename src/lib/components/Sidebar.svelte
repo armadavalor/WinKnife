@@ -4,12 +4,14 @@
   the app can do.
 -->
 <script lang="ts">
+  import { getVersion } from "@tauri-apps/api/app";
+  import { onMount } from "svelte";
+
   import { page } from "$app/state";
 
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
   import { t, tModuleName } from "$lib/i18n";
   import type { ModuleManifest } from "$lib/types";
-  import { version as appVersion } from "../../../package.json";
 
   interface Props {
     /** Modules to list, in registry order. */
@@ -29,6 +31,16 @@
     onopenquarantine,
   }: Props = $props();
 
+  let version = $state<string | null>(null);
+
+  onMount(async () => {
+    try {
+      version = await getVersion();
+    } catch {
+      version = null;
+    }
+  });
+
   function isActive(href: string): boolean {
     return page.url.pathname === href;
   }
@@ -41,12 +53,32 @@
   class="flex w-60 shrink-0 flex-col gap-6 border-r border-surface-2 bg-surface-1 p-4"
   aria-label={t("nav.tools")}
 >
-  <div class="px-1">
-    <p class="text-base font-semibold tracking-tight text-ink">
-      {t("app.name")}
-    </p>
-    <p class="text-xs text-ink-faint">{t("app.tagline")}</p>
-  </div>
+  <a
+    href="/dashboard"
+    class="flex items-center gap-3 rounded-lg px-1 py-1 outline-none focus-visible:outline-2 focus-visible:outline-accent"
+    aria-label={t("app.name")}
+  >
+    <img
+      src="/favicon.png"
+      alt=""
+      width="32"
+      height="32"
+      class="size-8 shrink-0 rounded-lg"
+      draggable="false"
+    />
+    <div class="min-w-0 leading-tight">
+      <p class="truncate text-base font-semibold tracking-tight text-ink">
+        {t("app.name")}
+      </p>
+      {#if version}
+        <p class="text-[0.7rem] tabular-nums text-ink-faint">
+          {t("status.version", { version })}
+        </p>
+      {:else}
+        <p class="text-[0.7rem] text-ink-faint">{t("app.tagline")}</p>
+      {/if}
+    </div>
+  </a>
 
   <ul class="flex flex-col gap-1">
     <li>
@@ -122,9 +154,5 @@
         </span>
       {/if}
     </button>
-
-    <p class="mt-2 px-3 text-[0.7rem] text-ink-faint">
-      {t("status.version", { version: appVersion })}
-    </p>
   </div>
 </nav>

@@ -19,7 +19,7 @@
     formatDateTime,
     formatRemaining,
   } from "$lib/format";
-  import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { t, tDynamic, tModuleDescription, tModuleName } from "$lib/i18n";
   import { dashboardStore } from "$lib/stores/dashboard.svelte";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
@@ -35,18 +35,11 @@
   });
 
   function actionLabel(module: ModuleManifest): string {
-    switch (module.id) {
-      case "cleaner":
-        return t("cleaner.scan");
-      case "treemap":
-        return t("treemap.scan");
-      case "duplicates":
-        return t("duplicates.scan");
-      case "startup":
-        return t("dashboard.review");
-      default:
-        return t("module.open");
-    }
+    return tDynamic(`dashboard.action.${module.id}`, t("module.open"));
+  }
+
+  function statusText(module: ModuleManifest): string {
+    return tDynamic(`dashboard.status.${module.id}`, t("dashboard.status.default"));
   }
 
   const timer = $derived(store.summary?.timer.active ?? null);
@@ -64,7 +57,7 @@
       {/if}
       <button
         type="button"
-        class="rounded-lg bg-surface-3 px-3 py-1.5 text-sm transition-colors hover:bg-accent-soft"
+        class="btn-secondary"
         onclick={() => store.load()}
       >
         {t("dashboard.retry")}
@@ -166,13 +159,13 @@
               {:else if module.capabilities.hasScan}
                 {t("dashboard.neverRun")}
               {:else}
-                {t("dashboard.noScan")}
+                {statusText(module)}
               {/if}
             </span>
 
             <a
               href="/{module.id}"
-              class="mt-auto inline-block w-fit rounded-lg bg-accent-soft px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent hover:text-surface-0"
+              class="btn-primary mt-auto w-fit"
             >
               {actionLabel(module)}
             </a>

@@ -88,7 +88,7 @@
 
   {#if store.status.dryRun}
     <p
-      class="rounded-xl border border-risk-review/30 p-4 text-sm leading-relaxed text-risk-review"
+      class="rounded-xl border border-risk-review/30 bg-surface-1 p-4 text-sm leading-relaxed text-risk-review"
     >
       {t("shutdown.dryRunBanner")}
     </p>
@@ -96,7 +96,7 @@
 
   {#if store.error}
     <p
-      class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger"
+      class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger"
     >
       {store.error}
     </p>
@@ -126,7 +126,7 @@
 
     <button
       type="button"
-      class="mt-2 rounded-lg px-4 py-2 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      class="btn-ghost mt-2"
       disabled={!store.isArmed || store.busy}
       onclick={() => store.cancel()}
     >
@@ -165,7 +165,7 @@
         {#each presets as preset (preset.label)}
           <button
             type="button"
-            class="rounded-lg bg-surface-2 px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-3 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            class="btn-secondary px-3! py-1.5!"
             disabled={store.busy}
             onclick={() => request(preset.mode)}
           >
@@ -191,7 +191,7 @@
         />
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0 disabled:cursor-not-allowed disabled:opacity-40"
+          class="btn-primary px-3! py-1.5!"
           disabled={store.busy}
           onclick={scheduleFromClock}
         >

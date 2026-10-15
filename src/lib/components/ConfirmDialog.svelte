@@ -61,7 +61,7 @@
 
 {#if open}
   <div
-    class="fixed inset-0 z-40 flex items-center justify-center bg-surface-0/80 p-6"
+    class="fixed inset-0 z-40 flex items-center justify-center bg-scrim p-6"
   >
     <div
       bind:this={dialog}
@@ -101,14 +101,14 @@
       <div class="mt-6 flex justify-end gap-2">
         <button
           type="button"
-          class="rounded-lg px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          class="btn-ghost px-3! py-1.5!"
           onclick={oncancel}
         >
           {t("action.cancel")}
         </button>
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+          class="btn-primary px-3! py-1.5!"
           onclick={onconfirm}
         >
           {confirmLabel}

@@ -24,6 +24,65 @@
   --color-risk-safe: oklch(72% 0.14 150);
   --color-risk-review: oklch(80% 0.13 85);
   --color-risk-danger: oklch(68% 0.14 25);
+  /* Amber "take a look" tone (file unlocker, startup leftovers). */
+  --color-risk-warning: oklch(78% 0.13 60);
+
+  /* Text/icons on a solid accent fill (primary button hover). */
+  --color-on-accent: oklch(16% 0.006 265);
+  /* Dialog backdrop: darkens in every theme. */
+  --color-scrim: oklch(0% 0 0 / 0.6);
+}
+
+/*
+ * Themes. Graphite is the @theme block above (no attribute). The others only
+ * override the same variables, so no component carries theme-specific classes.
+ * Set by src/lib/stores/theme.svelte.ts.
+ */
+:root {
+  color-scheme: dark;
+  --grain-opacity: 0.035;
+  --glow-opacity: 0.35;
+}
+
+:root[data-theme="forest"] {
+  --color-surface-0: oklch(15% 0.014 158);
+  --color-surface-1: oklch(19% 0.016 158);
+  --color-surface-2: oklch(24% 0.018 158);
+  --color-surface-3: oklch(30% 0.02 158);
+  --color-ink: oklch(95% 0.008 150);
+  --color-ink-muted: oklch(73% 0.02 150);
+  --color-ink-faint: oklch(60% 0.025 150);
+  --color-accent: oklch(76% 0.11 182);
+  --color-accent-soft: oklch(36% 0.06 182);
+  --color-on-accent: oklch(15% 0.014 158);
+  --color-risk-safe: oklch(76% 0.14 140);
+  --color-risk-review: oklch(82% 0.13 85);
+  --color-risk-warning: oklch(80% 0.13 60);
+  --color-risk-danger: oklch(70% 0.15 25);
+  --grain-opacity: 0.045;
+  --glow-opacity: 0.4;
+}
+
+/* Light theme: the surface ladder inverts, each step keeps its role. */
+:root[data-theme="mist"] {
+  color-scheme: light;
+  --color-surface-0: oklch(96% 0.004 265);
+  --color-surface-1: oklch(98.5% 0.003 265);
+  --color-surface-2: oklch(92.5% 0.005 265);
+  --color-surface-3: oklch(87.5% 0.007 265);
+  --color-ink: oklch(22% 0.01 265);
+  --color-ink-muted: oklch(42% 0.012 265);
+  --color-ink-faint: oklch(50% 0.012 265);
+  --color-accent: oklch(48% 0.12 205);
+  --color-accent-soft: oklch(90% 0.05 205);
+  --color-on-accent: oklch(98.5% 0.005 205);
+  --color-risk-safe: oklch(50% 0.14 150);
+  --color-risk-review: oklch(52% 0.13 75);
+  --color-risk-warning: oklch(55% 0.15 55);
+  --color-risk-danger: oklch(52% 0.17 25);
+  --color-scrim: oklch(20% 0.01 265 / 0.35);
+  --grain-opacity: 0.06;
+  --glow-opacity: 0.6;
 }
 
 html,
@@ -44,4 +103,52 @@ body {
 :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+/*
+ * Background texture: film grain (inline SVG in +layout.svelte; a data: URI
+ * would be an image load and the CSP blocks it) under a soft accent glow.
+ */
+.bg-grain {
+  opacity: var(--grain-opacity);
+  mix-blend-mode: soft-light;
+}
+
+.bg-glow {
+  opacity: var(--glow-opacity);
+  background: radial-gradient(60% 45% at 50% -8%, var(--color-accent-soft) 0%, transparent 70%);
+}
+
+/* Buttons: one look per role, used by every route. */
+@utility btn-base {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-lg);
+  padding: 0.5rem 1rem;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  font-weight: var(--font-weight-medium);
+  transition: background-color 150ms, color 150ms, border-color 150ms;
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+@utility btn-primary {
+  @apply btn-base bg-accent-soft text-ink hover:enabled:bg-accent hover:enabled:text-on-accent;
+}
+
+@utility btn-secondary {
+  @apply btn-base bg-surface-3 text-ink hover:enabled:bg-accent-soft;
+}
+
+@utility btn-outline {
+  @apply btn-base border border-surface-3 text-ink hover:enabled:bg-surface-2;
+}
+
+@utility btn-ghost {
+  @apply btn-base text-ink-muted hover:enabled:bg-surface-2 hover:enabled:text-ink;
 }

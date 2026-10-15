@@ -58,7 +58,7 @@
 
   {#if store.error}
     <p
-      class="rounded-xl border border-risk-danger/30 p-4 text-sm text-risk-danger"
+      class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger"
     >
       {store.error}
     </p>
@@ -72,7 +72,7 @@
         <span class="text-ink-muted">{t("emptyFolders.rootLabel")}</span>
         <input
           type="text"
-          class="rounded-lg border border-surface-2 bg-surface-0 px-3 py-2 font-mono text-xs"
+          class="rounded-lg border border-surface-3 bg-surface-0 px-3 py-2 font-mono text-xs"
           placeholder="C:\Users\…"
           bind:value={store.root}
         />
@@ -81,7 +81,7 @@
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+          class="btn-primary"
           onclick={() => store.scan()}
         >
           {t("emptyFolders.scan")}
@@ -100,7 +100,7 @@
       </p>
       <button
         type="button"
-        class="self-start rounded-lg px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+        class="self-start btn-ghost px-3! py-1.5!"
         disabled={store.stopping}
         onclick={() => store.stop()}
       >
@@ -143,14 +143,14 @@
       <div class="flex gap-2">
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0"
+          class="btn-primary"
           onclick={() => quarantineStore.show()}
         >
           {t("cleaner.openQuarantine")}
         </button>
         <button
           type="button"
-          class="rounded-lg px-4 py-2 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          class="btn-ghost"
           onclick={() => store.reset()}
         >
           {t("emptyFolders.scanAgain")}
@@ -169,7 +169,7 @@
       </p>
       <button
         type="button"
-        class="rounded-lg px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        class="btn-ghost px-3! py-1.5!"
         onclick={() => store.reset()}
       >
         {t("emptyFolders.scanAgain")}
@@ -177,17 +177,17 @@
     </section>
 
     {#if result.cancelled}
-      <p class="rounded-xl border border-surface-2 p-4 text-xs text-ink-faint">
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
         {t("emptyFolders.cancelled")}
       </p>
     {/if}
     {#if result.unreadable > 0}
-      <p class="rounded-xl border border-surface-2 p-4 text-xs text-ink-faint">
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
         {t("emptyFolders.unreadable", { count: result.unreadable })}
       </p>
     {/if}
     {#if result.skippedProtected > 0}
-      <p class="rounded-xl border border-surface-2 p-4 text-xs text-ink-faint">
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
         {t("emptyFolders.skippedProtected", { count: result.skippedProtected })}
       </p>
     {/if}
@@ -198,14 +198,14 @@
       <div class="flex gap-2 text-xs">
         <button
           type="button"
-          class="rounded-lg px-3 py-1.5 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          class="btn-ghost px-3! py-1.5!"
           onclick={() => store.selectAll()}
         >
           {t("emptyFolders.selectAll")}
         </button>
         <button
           type="button"
-          class="rounded-lg px-3 py-1.5 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          class="btn-ghost px-3! py-1.5!"
           onclick={() => store.selectNone()}
         >
           {t("emptyFolders.selectNone")}
@@ -266,7 +266,7 @@
         </p>
         <button
           type="button"
-          class="rounded-lg bg-accent-soft px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent hover:text-surface-0 disabled:cursor-not-allowed disabled:opacity-40"
+          class="btn-primary"
           disabled={store.selected.size === 0}
           onclick={() => (confirming = true)}
         >

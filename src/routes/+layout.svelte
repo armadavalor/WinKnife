@@ -19,6 +19,7 @@
   import { t } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
+  import { theme } from "$lib/stores/theme.svelte";
 
   let { children } = $props();
 
@@ -26,6 +27,7 @@
   // whatever its body reads, and a store that reports its own progress would
   // then re-trigger the very call that moved it.
   onMount(() => {
+    theme.init();
     void moduleStore.load();
     void quarantineStore.reload();
     void openLaunchRoute();
@@ -70,7 +72,22 @@
   {t("nav.skipToContent")}
 </a>
 
-<div class="flex h-screen w-screen overflow-hidden">
+<div class="relative isolate flex h-screen w-screen overflow-hidden">
+  <!-- Decorative: accent glow, then film grain. Neither takes clicks or layout. -->
+  <div class="bg-glow pointer-events-none fixed inset-0 -z-10" aria-hidden="true"></div>
+  <svg class="bg-grain pointer-events-none fixed inset-0 -z-10 h-full w-full" aria-hidden="true" focusable="false">
+    <defs>
+      <filter id="wk-grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" stitchTiles="stitch" />
+        <feColorMatrix type="saturate" values="0" />
+      </filter>
+      <pattern id="wk-grain-tile" width="256" height="256" patternUnits="userSpaceOnUse">
+        <rect width="256" height="256" filter="url(#wk-grain)" />
+      </pattern>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#wk-grain-tile)" />
+  </svg>
+
   <Sidebar
     modules={moduleStore.modules}
     loading={moduleStore.status === "loading"}
