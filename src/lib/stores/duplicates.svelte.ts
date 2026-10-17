@@ -105,6 +105,9 @@ class DuplicatesStore {
   report = $state<ExecReport | null>(null);
   error = $state<string | null>(null);
 
+  /** Id of the scan in flight, learnt from its progress events. */
+  private runningScanId: string | null = null;
+
   /** Filter: extension class. */
   filterClass = $state<ExtensionClass>("all");
   /** Filter: smallest set size to show, in bytes. */
@@ -166,6 +169,7 @@ class DuplicatesStore {
     this.pct = null;
     this.currentPath = null;
     this.stopping = false;
+    this.runningScanId = null;
     this.selected = new Set();
     this.keeperOverrides = new Map();
     await this.attachProgress();
@@ -180,21 +184,21 @@ class DuplicatesStore {
       this.step = "idle";
     } finally {
       this.detachProgress();
+      this.runningScanId = null;
       this.stopping = false;
     }
   }
 
-  /** Ask the running scan to stop. */
+  /**
+   * Ask the running scan to stop. The id comes from the scan's own progress
+   * events, never from the previous result; a Stop pressed before the first
+   * event is sent as soon as that event names the scan.
+   */
   async stop(): Promise<void> {
-    const scanId = this.result?.scanId;
     this.stopping = true;
-    if (scanId) {
-      await cancelScan(scanId);
-      return;
+    if (this.runningScanId) {
+      await cancelScan(this.runningScanId);
     }
-    // The scan is still running, so its id has not come back yet. Rust hands the
-    // id over with the result; until then the only honest thing is to say we are
-    // stopping and let the in-flight scan finish its current file.
   }
 
   /** Toggle one copy. Keepers are never selectable. */
@@ -295,6 +299,11 @@ class DuplicatesStore {
     this.unlistenProgress = await onScanProgress((payload) => {
       if (payload.module !== "duplicates") {
         return;
+      }
+      const isFirstEvent = this.runningScanId === null;
+      this.runningScanId = payload.scanId;
+      if (isFirstEvent && this.stopping) {
+        void cancelScan(payload.scanId);
       }
       this.itemsScanned = payload.itemsScanned;
       this.currentPath = payload.currentPath;
