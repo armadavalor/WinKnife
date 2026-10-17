@@ -271,8 +271,17 @@ test("duplicates: finds the fixture's copy sets", async () => {
 });
 
 test("duplicates: Stop returns to idle", async () => {
-  await goTo("duplicates");
-  await click("button", "Scan again");
+  // The fixture scan ends before Stop renders, so scan a big folder through
+  // the treemap's `?root=` cross-link and Stop it once the walker names a path.
+  expect(BIG_DIR, "no big folder to scan; set WINKNIFE_QA_BIG_DIR");
+  const href = `/duplicates?root=${encodeURIComponent(BIG_DIR)}`;
+  await evaluate(
+    `(() => { const a = document.createElement("a"); a.href = ${q(href)}; ` +
+      `document.body.append(a); a.click(); a.remove(); return true; })()`,
+  );
+  await sleep(SETTLE_MS);
+  await click("main button", (await has("main button", "Scan again")) ? "Scan again" : "Find duplicates");
+  await waitFor("main *", BIG_DIR + "\\");
   await click("button", "Stop");
   await waitGone("button", "Stopping", null, STEP_TIMEOUT_MS);
   await waitForAny([["main button", "Find duplicates"], ["main button", "Scan again"]], STEP_TIMEOUT_MS);
