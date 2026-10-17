@@ -1878,3 +1878,23 @@ fallback use `<Icon>`.
 package, offline, CSP `img-src 'self'` untouched. Legacy panels use
 `app-window` (`monitor-cog` was too busy at 20px); empty folders use
 `folder-search`. Licence row added to `docs/LISANSLAR.md`.
+
+## 2026-10-17 — QA plan, dirty-machine fixture, Sandbox profile, CDP e2e
+
+**Built.** `docs/QA-PLAN.md`: module × scenario matrix (empty, huge, locked,
+access denied, long/unicode paths, links, cancel, undo, restart), each cell an
+e2e test, a `cargo test` name or "manual in Sandbox". `scripts/qa/`:
+`New-DirtyProfile.ps1` (fake profile with N Temp files, duplicate sets, empty
+tree, locked file, deny-ACE dir, junction loop and a junction into
+`C:\Windows`, unicode and >MAX_PATH names; refuses the real profile),
+`winknife.wsb` + `Start-QASandbox.ps1` + `sandbox-bootstrap.ps1` (read-only
+mapped installer, silent install, dirty profile, launch), and `e2e.mjs`, a
+CDP suite driving the installed app: cleaner → quarantine restore, empty
+folders, duplicates, treemap, keep awake, unlocker (with Stop where there is
+one) plus page-load smoke. New `e2e` job in `ci.yml`: PRs to main and manual
+dispatch only (`temp_files` input, 100000 = huge Temp).
+
+**Decisions.** Not on push to main: the job really cleans and restores on the
+runner. Duplicates Stop is `knownIssue` (xfail) until #38 is fixed. Audit of
+long operations that can spin silently recorded in QA-PLAN and filed as
+#37–#41; nothing fixed here, the cleaner hang is fixed separately.
