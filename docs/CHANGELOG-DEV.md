@@ -1926,3 +1926,29 @@ The lock probe stays per file; it now just runs in parallel.
 
 **Deferred.** The 81 MB IPC payload is sent in one piece. Streaming or paging
 it from the backend is a separate change.
+
+## 2026-10-18 — Fix: startup disable deadlock and "Not Responding" window
+
+**Fixed.** Turning off any Startup entry stayed on "Working" forever, and the
+next click froze the window.
+
+- **Deadlock.** `commands::execute` runs the executor inside `Database::with`.
+  `StartupControlAdapter::read`/`disable` then called `Database::with` again,
+  on a non-reentrant `std::sync::Mutex`, so they waited forever.
+  - `StartupControl` now takes the `&Connection` the executor already holds.
+  - The adapter keeps no database handle of its own.
+  - Gate 4 (re-read before disable) is unchanged.
+  - Regression test: `the_executor_adapter_works_inside_the_database_lock`. It
+    drives the adapter under the lock on a thread with a timeout.
+- **Frozen window.** 23 sync commands that wait on the database lock, the disk
+  or a registry mutex are now `#[tauri::command(async)]`. Before, they ran on
+  the window thread, so one stuck lock (above), or a long scan or restore,
+  froze the whole UI. The same applied when pressing Stop mid-scan.
+  - `tests/command_wiring.rs` now recognises the `(async)` attribute.
+- **Kept sync.** These stay on the UI thread on purpose, since they are instant
+  or shell launches:
+  - `list_modules`;
+  - `take_launch_route`;
+  - `reveal_in_explorer`;
+  - `restore_point_open_settings`;
+  - `legacy_panels_open`.

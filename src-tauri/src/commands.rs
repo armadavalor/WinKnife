@@ -13,9 +13,16 @@
 //! `Database` are two unrelated keys: registering one and asking for the other
 //! compiles clean and then fails on every single invocation with
 //! `state not managed for field ...`. That is why the database arrives here as
-//! `Arc<Database>` — the startup adapter holds a second handle, so the `Arc` is
-//! what gets registered. `tests/command_wiring.rs` invokes every registered
+//! `Arc<Database>` — the `Arc` is what gets registered. `tests/command_wiring.rs` invokes every registered
 //! command against a real app and fails if these ever drift apart again.
+//!
+//! # Threads
+//!
+//! A plain `#[tauri::command]` runs on the window's own thread. Anything that
+//! waits on the database lock, the disk or another process is
+//! `#[tauri::command(async)]` instead: while a batch or a scan holds the lock,
+//! a click that needed it used to wait there too and the window went
+//! "Not Responding".
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -292,7 +299,7 @@ pub async fn start_scan<R: Runtime>(
 ///
 /// # Errors
 /// Returns [`CoreError::UnknownScan`] when the scan is no longer retained.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_recommendations(
     scan_id: Uuid,
     store: State<'_, ScanStore>,
@@ -304,7 +311,7 @@ pub fn get_recommendations(
 ///
 /// # Errors
 /// See [`get_recommendations`].
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_summary(
     scan_id: Uuid,
     store: State<'_, ScanStore>,
@@ -385,7 +392,7 @@ pub async fn execute<R: Runtime>(
 ///
 /// # Errors
 /// Infallible today; keeps the shared `Result` shape.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cancel_scan(scan_id: Uuid, cancels: State<'_, CancelRegistry>) -> Result<bool, ApiError> {
     let stopped = cancels.cancel(scan_id);
     tracing::info!(scan = %scan_id, stopped, "cancel requested");
@@ -689,7 +696,7 @@ pub struct TreemapScanResult {
 ///
 /// # Errors
 /// Infallible today; keeps the shared `Result` shape.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn treemap_drives() -> Result<Vec<crate::core::platform::DriveInfo>, ApiError> {
     use crate::core::platform::Volumes;
     Ok(crate::core::platform::SystemVolumes.drives())
@@ -798,7 +805,7 @@ pub async fn treemap_scan<R: Runtime>(
 /// # Errors
 /// Returns an error if `root` is not a mappable local path, if `path` is not
 /// inside it, or if the cache cannot be read.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn treemap_children(
     root: PathBuf,
     path: PathBuf,
@@ -865,7 +872,7 @@ fn mappable_level(root: &Path, path: &Path) -> Result<(PathBuf, PathBuf), ApiErr
 ///
 /// # Errors
 /// Returns an error if the cache cannot be read.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn treemap_cached(
     root: PathBuf,
     db: State<'_, Arc<Database>>,
@@ -1096,7 +1103,7 @@ fn startup_recommendation(
 /// # Errors
 /// Returns an error when the entry is unknown, when Windows owns it, or when
 /// the change was refused (an `HKLM` entry needs elevation).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn startup_enable(
     source: crate::core::types::StartupSource,
     key: String,
@@ -1170,7 +1177,7 @@ pub struct DashboardSummary {
 ///
 /// # Errors
 /// Returns an error if the history or the quarantine ledger cannot be read.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn dashboard_summary(
     registry: State<'_, ModuleRegistry>,
     services: State<'_, Services>,
@@ -1206,7 +1213,7 @@ pub fn dashboard_summary(
 ///
 /// # Errors
 /// Returns an error if the settings table cannot be read.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_settings(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
@@ -1227,7 +1234,7 @@ pub fn get_settings(
 ///
 /// # Errors
 /// Returns an error if the settings could not be written.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_settings(
     settings_in: AppSettings,
     services: State<'_, Services>,
@@ -1323,7 +1330,7 @@ fn read_settings(
 ///
 /// # Errors
 /// Returns an error if the ledger cannot be read.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quarantine_list(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
@@ -1335,7 +1342,7 @@ pub fn quarantine_list(
 ///
 /// # Errors
 /// Returns an error if the ledger cannot be read.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quarantine_batch_items(
     batch_id: Uuid,
     services: State<'_, Services>,
@@ -1348,7 +1355,7 @@ pub fn quarantine_batch_items(
 ///
 /// # Errors
 /// Returns an error if the ledger cannot be read.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quarantine_stats(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
@@ -1381,7 +1388,7 @@ pub struct RestoreFailure {
 /// # Errors
 /// Returns an error only if the ledger cannot be read; per-item failures are
 /// in the report.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quarantine_restore<R: Runtime>(
     app: AppHandle<R>,
     batch_id: Uuid,
@@ -1403,7 +1410,7 @@ pub fn quarantine_restore<R: Runtime>(
 ///
 /// # Errors
 /// Returns [`CoreError::UnknownQuarantineItem`] for an unknown id.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quarantine_restore_item<R: Runtime>(
     app: AppHandle<R>,
     item_id: Uuid,
@@ -1419,7 +1426,7 @@ pub fn quarantine_restore_item<R: Runtime>(
 ///
 /// # Errors
 /// Returns an error if the ledger cannot be read.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quarantine_purge<R: Runtime>(
     app: AppHandle<R>,
     services: State<'_, Services>,
@@ -1437,7 +1444,7 @@ pub fn quarantine_purge<R: Runtime>(
 /// # Errors
 /// Returns [`CoreError::UnknownQuarantineItem`] for an id that is not held,
 /// and [`CoreError::Quarantine`] for an item whose restore was never refused.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quarantine_purge_item<R: Runtime>(
     app: AppHandle<R>,
     item_id: Uuid,
@@ -1480,7 +1487,7 @@ fn notify_quarantine_changed<R: Runtime>(
 /// Persist before arming. The other order left a live countdown running
 /// whenever the write failed, while the UI reported the failure and showed no
 /// timer — the worst of both (security review H4).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn shutdown_schedule(
     mode: ScheduleMode,
     action: PowerAction,
@@ -1506,7 +1513,7 @@ pub fn shutdown_schedule(
 ///
 /// # Errors
 /// Returns an error only if the setting could not be cleared.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn shutdown_cancel(
     timer: State<'_, Arc<ShutdownTimer>>,
     db: State<'_, Arc<Database>>,
@@ -1520,7 +1527,7 @@ pub fn shutdown_cancel(
 ///
 /// # Errors
 /// Infallible today; keeps the shared `Result` shape.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn shutdown_status(timer: State<'_, Arc<ShutdownTimer>>) -> Result<TimerStatus, ApiError> {
     Ok(timer.status(Utc::now()))
 }
@@ -1550,7 +1557,7 @@ pub fn take_launch_route(
 ///
 /// # Errors
 /// Infallible today; an unreadable registry is reported as `unknown`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_point_status(
     service: State<'_, Arc<RestorePointService>>,
 ) -> Result<RestorePointStatus, ApiError> {
@@ -1597,7 +1604,7 @@ pub fn restore_point_open_settings(
 ///
 /// # Errors
 /// Infallible today.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn legacy_panels_list(
     service: State<'_, Arc<LegacyPanelsService>>,
 ) -> Result<Vec<PanelInfo>, ApiError> {
@@ -1658,7 +1665,7 @@ pub async fn keep_awake_stop(
 ///
 /// # Errors
 /// Infallible today; keeps the shared `Result` shape.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn keep_awake_status(engine: State<'_, Arc<KeepAwake>>) -> Result<KeepAwakeStatus, ApiError> {
     Ok(engine.status())
 }
