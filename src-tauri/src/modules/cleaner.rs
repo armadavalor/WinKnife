@@ -19,7 +19,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use rayon::prelude::*;
 use uuid::Uuid;
 
 use crate::core::brain::{
@@ -133,7 +132,6 @@ pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) ->
     let mut output = ScanOutput::default();
     let mut progress = progress;
     let mut seen = 0u64;
-    let mut walks: Vec<SharedWalk<'_>> = Vec::new();
 
     for pack in ctx.packs {
         // Packs written for other tools (the empty-folders pack) share the
@@ -168,34 +166,31 @@ pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) ->
         // has been resolved and cleared against the hard gates.
         let (groups, refused) = plan_walks(pack, ctx.protected);
         output.skipped_rules.extend(refused);
-        share_walks(&mut walks, pack, groups);
-    }
 
-    for walk in &walks {
-        let summary = scanner::walk(&walk.root, ctx.cancel, &mut |entry| {
-            seen += 1;
-            if let Some(sink) = progress.as_deref_mut() {
-                sink(seen, &entry.path);
-            }
-            // Packs in pack order, rules in declaration order, and the first
-            // one to claim an entry wins — what one walk per pack plus
-            // `dedupe_by_path`'s "first pack wins" used to add up to.
-            'claim: for (pack, rules) in &walk.claims {
-                for held in rules {
-                    let match_path = held.match_path(&entry.path, &walk.root);
+        for group in &groups {
+            let summary = scanner::walk(&group.root, ctx.cancel, &mut |entry| {
+                seen += 1;
+                if let Some(sink) = progress.as_deref_mut() {
+                    sink(seen, &entry.path);
+                }
+                // Rules sharing a root are tried in declaration order and the
+                // first one to claim an entry wins, which is what the walk-per-
+                // rule loop plus `dedupe_by_path` used to add up to.
+                for held in &group.rules {
+                    let match_path = held.match_path(&entry.path, &group.root);
                     if let Some(finding) =
                         finding_for(entry, &match_path, held.rule, pack, ctx.now)
                     {
                         output.findings.push(finding);
-                        break 'claim;
+                        break;
                     }
                 }
+            });
+            output.unreadable.extend(summary.unreadable);
+            output.cancelled |= summary.cancelled;
+            if output.cancelled {
+                return output;
             }
-        });
-        output.unreadable.extend(summary.unreadable);
-        output.cancelled |= summary.cancelled;
-        if output.cancelled {
-            return output;
         }
     }
 
@@ -205,51 +200,6 @@ pub fn scan(ctx: &CleanerContext<'_>, progress: Option<ScanProgressSink<'_>>) ->
     output
 }
 
-/// One directory walked once for every pack that points at it.
-///
-/// `%TEMP%` is a root of three shipped packs, and on a full temp folder each
-/// extra walk was ten seconds of reading the same listing again. Each pack's
-/// own [`plan_walks`] still decides what that pack may walk; this only folds
-/// the walks the packs were already allowed.
-struct SharedWalk<'a> {
-    /// The root as the first pack to claim it spelled it.
-    root: PathBuf,
-    /// The canonical identity [`plan_walks`] folded on.
-    identity: String,
-    /// Every pack walking this root with its rules, in pack order.
-    claims: Vec<(&'a RulePack, Vec<GroupRule<'a>>)>,
-}
-
-/// Merge one pack's walk groups into the shared walks, folding on the same
-/// canonical identity [`plan_walks`] folds on inside a pack.
-fn share_walks<'a>(walks: &mut Vec<SharedWalk<'a>>, pack: &'a RulePack, groups: Vec<WalkGroup<'a>>) {
-    for group in groups {
-        let Some(walk) = walks.iter_mut().find(|walk| walk.identity == group.identity) else {
-            walks.push(SharedWalk {
-                root: group.root,
-                identity: group.identity,
-                claims: vec![(pack, group.rules)],
-            });
-            continue;
-        };
-        // Walked under the first pack's spelling, so a pack spelling it
-        // differently keeps its own anchor for its globs (review M14), exactly
-        // as a folded rule inside one pack does.
-        let spelled_alike = CanonicalPath::lexical(&walk.root) == CanonicalPath::lexical(&group.root);
-        let rules = group
-            .rules
-            .into_iter()
-            .map(|held| GroupRule {
-                own_root: held
-                    .own_root
-                    .or_else(|| (!spelled_alike).then(|| group.root.clone())),
-                rule: held.rule,
-            })
-            .collect();
-        walk.claims.push((pack, rules));
-    }
-}
-
 /// One directory to walk and the rules that asked for it.
 struct WalkGroup<'a> {
     /// The root exactly as the *first* rule spelled it. The canonical form
@@ -257,8 +207,6 @@ struct WalkGroup<'a> {
     /// because the globs were compiled against that spelling and would stop
     /// matching if a junction rewrote it.
     root: PathBuf,
-    /// The canonical identity the fold keyed on.
-    identity: String,
     /// Rules whose roots resolve to this same directory, in declaration order.
     rules: Vec<GroupRule<'a>>,
 }
@@ -367,10 +315,9 @@ fn plan_walks<'a>(pack: &'a RulePack, protected: &ProtectedPaths) -> (Vec<WalkGr
                     groups[index].rules.push(GroupRule { rule, own_root });
                 }
                 None => {
-                    by_identity.insert(identity.clone(), groups.len());
+                    by_identity.insert(identity, groups.len());
                     groups.push(WalkGroup {
                         root: root.clone(),
-                        identity,
                         rules: vec![GroupRule {
                             rule,
                             own_root: None,
@@ -548,128 +495,54 @@ pub fn analyze(findings: &[Finding], brain: &Brain) -> Vec<Recommendation> {
 /// [`analyze`] with the reference instant injected, so an age-sensitive test is
 /// not at the mercy of when it runs.
 pub fn analyze_at(findings: &[Finding], brain: &Brain, now: DateTime<Utc>) -> Vec<Recommendation> {
-    analyze_with(findings, brain, now, &CancellationToken::new(), None).recommendations
-}
-
-/// Progress callback for [`analyze_with`]: findings analysed so far, how many
-/// there are in all, and the path just analysed. Throttling is the caller's job.
-pub type AnalyzeProgressSink<'a> = &'a mut dyn FnMut(u64, u64, &Path);
-
-/// What [`analyze_with`] produced.
-#[derive(Debug, Default)]
-pub struct AnalyzeOutput {
-    /// One per analysed finding that passed its own invariants.
-    pub recommendations: Vec<Recommendation>,
-    /// How many findings, from the front of the slice, were analysed. Equal to
-    /// the slice length unless the run was cancelled.
-    pub analyzed: usize,
-    /// Whether the run stopped early.
-    pub cancelled: bool,
-}
-
-/// Findings analysed between two cancellation checks and progress ticks.
-///
-/// Each finding costs a canonicalisation and a lock probe — a few hundred
-/// microseconds on a real disk with an antivirus filter in the way — so a
-/// chunk this size answers a cancel within a fraction of a second while
-/// keeping the per-chunk overhead negligible.
-const ANALYZE_CHUNK: usize = 256;
-
-/// [`analyze_at`], cancellable and reporting progress.
-///
-/// The gates are the same per-finding gates as ever (path refusal, then the
-/// lock probe, then the rule): the work is spread over a thread pool in
-/// chunks, not reduced. On cancel, the findings *before* `analyzed` all have
-/// their recommendation and the rest were never looked at; the caller keeps
-/// only the analysed prefix, so nothing reaches the review screen unjudged.
-pub fn analyze_with(
-    findings: &[Finding],
-    brain: &Brain,
-    now: DateTime<Utc>,
-    cancel: &CancellationToken,
-    progress: Option<AnalyzeProgressSink<'_>>,
-) -> AnalyzeOutput {
     let rules_by_id = index_rules(brain);
-    let total = findings.len() as u64;
-    let mut progress = progress;
-    let mut output = AnalyzeOutput {
-        recommendations: Vec::with_capacity(findings.len()),
-        ..AnalyzeOutput::default()
-    };
+    let mut recommendations = Vec::with_capacity(findings.len());
 
-    for chunk in findings.chunks(ANALYZE_CHUNK) {
-        if cancel.is_cancelled() {
-            output.cancelled = true;
-            break;
-        }
-        let judged: Vec<Option<Recommendation>> = chunk
-            .par_iter()
-            .map(|finding| recommend(finding, brain, &rules_by_id, now))
-            .collect();
-        output.recommendations.extend(judged.into_iter().flatten());
-        output.analyzed += chunk.len();
+    for finding in findings {
+        let matched = rule_key(finding).and_then(|key| rules_by_id.get(&key).copied());
+        let verdict = brain.classify_finding_with(finding, matched, &signals_for(finding, now));
 
-        if let (Some(sink), Some(last)) = (progress.as_deref_mut(), chunk.last()) {
-            sink(output.analyzed as u64, total, &last.path);
-        }
-    }
+        // The red bucket carries no action, and `Recommendation::new` refuses
+        // any other combination — that invariant is the last line of defence.
+        let action = if verdict.bucket.is_actionable() {
+            verdict.action
+        } else {
+            Action::InfoOnly
+        };
+        let savings = if action.is_mutating() {
+            finding.size_bytes
+        } else {
+            0
+        };
 
-    output
-}
+        // The machine-checkable half of the reason. A finding the walk produced
+        // always names the rule that matched it; a finding that somehow does not
+        // can only ever be informational, which is what the executor's gate 1
+        // then enforces (architect addition A, phase 3).
+        let justification = match rule_key(finding) {
+            Some((pack_id, rule_id)) => Justification::Rule { pack_id, rule_id },
+            None => Justification::Informational,
+        };
 
-/// The one recommendation for one finding, or `None` if it failed its own
-/// invariants (logged, never silently).
-fn recommend(
-    finding: &Finding,
-    brain: &Brain,
-    rules_by_id: &BTreeMap<(String, String), &CompiledRule>,
-    now: DateTime<Utc>,
-) -> Option<Recommendation> {
-    let key = rule_key(finding);
-    let matched = key.as_ref().and_then(|key| rules_by_id.get(key).copied());
-    let verdict = brain.classify_finding_with(finding, matched, &signals_for(finding, now));
-
-    // The red bucket carries no action, and `Recommendation::new` refuses
-    // any other combination — that invariant is the last line of defence.
-    let action = if verdict.bucket.is_actionable() {
-        verdict.action
-    } else {
-        Action::InfoOnly
-    };
-    let savings = if action.is_mutating() {
-        finding.size_bytes
-    } else {
-        0
-    };
-
-    // The machine-checkable half of the reason. A finding the walk produced
-    // always names the rule that matched it; a finding that somehow does not
-    // can only ever be informational, which is what the executor's gate 1
-    // then enforces (architect addition A, phase 3).
-    let justification = match key {
-        Some((pack_id, rule_id)) => Justification::Rule { pack_id, rule_id },
-        None => Justification::Informational,
-    };
-
-    match Recommendation::new(
-        vec![finding.id],
-        verdict.bucket,
-        verdict.confidence,
-        action,
-        verdict.reason,
-        savings,
-        justification,
-    ) {
-        Ok(rec) => Some(rec),
-        Err(err) => {
-            tracing::error!(
+        match Recommendation::new(
+            vec![finding.id],
+            verdict.bucket,
+            verdict.confidence,
+            action,
+            verdict.reason,
+            savings,
+            justification,
+        ) {
+            Ok(rec) => recommendations.push(rec),
+            Err(err) => tracing::error!(
                 path = %finding.path.display(),
                 error = %err,
                 "dropped a recommendation that failed its own invariants"
-            );
-            None
+            ),
         }
     }
+
+    recommendations
 }
 
 /// What the filesystem says about one finding, for the brain's step 3.
@@ -718,16 +591,8 @@ fn rule_key(finding: &Finding) -> Option<(String, String)> {
 /// spelled differently would otherwise both offer the same file, and the user
 /// would be asked to approve it twice.
 fn dedupe_by_path(findings: &mut Vec<Finding>) {
-    // Resolving is a filesystem round trip per finding — 13 s for 100 000 on
-    // one thread — so the keys are computed in parallel. The keep-or-drop pass
-    // stays sequential: "first one wins" is an ordering promise.
-    let keys: Vec<String> = findings
-        .par_iter()
-        .map(|finding| CanonicalPath::resolved(&finding.path).key())
-        .collect();
-    let mut seen = std::collections::HashSet::with_capacity(keys.len());
-    let mut keys = keys.into_iter();
-    findings.retain(|_| keys.next().is_some_and(|key| seen.insert(key)));
+    let mut seen = std::collections::HashSet::new();
+    findings.retain(|finding| seen.insert(CanonicalPath::resolved(&finding.path).key()));
 }
 
 /// Summary numbers for the header line after a scan.
@@ -1728,70 +1593,6 @@ mod tests {
         assert_eq!(last, ticks, "the count must be monotonic");
     }
 
-    /// The fixture's findings repeated until they span several analysis
-    /// chunks, so a cancel can land between two of them.
-    fn many_findings(fixture: &Fixture) -> Vec<Finding> {
-        let bin = StubRecycleBin::default();
-        let one_pass = run(fixture, &bin).findings;
-        assert!(!one_pass.is_empty());
-        one_pass
-            .iter()
-            .cycle()
-            .take(ANALYZE_CHUNK * 2 + 1)
-            .cloned()
-            .collect()
-    }
-
-    #[test]
-    fn analysis_reports_progress_up_to_the_total_and_matches_the_plain_run() {
-        let fixture = Fixture::new();
-        let findings = many_findings(&fixture);
-        let brain = fixture.brain(fixture.packs());
-        let now = Utc::now();
-        let mut ticks: Vec<(u64, u64)> = Vec::new();
-        let mut sink = |done: u64, total: u64, _: &Path| ticks.push((done, total));
-
-        let output = analyze_with(&findings, &brain, now, &CancellationToken::new(), Some(&mut sink));
-
-        let total = findings.len() as u64;
-        assert!(!output.cancelled);
-        assert_eq!(output.analyzed, findings.len());
-        assert_eq!(ticks.len(), 3, "one tick per chunk");
-        assert!(ticks.windows(2).all(|pair| pair[0].0 < pair[1].0), "monotonic");
-        assert_eq!(ticks.last(), Some(&(total, total)));
-        // Parallel, but not reordered: the same verdicts in the same order.
-        let plain = analyze_at(&findings, &brain, now);
-        let ids = |recs: &[Recommendation]| {
-            recs.iter()
-                .map(|rec| (rec.finding_ids.clone(), rec.risk))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(ids(&output.recommendations), ids(&plain));
-    }
-
-    #[test]
-    fn cancelling_analysis_keeps_only_the_judged_prefix() {
-        let fixture = Fixture::new();
-        let findings = many_findings(&fixture);
-        let brain = fixture.brain(fixture.packs());
-        let cancel = CancellationToken::new();
-        let mut sink = |_: u64, _: u64, _: &Path| cancel.cancel();
-
-        let output = analyze_with(&findings, &brain, Utc::now(), &cancel, Some(&mut sink));
-
-        assert!(output.cancelled);
-        assert_eq!(output.analyzed, ANALYZE_CHUNK, "stops at the next chunk boundary");
-        let judged: std::collections::HashSet<Uuid> =
-            findings[..output.analyzed].iter().map(|f| f.id).collect();
-        assert!(
-            output
-                .recommendations
-                .iter()
-                .all(|rec| rec.finding_ids.iter().all(|id| judged.contains(id))),
-            "nothing past the cancel point may carry a verdict"
-        );
-    }
-
     #[test]
     fn a_pack_whose_variable_is_unset_is_reported_not_hidden() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2104,51 +1905,6 @@ mod tests {
                 entry.display(),
                 held.own_root,
             );
-        }
-    }
-
-    /// Three shipped packs point at `%TEMP%`. Each walked it separately, which
-    /// on a 100 000-file temp folder was ten seconds per extra walk; they now
-    /// share one walk, in pack order, so "first pack wins" still holds.
-    #[test]
-    fn packs_naming_the_same_folder_share_one_walk_in_pack_order() {
-        let fixture = Fixture::new();
-        let packs = fixture.packs();
-        let protected = fixture.protected();
-        let mut walks = Vec::new();
-        for pack in packs.iter().filter(|pack| pack.spec.module == CLEANER_MODULE_ID) {
-            let (groups, _) = plan_walks(pack, &protected);
-            share_walks(&mut walks, pack, groups);
-        }
-
-        let mut identities: Vec<&str> = walks.iter().map(|walk| walk.identity.as_str()).collect();
-        let walked = identities.len();
-        identities.sort_unstable();
-        identities.dedup();
-        assert_eq!(identities.len(), walked, "no folder may be walked twice");
-
-        let shared = walks
-            .iter()
-            .find(|walk| walk.claims.len() > 1)
-            .expect("the fixture's temp folder is a root of more than one pack");
-        let order: Vec<usize> = shared
-            .claims
-            .iter()
-            .map(|(pack, _)| packs.iter().position(|p| p.id() == pack.id()).expect("known pack"))
-            .collect();
-        assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "claims follow pack order");
-        for (_, rules) in &shared.claims {
-            let entry = shared.root.join("probe.tmp");
-            for held in rules {
-                let candidate = held.match_path(&entry, &shared.root);
-                assert!(
-                    CanonicalPath::lexical(&candidate).is_within(&CanonicalPath::lexical(
-                        held.own_root.as_deref().unwrap_or(&shared.root)
-                    )),
-                    "`{}` must see the walked path in its own spelling",
-                    held.rule.spec.id
-                );
-            }
         }
     }
 

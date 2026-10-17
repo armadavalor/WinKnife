@@ -253,6 +253,9 @@ test("empty folders: Stop on a big folder", async () => {
   if (await has("button", "Scan again")) await click("button", "Scan again");
   await setInput('main input[type="text"]', BIG_DIR);
   await click("button", "Find empty folders");
+  // Stop before the first progress event is a no-op (audit A9); wait for the
+  // walker's current path so this tests Stop itself.
+  await waitFor("main *", BIG_DIR + "\\");
   await click("button", "Stop");
   await waitFor("*", "The scan was stopped early", null, STEP_TIMEOUT_MS);
 });
