@@ -32,6 +32,7 @@ use tauri::{AppHandle, Runtime, State};
 use uuid::Uuid;
 
 use crate::core::brain::Brain;
+use crate::core::busy::Operation;
 use crate::core::db::Database;
 use crate::core::error::{ApiError, CoreError};
 use crate::core::events::{
@@ -56,6 +57,55 @@ use crate::modules::legacy_panels::{LegacyPanelsService, PanelInfo};
 use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
 use crate::modules::{startup, treemap};
+
+/// Run a sync command body, turning a panic into an `internal` [`ApiError`].
+///
+/// Without this a panic in a command never answers the WebView: the page that
+/// awaited the call spins forever (issue #40). Every command body runs inside
+/// this or [`guarded_async`]; `tests/panic_and_busy.rs` checks that.
+pub fn guarded<T>(
+    command: &'static str,
+    body: impl FnOnce() -> Result<T, ApiError>,
+) -> Result<T, ApiError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(body))
+        .unwrap_or_else(|payload| Err(panic_error(command, payload.as_ref())))
+}
+
+/// The async twin of [`guarded`]: each poll of `body` runs under
+/// `catch_unwind`, so a panic anywhere in the future answers with an error
+/// instead of killing the task that owns the IPC response.
+pub async fn guarded_async<T, F>(command: &'static str, body: F) -> Result<T, ApiError>
+where
+    F: std::future::Future<Output = Result<T, ApiError>>,
+{
+    let mut body = std::pin::pin!(body);
+    std::future::poll_fn(|cx| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body.as_mut().poll(cx)))
+            .unwrap_or_else(|payload| {
+                std::task::Poll::Ready(Err(panic_error(command, payload.as_ref())))
+            })
+    })
+    .await
+}
+
+/// The error a caught panic becomes. The panic text goes to the log and to
+/// `detail`; the message stays readable.
+fn panic_error(command: &'static str, payload: &(dyn std::any::Any + Send)) -> ApiError {
+    let text = payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-text panic payload".to_owned());
+    tracing::error!(command, panic = %text, "command panicked");
+    ApiError::new(
+        "internal",
+        format!(
+            "WinKnife hit an internal error while running `{command}`. \
+             The operation stopped; see the log for details."
+        ),
+    )
+    .with_detail(text)
+}
 
 /// Everything the settings page reads and writes, in one round trip.
 ///
@@ -144,7 +194,7 @@ pub struct Services {
 /// the UI's error handling does not change when it grows one.
 #[tauri::command]
 pub fn list_modules(registry: State<'_, ModuleRegistry>) -> Result<Vec<ModuleManifest>, ApiError> {
-    Ok(registry.manifests())
+    guarded("list_modules", || Ok(registry.manifests()))
 }
 
 /* -------------------------------------------------------------------------
@@ -166,133 +216,136 @@ pub async fn start_scan<R: Runtime>(
     db: State<'_, Arc<Database>>,
     cancels: State<'_, CancelRegistry>,
 ) -> Result<ScanResult, ApiError> {
-    if module_id != "cleaner" {
-        return Err(CoreError::UnknownModule(module_id).into());
-    }
+    guarded_async("start_scan", async {
+        if module_id != "cleaner" {
+            return Err(CoreError::UnknownModule(module_id).into());
+        }
 
-    // Which packs run is the user's decision, re-read per scan so a change on
-    // the settings page takes effect on the next scan rather than the next
-    // restart.
-    let settings: cleaner::CleanerSettings = db
-        .with(|conn| settings::get_module(conn, "cleaner"))?
-        .unwrap_or_default();
+        // Which packs run is the user's decision, re-read per scan so a change on
+        // the settings page takes effect on the next scan rather than the next
+        // restart.
+        let settings: cleaner::CleanerSettings = db
+            .with(|conn| settings::get_module(conn, "cleaner"))?
+            .unwrap_or_default();
 
-    let scan_id = Uuid::new_v4();
-    let started_at = Utc::now();
-    let cancel = cancels.start(scan_id);
-    let mut throttle = ProgressThrottle::new();
-
-    let output = {
-        let mut emit = |items: u64, path: &std::path::Path| {
-            if !throttle.should_emit() {
-                return;
-            }
-            let payload = ScanProgress {
-                scan_id,
-                module: module_id.clone(),
-                items_scanned: items,
-                current_path: Some(path.display().to_string()),
-                pct: None,
-                items_total: None,
-            };
-            if let Err(err) = events::emit_scan_progress(&app, &payload) {
-                tracing::debug!(error = %err, "scan progress event was not delivered");
-            }
-        };
-
-        cleaner::scan(
-            &CleanerContext {
-                packs: services.brain.packs(),
-                settings: &settings,
-                protected: services.brain.protected_paths(),
-                recycle_bin: services.recycle_bin.as_ref(),
-                now: Utc::now(),
-                cancel: &cancel,
-            },
-            Some(&mut emit),
-        )
-    };
-
-    tracing::info!(
-        scan = %scan_id,
-        findings = output.findings.len(),
-        cancelled = output.cancelled,
-        "scan walk finished, analysing"
-    );
-
-    // Judging every finding is the long half on a full `%TEMP%` (a path
-    // check and a lock probe each), so it reports progress against a known
-    // total and stays cancellable: the token is only released after it.
-    let analysed = {
+        let scan_id = Uuid::new_v4();
+        let started_at = Utc::now();
+        let cancel = cancels.start(scan_id);
         let mut throttle = ProgressThrottle::new();
-        let mut emit = |done: u64, total: u64, path: &Path| {
-            // The final tick always goes out; the rest are throttled.
-            if done != total && !throttle.should_emit() {
-                return;
-            }
-            let payload = ScanProgress {
-                scan_id,
-                module: module_id.clone(),
-                items_scanned: done,
-                current_path: Some(path.display().to_string()),
-                pct: percent(done, total),
-                items_total: Some(total),
+
+        let output = {
+            let mut emit = |items: u64, path: &std::path::Path| {
+                if !throttle.should_emit() {
+                    return;
+                }
+                let payload = ScanProgress {
+                    scan_id,
+                    module: module_id.clone(),
+                    items_scanned: items,
+                    current_path: Some(path.display().to_string()),
+                    pct: None,
+                    items_total: None,
+                };
+                if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                    tracing::debug!(error = %err, "scan progress event was not delivered");
+                }
             };
-            if let Err(err) = events::emit_scan_progress(&app, &payload) {
-                tracing::debug!(error = %err, "scan progress event was not delivered");
-            }
+
+            cleaner::scan(
+                &CleanerContext {
+                    packs: services.brain.packs(),
+                    settings: &settings,
+                    protected: services.brain.protected_paths(),
+                    recycle_bin: services.recycle_bin.as_ref(),
+                    now: Utc::now(),
+                    cancel: &cancel,
+                },
+                Some(&mut emit),
+            )
         };
-        cleaner::analyze_with(
-            &output.findings,
-            &services.brain,
-            Utc::now(),
-            &cancel,
-            Some(&mut emit),
-        )
-    };
 
-    cancels.finish(scan_id);
+        tracing::info!(
+            scan = %scan_id,
+            findings = output.findings.len(),
+            cancelled = output.cancelled,
+            "scan walk finished, analysing"
+        );
 
-    // On a stop, only the judged prefix is kept: a finding without its
-    // recommendation must never reach the review screen.
-    let mut findings = output.findings;
-    findings.truncate(analysed.analyzed);
-    let result = ScanResult {
-        scan_id,
-        module: module_id.clone(),
-        findings,
-        recommendations: analysed.recommendations,
-        skipped_rules: output.skipped_rules,
-        cancelled: output.cancelled || analysed.cancelled,
-    };
+        // Judging every finding is the long half on a full `%TEMP%` (a path
+        // check and a lock probe each), so it reports progress against a known
+        // total and stays cancellable: the token is only released after it.
+        let analysed = {
+            let mut throttle = ProgressThrottle::new();
+            let mut emit = |done: u64, total: u64, path: &Path| {
+                // The final tick always goes out; the rest are throttled.
+                if done != total && !throttle.should_emit() {
+                    return;
+                }
+                let payload = ScanProgress {
+                    scan_id,
+                    module: module_id.clone(),
+                    items_scanned: done,
+                    current_path: Some(path.display().to_string()),
+                    pct: percent(done, total),
+                    items_total: Some(total),
+                };
+                if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                    tracing::debug!(error = %err, "scan progress event was not delivered");
+                }
+            };
+            cleaner::analyze_with(
+                &output.findings,
+                &services.brain,
+                Utc::now(),
+                &cancel,
+                Some(&mut emit),
+            )
+        };
 
-    tracing::info!(
-        scan = %scan_id,
-        findings = result.findings.len(),
-        unreadable = output.unreadable.len(),
-        cancelled = result.cancelled,
-        "scan finished"
-    );
+        cancels.finish(scan_id);
 
-    remember(
-        &db,
-        scan_id,
-        "cleaner",
-        started_at,
-        result.findings.len() as u64,
-        result.safe_bytes() + result.review_bytes(),
-        result.cancelled,
-    );
+        // On a stop, only the judged prefix is kept: a finding without its
+        // recommendation must never reach the review screen.
+        let mut findings = output.findings;
+        findings.truncate(analysed.analyzed);
+        let result = ScanResult {
+            scan_id,
+            module: module_id.clone(),
+            findings,
+            recommendations: analysed.recommendations,
+            skipped_rules: output.skipped_rules,
+            cancelled: output.cancelled || analysed.cancelled,
+        };
 
-    let done = ScanDone {
-        scan_id,
-        module: module_id,
-        finding_count: result.findings.len() as u64,
-    };
-    let _ = events::emit_scan_done(&app, &done);
+        tracing::info!(
+            scan = %scan_id,
+            findings = result.findings.len(),
+            unreadable = output.unreadable.len(),
+            cancelled = result.cancelled,
+            "scan finished"
+        );
 
-    store.insert(result.clone());
-    Ok(result)
+        remember(
+            &db,
+            scan_id,
+            "cleaner",
+            started_at,
+            result.findings.len() as u64,
+            result.safe_bytes() + result.review_bytes(),
+            result.cancelled,
+        );
+
+        let done = ScanDone {
+            scan_id,
+            module: module_id,
+            finding_count: result.findings.len() as u64,
+        };
+        let _ = events::emit_scan_done(&app, &done);
+
+        store.insert(result.clone());
+        Ok(result)
+    })
+    .await
 }
 
 /// Fetch a scan the UI already ran.
@@ -304,7 +357,7 @@ pub fn get_recommendations(
     scan_id: Uuid,
     store: State<'_, ScanStore>,
 ) -> Result<ScanResult, ApiError> {
-    Ok(store.get(scan_id)?)
+    guarded("get_recommendations", || Ok(store.get(scan_id)?))
 }
 
 /// Green/yellow/red totals for the header line after a scan.
@@ -316,8 +369,10 @@ pub fn scan_summary(
     scan_id: Uuid,
     store: State<'_, ScanStore>,
 ) -> Result<CleanerSummary, ApiError> {
-    let scan = store.get(scan_id)?;
-    Ok(cleaner::summarise(&scan.recommendations))
+    guarded("scan_summary", || {
+        let scan = store.get(scan_id)?;
+        Ok(cleaner::summarise(&scan.recommendations))
+    })
 }
 
 /// Apply the recommendations the user approved.
@@ -342,47 +397,52 @@ pub async fn execute<R: Runtime>(
     store: State<'_, ScanStore>,
     db: State<'_, Arc<Database>>,
 ) -> Result<ExecReport, ApiError> {
-    let scan = store.get(scan_id)?;
-    let units = executor::plan(&approved, &scan.recommendations, &scan.findings);
+    guarded_async("execute", async {
+        // Before the database lock: a second click must be refused, not queued.
+        let _busy = services.quarantine.begin(Operation::Clean)?;
+        let scan = store.get(scan_id)?;
+        let units = executor::plan(&approved, &scan.recommendations, &scan.findings);
 
-    let mut throttle = ProgressThrottle::new();
-    let module = scan.module.clone();
-    let report = db.with(|conn| {
-        let env = ExecEnvironment {
-            quarantine: &services.quarantine,
-            conn,
-            brain: &services.brain,
-            recycle_bin: services.recycle_bin.as_ref(),
-            startup: services.startup.as_ref(),
-        };
-        let mut emit = |done: u64, total: u64, finding: &crate::core::types::Finding| {
-            // The final tick always goes out; the rest are throttled.
-            if done != total && !throttle.should_emit() {
-                return;
-            }
-            let payload = ExecProgress {
-                scan_id,
-                module: module.clone(),
-                items_done: done,
-                items_total: total,
-                current_path: Some(finding.path.display().to_string()),
+        let mut throttle = ProgressThrottle::new();
+        let module = scan.module.clone();
+        let report = db.with(|conn| {
+            let env = ExecEnvironment {
+                quarantine: &services.quarantine,
+                conn,
+                brain: &services.brain,
+                recycle_bin: services.recycle_bin.as_ref(),
+                startup: services.startup.as_ref(),
             };
-            if let Err(err) = events::emit_exec_progress(&app, &payload) {
-                tracing::debug!(error = %err, "exec progress event was not delivered");
-            }
-        };
-        executor::execute(
-            &units,
-            &env,
-            &executor::ExecOptions {
-                confirm_empty_recycle_bin,
-            },
-            Some(&mut emit),
-        )
-    })?;
+            let mut emit = |done: u64, total: u64, finding: &crate::core::types::Finding| {
+                // The final tick always goes out; the rest are throttled.
+                if done != total && !throttle.should_emit() {
+                    return;
+                }
+                let payload = ExecProgress {
+                    scan_id,
+                    module: module.clone(),
+                    items_done: done,
+                    items_total: total,
+                    current_path: Some(finding.path.display().to_string()),
+                };
+                if let Err(err) = events::emit_exec_progress(&app, &payload) {
+                    tracing::debug!(error = %err, "exec progress event was not delivered");
+                }
+            };
+            executor::execute(
+                &units,
+                &env,
+                &executor::ExecOptions {
+                    confirm_empty_recycle_bin,
+                },
+                Some(&mut emit),
+            )
+        })?;
 
-    notify_quarantine_changed(&app, &services, &db, report.batch_id);
-    Ok(report)
+        notify_quarantine_changed(&app, &services, &db, report.batch_id);
+        Ok(report)
+    })
+    .await
 }
 
 /// Ask a running scan to stop (ARCHITECTURE section 3).
@@ -394,9 +454,11 @@ pub async fn execute<R: Runtime>(
 /// Infallible today; keeps the shared `Result` shape.
 #[tauri::command(async)]
 pub fn cancel_scan(scan_id: Uuid, cancels: State<'_, CancelRegistry>) -> Result<bool, ApiError> {
-    let stopped = cancels.cancel(scan_id);
-    tracing::info!(scan = %scan_id, stopped, "cancel requested");
-    Ok(stopped)
+    guarded("cancel_scan", || {
+        let stopped = cancels.cancel(scan_id);
+        tracing::info!(scan = %scan_id, stopped, "cancel requested");
+        Ok(stopped)
+    })
 }
 
 /* -------------------------------------------------------------------------
@@ -432,105 +494,108 @@ pub async fn start_duplicate_scan<R: Runtime>(
     db: State<'_, Arc<Database>>,
     cancels: State<'_, CancelRegistry>,
 ) -> Result<DuplicateScanResult, ApiError> {
-    let stored: duplicates::DuplicatesSettings = db
-        .with(|conn| settings::get_module(conn, "duplicates"))?
-        .unwrap_or_default();
-    let stored = stored.validated();
+    guarded_async("start_duplicate_scan", async {
+        let stored: duplicates::DuplicatesSettings = db
+            .with(|conn| settings::get_module(conn, "duplicates"))?
+            .unwrap_or_default();
+        let stored = stored.validated();
 
-    // An explicit selection from the folder picker wins; then the saved roots;
-    // then the profile folders module spec 03 names.
-    let roots = roots
-        .filter(|roots| !roots.is_empty())
-        .or_else(|| Some(stored.roots.clone()).filter(|roots| !roots.is_empty()))
-        .unwrap_or_else(|| duplicates::default_roots(&crate::core::platform::SystemEnv));
+        // An explicit selection from the folder picker wins; then the saved roots;
+        // then the profile folders module spec 03 names.
+        let roots = roots
+            .filter(|roots| !roots.is_empty())
+            .or_else(|| Some(stored.roots.clone()).filter(|roots| !roots.is_empty()))
+            .unwrap_or_else(|| duplicates::default_roots(&crate::core::platform::SystemEnv));
 
-    let scan_id = Uuid::new_v4();
-    let started_at = Utc::now();
-    let cancel = cancels.start(scan_id);
-    let throttle = std::sync::Mutex::new(ProgressThrottle::new());
+        let scan_id = Uuid::new_v4();
+        let started_at = Utc::now();
+        let cancel = cancels.start(scan_id);
+        let throttle = std::sync::Mutex::new(ProgressThrottle::new());
 
-    let emit = |progress: &DuplicateProgress| {
-        // The sink is called from several rayon threads at once, so the throttle
-        // is shared rather than owned by one of them.
-        let allowed = throttle
-            .lock()
-            .map(|mut throttle| throttle.should_emit())
-            .unwrap_or(false);
-        if !allowed {
-            return;
-        }
-        let payload = ScanProgress {
-            scan_id,
-            module: "duplicates".to_owned(),
-            items_scanned: progress.done,
-            current_path: Some(progress.current_path.display().to_string()),
-            pct: percent(progress.done, progress.total),
-            items_total: None,
+        let emit = |progress: &DuplicateProgress| {
+            // The sink is called from several rayon threads at once, so the throttle
+            // is shared rather than owned by one of them.
+            let allowed = throttle
+                .lock()
+                .map(|mut throttle| throttle.should_emit())
+                .unwrap_or(false);
+            if !allowed {
+                return;
+            }
+            let payload = ScanProgress {
+                scan_id,
+                module: "duplicates".to_owned(),
+                items_scanned: progress.done,
+                current_path: Some(progress.current_path.display().to_string()),
+                pct: percent(progress.done, progress.total),
+                items_total: None,
+            };
+            if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                tracing::debug!(error = %err, "duplicate progress event was not delivered");
+            }
         };
-        if let Err(err) = events::emit_scan_progress(&app, &payload) {
-            tracing::debug!(error = %err, "duplicate progress event was not delivered");
-        }
-    };
 
-    let scan = {
-        let protected = services.brain.protected_paths();
-        duplicates::scan(
-            &duplicates::DuplicateContext {
-                roots: &roots,
-                protected,
-                settings: &stored,
-                cancel: &cancel,
-            },
-            Some(&emit),
-        )
-    };
-    cancels.finish(scan_id);
+        let scan = {
+            let protected = services.brain.protected_paths();
+            duplicates::scan(
+                &duplicates::DuplicateContext {
+                    roots: &roots,
+                    protected,
+                    settings: &stored,
+                    cancel: &cancel,
+                },
+                Some(&emit),
+            )
+        };
+        cancels.finish(scan_id);
 
-    let recommendations = duplicates::analyze(&scan, &services.brain);
-    tracing::info!(
-        scan = %scan_id,
-        sets = scan.sets.len(),
-        hashed = scan.files_hashed,
-        cancelled = scan.cancelled,
-        "duplicate scan finished"
-    );
+        let recommendations = duplicates::analyze(&scan, &services.brain);
+        tracing::info!(
+            scan = %scan_id,
+            sets = scan.sets.len(),
+            hashed = scan.files_hashed,
+            cancelled = scan.cancelled,
+            "duplicate scan finished"
+        );
 
-    // Kept in the same store the cleaner uses, so `execute` needs no second
-    // code path: a duplicate recommendation is a recommendation.
-    store.insert(ScanResult {
-        scan_id,
-        module: "duplicates".to_owned(),
-        findings: scan.findings.clone(),
-        recommendations: recommendations.clone(),
-        skipped_rules: scan.skipped_roots.clone(),
-        cancelled: false,
-    });
-
-    remember(
-        &db,
-        scan_id,
-        "duplicates",
-        started_at,
-        scan.sets.len() as u64,
-        scan.wasted_bytes(),
-        scan.cancelled,
-    );
-
-    let _ = events::emit_scan_done(
-        &app,
-        &ScanDone {
+        // Kept in the same store the cleaner uses, so `execute` needs no second
+        // code path: a duplicate recommendation is a recommendation.
+        store.insert(ScanResult {
             scan_id,
             module: "duplicates".to_owned(),
-            finding_count: scan.findings.len() as u64,
-        },
-    );
+            findings: scan.findings.clone(),
+            recommendations: recommendations.clone(),
+            skipped_rules: scan.skipped_roots.clone(),
+            cancelled: false,
+        });
 
-    Ok(DuplicateScanResult {
-        wasted_bytes: scan.wasted_bytes(),
-        scan_id,
-        scan,
-        recommendations,
+        remember(
+            &db,
+            scan_id,
+            "duplicates",
+            started_at,
+            scan.sets.len() as u64,
+            scan.wasted_bytes(),
+            scan.cancelled,
+        );
+
+        let _ = events::emit_scan_done(
+            &app,
+            &ScanDone {
+                scan_id,
+                module: "duplicates".to_owned(),
+                finding_count: scan.findings.len() as u64,
+            },
+        );
+
+        Ok(DuplicateScanResult {
+            wasted_bytes: scan.wasted_bytes(),
+            scan_id,
+            scan,
+            recommendations,
+        })
     })
+    .await
 }
 
 /// What an empty-folder scan hands the UI.
@@ -571,96 +636,101 @@ pub async fn start_empty_folder_scan<R: Runtime>(
     db: State<'_, Arc<Database>>,
     cancels: State<'_, CancelRegistry>,
 ) -> Result<EmptyFolderScanResult, ApiError> {
-    use crate::core::platform::EnvResolver;
+    guarded_async("start_empty_folder_scan", async {
+        use crate::core::platform::EnvResolver;
 
-    let invalid = |message: String| {
-        CoreError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            message,
-        ))
-    };
-    let root = root
-        .or_else(|| {
-            crate::core::platform::SystemEnv
-                .var("USERPROFILE")
-                .map(PathBuf::from)
-        })
-        .ok_or_else(|| invalid("no folder was chosen and no user profile was found".to_owned()))?;
-    if !root.is_dir() {
-        return Err(invalid(format!("`{}` is not a folder", root.display())).into());
-    }
-    if let Some(refusal) = services.brain.path_refusal(&root) {
-        return Err(invalid(refusal.reason).into());
-    }
-
-    let scan_id = Uuid::new_v4();
-    let started_at = Utc::now();
-    let cancel = cancels.start(scan_id);
-    let mut throttle = ProgressThrottle::new();
-    let mut emit = |visited: u64, current: &Path| {
-        if !throttle.should_emit() {
-            return;
-        }
-        let payload = ScanProgress {
-            scan_id,
-            module: empty_folders::MODULE_ID.to_owned(),
-            items_scanned: visited,
-            current_path: Some(current.display().to_string()),
-            pct: None,
-            items_total: None,
+        let invalid = |message: String| {
+            CoreError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                message,
+            ))
         };
-        if let Err(err) = events::emit_scan_progress(&app, &payload) {
-            tracing::debug!(error = %err, "empty-folder progress event was not delivered");
+        let root = root
+            .or_else(|| {
+                crate::core::platform::SystemEnv
+                    .var("USERPROFILE")
+                    .map(PathBuf::from)
+            })
+            .ok_or_else(|| {
+                invalid("no folder was chosen and no user profile was found".to_owned())
+            })?;
+        if !root.is_dir() {
+            return Err(invalid(format!("`{}` is not a folder", root.display())).into());
         }
-    };
+        if let Some(refusal) = services.brain.path_refusal(&root) {
+            return Err(invalid(refusal.reason).into());
+        }
 
-    let output = empty_folders::scan(
-        &empty_folders::ScanContext {
-            root: &root,
-            protected: services.brain.protected_paths(),
-            cancel: &cancel,
-        },
-        Some(&mut emit),
-    );
-    cancels.finish(scan_id);
+        let scan_id = Uuid::new_v4();
+        let started_at = Utc::now();
+        let cancel = cancels.start(scan_id);
+        let mut throttle = ProgressThrottle::new();
+        let mut emit = |visited: u64, current: &Path| {
+            if !throttle.should_emit() {
+                return;
+            }
+            let payload = ScanProgress {
+                scan_id,
+                module: empty_folders::MODULE_ID.to_owned(),
+                items_scanned: visited,
+                current_path: Some(current.display().to_string()),
+                pct: None,
+                items_total: None,
+            };
+            if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                tracing::debug!(error = %err, "empty-folder progress event was not delivered");
+            }
+        };
 
-    let recommendations = empty_folders::analyze(&output.findings, &services.brain);
-    store.insert(ScanResult {
-        scan_id,
-        module: empty_folders::MODULE_ID.to_owned(),
-        findings: output.findings.clone(),
-        recommendations: recommendations.clone(),
-        skipped_rules: Vec::new(),
-        cancelled: false,
-    });
-    remember(
-        &db,
-        scan_id,
-        empty_folders::MODULE_ID,
-        started_at,
-        output.findings.len() as u64,
-        0,
-        output.cancelled,
-    );
-    let _ = events::emit_scan_done(
-        &app,
-        &ScanDone {
+        let output = empty_folders::scan(
+            &empty_folders::ScanContext {
+                root: &root,
+                protected: services.brain.protected_paths(),
+                cancel: &cancel,
+            },
+            Some(&mut emit),
+        );
+        cancels.finish(scan_id);
+
+        let recommendations = empty_folders::analyze(&output.findings, &services.brain);
+        store.insert(ScanResult {
             scan_id,
             module: empty_folders::MODULE_ID.to_owned(),
-            finding_count: output.findings.len() as u64,
-        },
-    );
+            findings: output.findings.clone(),
+            recommendations: recommendations.clone(),
+            skipped_rules: Vec::new(),
+            cancelled: false,
+        });
+        remember(
+            &db,
+            scan_id,
+            empty_folders::MODULE_ID,
+            started_at,
+            output.findings.len() as u64,
+            0,
+            output.cancelled,
+        );
+        let _ = events::emit_scan_done(
+            &app,
+            &ScanDone {
+                scan_id,
+                module: empty_folders::MODULE_ID.to_owned(),
+                finding_count: output.findings.len() as u64,
+            },
+        );
 
-    Ok(EmptyFolderScanResult {
-        scan_id,
-        root,
-        unreadable: output.unreadable.len() as u64,
-        skipped_protected: output.skipped_protected,
-        folders_visited: output.folders_visited,
-        cancelled: output.cancelled,
-        findings: output.findings,
-        recommendations,
+        Ok(EmptyFolderScanResult {
+            scan_id,
+            root,
+            unreadable: output.unreadable.len() as u64,
+            skipped_protected: output.skipped_protected,
+            folders_visited: output.folders_visited,
+            cancelled: output.cancelled,
+            findings: output.findings,
+            recommendations,
+        })
     })
+    .await
 }
 
 fn percent(done: u64, total: u64) -> Option<u8> {
@@ -698,8 +768,10 @@ pub struct TreemapScanResult {
 /// Infallible today; keeps the shared `Result` shape.
 #[tauri::command(async)]
 pub fn treemap_drives() -> Result<Vec<crate::core::platform::DriveInfo>, ApiError> {
-    use crate::core::platform::Volumes;
-    Ok(crate::core::platform::SystemVolumes.drives())
+    guarded("treemap_drives", || {
+        use crate::core::platform::Volumes;
+        Ok(crate::core::platform::SystemVolumes.drives())
+    })
 }
 
 /// Walk `root`, aggregate it, cache it, and return its top level.
@@ -717,84 +789,89 @@ pub async fn treemap_scan<R: Runtime>(
     db: State<'_, Arc<Database>>,
     cancels: State<'_, CancelRegistry>,
 ) -> Result<TreemapScanResult, ApiError> {
-    // The root arrives from the WebView unchecked, exactly as `treemap_children`'s
-    // did (security review M17).
-    let root = mappable_root(&root)?;
-    let scan_id = Uuid::new_v4();
-    let started_at = Utc::now();
-    let cancel = cancels.start(scan_id);
-    let mut throttle = ProgressThrottle::new();
+    guarded_async("treemap_scan", async {
+        // The root arrives from the WebView unchecked, exactly as `treemap_children`'s
+        // did (security review M17).
+        let root = mappable_root(&root)?;
+        let scan_id = Uuid::new_v4();
+        let started_at = Utc::now();
+        let cancel = cancels.start(scan_id);
+        let mut throttle = ProgressThrottle::new();
 
-    let scan = {
-        let mut emit = |progress: &treemap::TreeProgress<'_>| {
-            if !throttle.should_emit() {
-                return;
-            }
-            let payload = ScanProgress {
+        let scan = {
+            let mut emit = |progress: &treemap::TreeProgress<'_>| {
+                if !throttle.should_emit() {
+                    return;
+                }
+                let payload = ScanProgress {
+                    scan_id,
+                    module: "treemap".to_owned(),
+                    items_scanned: progress.entries,
+                    current_path: Some(progress.current_path.display().to_string()),
+                    pct: None,
+                    items_total: None,
+                };
+                if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                    tracing::debug!(error = %err, "treemap progress event was not delivered");
+                }
+            };
+            treemap::scan(&root, &cancel, Some(&mut emit))
+        };
+        cancels.finish(scan_id);
+
+        tracing::info!(
+            scan = %scan_id,
+            root = %root.display(),
+            dirs = scan.dirs.len(),
+            bytes = scan.root_total().map_or(0, |t| t.total_bytes),
+            cancelled = scan.cancelled,
+            "treemap scan finished"
+        );
+
+        // A cancelled walk is still cached: a partial picture beats no picture, and
+        // `complete: false` stops anyone reading it as a total.
+        let summary = db.with(|conn| {
+            treemap::save_cache(conn, &scan)?;
+            treemap::cached_scan(conn, &root)
+        })?;
+        let summary = summary.ok_or_else(|| {
+            CoreError::Quarantine(
+                "the treemap cache was written but could not be read back".to_owned(),
+            )
+        })?;
+
+        remember(
+            &db,
+            scan_id,
+            "treemap",
+            started_at,
+            summary.file_count,
+            0,
+            scan.cancelled,
+        );
+
+        let oracle = treemap::MemoryOracle::new(&scan);
+        let level = treemap::children(&root, &root, &oracle)?;
+
+        let _ = events::emit_scan_done(
+            &app,
+            &ScanDone {
                 scan_id,
                 module: "treemap".to_owned(),
-                items_scanned: progress.entries,
-                current_path: Some(progress.current_path.display().to_string()),
-                pct: None,
-                items_total: None,
-            };
-            if let Err(err) = events::emit_scan_progress(&app, &payload) {
-                tracing::debug!(error = %err, "treemap progress event was not delivered");
-            }
-        };
-        treemap::scan(&root, &cancel, Some(&mut emit))
-    };
-    cancels.finish(scan_id);
+                finding_count: scan.dirs.len() as u64,
+            },
+        );
 
-    tracing::info!(
-        scan = %scan_id,
-        root = %root.display(),
-        dirs = scan.dirs.len(),
-        bytes = scan.root_total().map_or(0, |t| t.total_bytes),
-        cancelled = scan.cancelled,
-        "treemap scan finished"
-    );
-
-    // A cancelled walk is still cached: a partial picture beats no picture, and
-    // `complete: false` stops anyone reading it as a total.
-    let summary = db.with(|conn| {
-        treemap::save_cache(conn, &scan)?;
-        treemap::cached_scan(conn, &root)
-    })?;
-    let summary = summary.ok_or_else(|| {
-        CoreError::Quarantine("the treemap cache was written but could not be read back".to_owned())
-    })?;
-
-    remember(
-        &db,
-        scan_id,
-        "treemap",
-        started_at,
-        summary.file_count,
-        0,
-        scan.cancelled,
-    );
-
-    let oracle = treemap::MemoryOracle::new(&scan);
-    let level = treemap::children(&root, &root, &oracle)?;
-
-    let _ = events::emit_scan_done(
-        &app,
-        &ScanDone {
+        Ok(TreemapScanResult {
             scan_id,
-            module: "treemap".to_owned(),
-            finding_count: scan.dirs.len() as u64,
-        },
-    );
-
-    Ok(TreemapScanResult {
-        scan_id,
-        summary,
-        links: scan.links,
-        unreadable: scan.unreadable,
-        cancelled: scan.cancelled,
-        level,
+            summary,
+            links: scan.links,
+            unreadable: scan.unreadable,
+            cancelled: scan.cancelled,
+            level,
+        })
     })
+    .await
 }
 
 /// One directory's children, sized from the cached scan of `root`.
@@ -811,8 +888,12 @@ pub fn treemap_children(
     path: PathBuf,
     db: State<'_, Arc<Database>>,
 ) -> Result<treemap::TreeLevel, ApiError> {
-    let (root, path) = mappable_level(&root, &path)?;
-    Ok(db.with(|conn| treemap::children(&path, &root, &treemap::CacheOracle::new(conn, &root)))?)
+    guarded("treemap_children", || {
+        let (root, path) = mappable_level(&root, &path)?;
+        Ok(db.with(|conn| {
+            treemap::children(&path, &root, &treemap::CacheOracle::new(conn, &root))
+        })?)
+    })
 }
 
 /// The gate every treemap root crosses.
@@ -877,7 +958,9 @@ pub fn treemap_cached(
     root: PathBuf,
     db: State<'_, Arc<Database>>,
 ) -> Result<Option<treemap::CachedScan>, ApiError> {
-    Ok(db.with(|conn| treemap::cached_scan(conn, &root))?)
+    guarded("treemap_cached", || {
+        Ok(db.with(|conn| treemap::cached_scan(conn, &root))?)
+    })
 }
 
 /// Open a path in Explorer, selecting it when it is a file.
@@ -889,7 +972,9 @@ pub fn treemap_cached(
 /// Returns an error if Explorer could not be started.
 #[tauri::command]
 pub fn reveal_in_explorer(path: PathBuf) -> Result<(), ApiError> {
-    crate::core::platform::reveal_in_explorer(&path).map_err(Into::into)
+    guarded("reveal_in_explorer", || {
+        crate::core::platform::reveal_in_explorer(&path).map_err(Into::into)
+    })
 }
 
 /* -------------------------------------------------------------------------
@@ -921,59 +1006,62 @@ pub async fn startup_scan<R: Runtime>(
     store: State<'_, ScanStore>,
     db: State<'_, Arc<Database>>,
 ) -> Result<StartupScanResult, ApiError> {
-    let started_at = Utc::now();
-    let scan = db.with(|conn| Ok(services.startup_service.scan(conn)))?;
-    let scan_id = Uuid::new_v4();
+    guarded_async("startup_scan", async {
+        let started_at = Utc::now();
+        let scan = db.with(|conn| Ok(services.startup_service.scan(conn)))?;
+        let scan_id = Uuid::new_v4();
 
-    let mut findings = Vec::with_capacity(scan.entries.len());
-    let mut recommendations = Vec::with_capacity(scan.entries.len());
-    for entry in &scan.entries {
-        let (finding, recommendation) = startup_recommendation(entry, &services.brain);
-        findings.push(finding);
-        if let Some(recommendation) = recommendation {
-            recommendations.push(recommendation);
+        let mut findings = Vec::with_capacity(scan.entries.len());
+        let mut recommendations = Vec::with_capacity(scan.entries.len());
+        for entry in &scan.entries {
+            let (finding, recommendation) = startup_recommendation(entry, &services.brain);
+            findings.push(finding);
+            if let Some(recommendation) = recommendation {
+                recommendations.push(recommendation);
+            }
         }
-    }
 
-    store.insert(ScanResult {
-        scan_id,
-        module: "startup".to_owned(),
-        findings,
-        recommendations: recommendations.clone(),
-        skipped_rules: scan.unreadable.clone(),
-        cancelled: false,
-    });
-
-    remember(
-        &db,
-        scan_id,
-        "startup",
-        started_at,
-        scan.entries.len() as u64,
-        0,
-        false,
-    );
-
-    tracing::info!(
-        scan = %scan_id,
-        entries = scan.entries.len(),
-        unreadable = scan.unreadable.len(),
-        "startup scan finished"
-    );
-    let _ = events::emit_scan_done(
-        &app,
-        &ScanDone {
+        store.insert(ScanResult {
             scan_id,
             module: "startup".to_owned(),
-            finding_count: scan.entries.len() as u64,
-        },
-    );
+            findings,
+            recommendations: recommendations.clone(),
+            skipped_rules: scan.unreadable.clone(),
+            cancelled: false,
+        });
 
-    Ok(StartupScanResult {
-        scan_id,
-        scan,
-        recommendations,
+        remember(
+            &db,
+            scan_id,
+            "startup",
+            started_at,
+            scan.entries.len() as u64,
+            0,
+            false,
+        );
+
+        tracing::info!(
+            scan = %scan_id,
+            entries = scan.entries.len(),
+            unreadable = scan.unreadable.len(),
+            "startup scan finished"
+        );
+        let _ = events::emit_scan_done(
+            &app,
+            &ScanDone {
+                scan_id,
+                module: "startup".to_owned(),
+                finding_count: scan.entries.len() as u64,
+            },
+        );
+
+        Ok(StartupScanResult {
+            scan_id,
+            scan,
+            recommendations,
+        })
     })
+    .await
 }
 
 /// How every note explaining a withheld green rating opens.
@@ -1110,11 +1198,13 @@ pub fn startup_enable(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<Vec<crate::core::types::MoveWarning>, ApiError> {
-    Ok(db.with(|conn| {
-        services
-            .startup_service
-            .set_enabled(conn, source, &key, true, Utc::now())
-    })?)
+    guarded("startup_enable", || {
+        Ok(db.with(|conn| {
+            services
+                .startup_service
+                .set_enabled(conn, source, &key, true, Utc::now())
+        })?)
+    })
 }
 
 /// Write one line of scan history, logging rather than failing.
@@ -1184,24 +1274,26 @@ pub fn dashboard_summary(
     timer: State<'_, Arc<ShutdownTimer>>,
     db: State<'_, Arc<Database>>,
 ) -> Result<DashboardSummary, ApiError> {
-    use crate::core::platform::Volumes;
+    guarded("dashboard_summary", || {
+        use crate::core::platform::Volumes;
 
-    let (modules, quarantine) = db.with(|conn| {
-        let mut cards = Vec::with_capacity(registry.len());
-        for manifest in registry.manifests() {
-            cards.push(ModuleCard {
-                last_scan: history::latest(conn, &manifest.id)?,
-                module: manifest.id,
-            });
-        }
-        Ok((cards, services.quarantine.stats(conn)?))
-    })?;
+        let (modules, quarantine) = db.with(|conn| {
+            let mut cards = Vec::with_capacity(registry.len());
+            for manifest in registry.manifests() {
+                cards.push(ModuleCard {
+                    last_scan: history::latest(conn, &manifest.id)?,
+                    module: manifest.id,
+                });
+            }
+            Ok((cards, services.quarantine.stats(conn)?))
+        })?;
 
-    Ok(DashboardSummary {
-        modules,
-        quarantine,
-        timer: timer.status(Utc::now()),
-        drives: crate::core::platform::SystemVolumes.drives(),
+        Ok(DashboardSummary {
+            modules,
+            quarantine,
+            timer: timer.status(Utc::now()),
+            drives: crate::core::platform::SystemVolumes.drives(),
+        })
     })
 }
 
@@ -1218,7 +1310,9 @@ pub fn get_settings(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<AppSettings, ApiError> {
-    Ok(db.with(|conn| read_settings(&services, conn))?)
+    guarded("get_settings", || {
+        Ok(db.with(|conn| read_settings(&services, conn))?)
+    })
 }
 
 /// Save the settings page.
@@ -1240,36 +1334,38 @@ pub fn set_settings(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<AppSettings, ApiError> {
-    let policy = RetentionPolicy::validated(
-        settings_in.quarantine.retention_days,
-        settings_in.quarantine.max_bytes,
-    );
-    let duplicates = settings_in.duplicates.validated();
+    guarded("set_settings", || {
+        let policy = RetentionPolicy::validated(
+            settings_in.quarantine.retention_days,
+            settings_in.quarantine.max_bytes,
+        );
+        let duplicates = settings_in.duplicates.validated();
 
-    let mut cleaner_settings = cleaner::CleanerSettings::default();
-    for pack in &settings_in.cleaner.packs {
-        cleaner_settings.set_enabled(pack.id.clone(), pack.enabled);
-    }
+        let mut cleaner_settings = cleaner::CleanerSettings::default();
+        for pack in &settings_in.cleaner.packs {
+            cleaner_settings.set_enabled(pack.id.clone(), pack.enabled);
+        }
 
-    let stored = db.with(|conn| {
-        settings::set_module(conn, "cleaner", &cleaner_settings)?;
-        settings::set_module(conn, "duplicates", &duplicates)?;
-        settings::set_raw(
-            conn,
-            settings::KEY_RETENTION_DAYS,
-            &policy.retention_days.to_string(),
-        )?;
-        settings::set_raw(conn, settings::KEY_MAX_BYTES, &policy.max_bytes.to_string())?;
-        read_settings(&services, conn)
-    })?;
+        let stored = db.with(|conn| {
+            settings::set_module(conn, "cleaner", &cleaner_settings)?;
+            settings::set_module(conn, "duplicates", &duplicates)?;
+            settings::set_raw(
+                conn,
+                settings::KEY_RETENTION_DAYS,
+                &policy.retention_days.to_string(),
+            )?;
+            settings::set_raw(conn, settings::KEY_MAX_BYTES, &policy.max_bytes.to_string())?;
+            read_settings(&services, conn)
+        })?;
 
-    tracing::info!(
-        retention_days = policy.retention_days,
-        max_bytes = policy.max_bytes,
-        min_size_bytes = duplicates.min_size_bytes,
-        "settings saved"
-    );
-    Ok(stored)
+        tracing::info!(
+            retention_days = policy.retention_days,
+            max_bytes = policy.max_bytes,
+            min_size_bytes = duplicates.min_size_bytes,
+            "settings saved"
+        );
+        Ok(stored)
+    })
 }
 
 /// Read the current settings, joining the stored overrides onto the packs that
@@ -1335,7 +1431,9 @@ pub fn quarantine_list(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<Vec<QuarantineBatch>, ApiError> {
-    Ok(db.with(|conn| services.quarantine.list_batches(conn))?)
+    guarded("quarantine_list", || {
+        Ok(db.with(|conn| services.quarantine.list_batches(conn))?)
+    })
 }
 
 /// Items of one batch, so the drawer can expand it.
@@ -1348,7 +1446,9 @@ pub fn quarantine_batch_items(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<Vec<QuarantineItem>, ApiError> {
-    Ok(db.with(|conn| services.quarantine.items_in_batch(conn, batch_id))?)
+    guarded("quarantine_batch_items", || {
+        Ok(db.with(|conn| services.quarantine.items_in_batch(conn, batch_id))?)
+    })
 }
 
 /// Totals across everything still held.
@@ -1360,7 +1460,9 @@ pub fn quarantine_stats(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<QuarantineStats, ApiError> {
-    Ok(db.with(|conn| services.quarantine.stats(conn))?)
+    guarded("quarantine_stats", || {
+        Ok(db.with(|conn| services.quarantine.stats(conn))?)
+    })
 }
 
 /// What a restore did, per item.
@@ -1395,14 +1497,18 @@ pub fn quarantine_restore<R: Runtime>(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<RestoreReport, ApiError> {
-    let (restored, failed) = db.with(|conn| services.quarantine.restore_batch(conn, batch_id))?;
-    notify_quarantine_changed(&app, &services, &db, Some(batch_id));
-    Ok(RestoreReport {
-        restored,
-        failed: failed
-            .into_iter()
-            .map(|(item_id, error)| RestoreFailure { item_id, error })
-            .collect(),
+    guarded("quarantine_restore", || {
+        let _busy = services.quarantine.begin(Operation::Restore)?;
+        let (restored, failed) =
+            db.with(|conn| services.quarantine.restore_batch(conn, batch_id))?;
+        notify_quarantine_changed(&app, &services, &db, Some(batch_id));
+        Ok(RestoreReport {
+            restored,
+            failed: failed
+                .into_iter()
+                .map(|(item_id, error)| RestoreFailure { item_id, error })
+                .collect(),
+        })
     })
 }
 
@@ -1417,9 +1523,12 @@ pub fn quarantine_restore_item<R: Runtime>(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<RestoreOutcome, ApiError> {
-    let outcome = db.with(|conn| services.quarantine.restore_item(conn, item_id))?;
-    notify_quarantine_changed(&app, &services, &db, None);
-    Ok(outcome)
+    guarded("quarantine_restore_item", || {
+        let _busy = services.quarantine.begin(Operation::Restore)?;
+        let outcome = db.with(|conn| services.quarantine.restore_item(conn, item_id))?;
+        notify_quarantine_changed(&app, &services, &db, None);
+        Ok(outcome)
+    })
 }
 
 /// Run the retention purge and the size cap now.
@@ -1432,9 +1541,12 @@ pub fn quarantine_purge<R: Runtime>(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<PurgeReport, ApiError> {
-    let report = db.with(|conn| services.quarantine.purge(conn, Utc::now()))?;
-    notify_quarantine_changed(&app, &services, &db, None);
-    Ok(report)
+    guarded("quarantine_purge", || {
+        let _busy = services.quarantine.begin(Operation::Purge)?;
+        let report = db.with(|conn| services.quarantine.purge(conn, Utc::now()))?;
+        notify_quarantine_changed(&app, &services, &db, None);
+        Ok(report)
+    })
 }
 
 /// Remove one item whose encrypted restore was refused, at the user's
@@ -1451,9 +1563,12 @@ pub fn quarantine_purge_item<R: Runtime>(
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<PurgeReport, ApiError> {
-    let report = db.with(|conn| services.quarantine.purge_item(conn, item_id))?;
-    notify_quarantine_changed(&app, &services, &db, None);
-    Ok(report)
+    guarded("quarantine_purge_item", || {
+        let _busy = services.quarantine.begin(Operation::Purge)?;
+        let report = db.with(|conn| services.quarantine.purge_item(conn, item_id))?;
+        notify_quarantine_changed(&app, &services, &db, None);
+        Ok(report)
+    })
 }
 
 fn notify_quarantine_changed<R: Runtime>(
@@ -1494,13 +1609,19 @@ pub fn shutdown_schedule(
     timer: State<'_, Arc<ShutdownTimer>>,
     db: State<'_, Arc<Database>>,
 ) -> Result<TimerStatus, ApiError> {
-    let now = Utc::now();
-    let persisted = ShutdownTimer::prepare(mode, action, now)?;
-    db.with(|conn| {
-        crate::core::settings::set_json(conn, crate::core::settings::KEY_ACTIVE_TIMER, &persisted)
-    })?;
-    timer.arm(persisted);
-    Ok(timer.status(now))
+    guarded("shutdown_schedule", || {
+        let now = Utc::now();
+        let persisted = ShutdownTimer::prepare(mode, action, now)?;
+        db.with(|conn| {
+            crate::core::settings::set_json(
+                conn,
+                crate::core::settings::KEY_ACTIVE_TIMER,
+                &persisted,
+            )
+        })?;
+        timer.arm(persisted);
+        Ok(timer.status(now))
+    })
 }
 
 /// Cancel the timer. Cancelling when nothing is armed is not an error.
@@ -1518,9 +1639,13 @@ pub fn shutdown_cancel(
     timer: State<'_, Arc<ShutdownTimer>>,
     db: State<'_, Arc<Database>>,
 ) -> Result<TimerStatus, ApiError> {
-    db.with(|conn| crate::core::settings::clear(conn, crate::core::settings::KEY_ACTIVE_TIMER))?;
-    timer.cancel();
-    Ok(timer.status(Utc::now()))
+    guarded("shutdown_cancel", || {
+        db.with(|conn| {
+            crate::core::settings::clear(conn, crate::core::settings::KEY_ACTIVE_TIMER)
+        })?;
+        timer.cancel();
+        Ok(timer.status(Utc::now()))
+    })
 }
 
 /// Current timer state.
@@ -1529,7 +1654,7 @@ pub fn shutdown_cancel(
 /// Infallible today; keeps the shared `Result` shape.
 #[tauri::command(async)]
 pub fn shutdown_status(timer: State<'_, Arc<ShutdownTimer>>) -> Result<TimerStatus, ApiError> {
-    Ok(timer.status(Utc::now()))
+    guarded("shutdown_status", || Ok(timer.status(Utc::now())))
 }
 
 /* -------------------------------------------------------------------------
@@ -1549,7 +1674,7 @@ pub fn shutdown_status(timer: State<'_, Arc<ShutdownTimer>>) -> Result<TimerStat
 pub fn take_launch_route(
     pending: State<'_, crate::PendingLaunchRoute>,
 ) -> Result<Option<String>, ApiError> {
-    Ok(pending.take())
+    guarded("take_launch_route", || Ok(pending.take()))
 }
 
 /// Whether System Protection looks enabled. Read-only; `unknown` is a valid
@@ -1561,7 +1686,7 @@ pub fn take_launch_route(
 pub fn restore_point_status(
     service: State<'_, Arc<RestorePointService>>,
 ) -> Result<RestorePointStatus, ApiError> {
-    Ok(service.status())
+    guarded("restore_point_status", || Ok(service.status()))
 }
 
 /// Ask Windows for a restore point through the elevated helper. Shows a UAC
@@ -1576,11 +1701,14 @@ pub async fn restore_point_create(
     service: State<'_, Arc<RestorePointService>>,
     description: String,
 ) -> Result<CreateOutcome, ApiError> {
-    let service = Arc::clone(&service);
-    tauri::async_runtime::spawn_blocking(move || service.create(&description))
-        .await
-        .map_err(|err| CoreError::RestorePoint(format!("the request did not finish: {err}")))?
-        .map_err(ApiError::from)
+    guarded_async("restore_point_create", async {
+        let service = Arc::clone(&service);
+        tauri::async_runtime::spawn_blocking(move || service.create(&description))
+            .await
+            .map_err(|err| CoreError::RestorePoint(format!("the request did not finish: {err}")))?
+            .map_err(ApiError::from)
+    })
+    .await
 }
 
 /// Open Windows' System Protection settings. Only ever on a button click; it
@@ -1592,7 +1720,9 @@ pub async fn restore_point_create(
 pub fn restore_point_open_settings(
     service: State<'_, Arc<RestorePointService>>,
 ) -> Result<(), ApiError> {
-    Ok(service.open_protection_settings()?)
+    guarded("restore_point_open_settings", || {
+        Ok(service.open_protection_settings()?)
+    })
 }
 
 /* -------------------------------------------------------------------------
@@ -1608,7 +1738,7 @@ pub fn restore_point_open_settings(
 pub fn legacy_panels_list(
     service: State<'_, Arc<LegacyPanelsService>>,
 ) -> Result<Vec<PanelInfo>, ApiError> {
-    Ok(service.list())
+    guarded("legacy_panels_list", || Ok(service.list()))
 }
 
 /// Open one of Windows' own windows by catalogue id. Only ever on a button
@@ -1622,7 +1752,7 @@ pub fn legacy_panels_open(
     service: State<'_, Arc<LegacyPanelsService>>,
     id: String,
 ) -> Result<(), ApiError> {
-    Ok(service.open(&id)?)
+    guarded("legacy_panels_open", || Ok(service.open(&id)?))
 }
 
 /* -------------------------------------------------------------------------
@@ -1639,12 +1769,15 @@ pub async fn keep_awake_start(
     display: bool,
     engine: State<'_, Arc<KeepAwake>>,
 ) -> Result<KeepAwakeStatus, ApiError> {
-    // Joins the previous worker thread, so keep it off the async runtime.
-    let engine = Arc::clone(&engine);
-    tauri::async_runtime::spawn_blocking(move || engine.start(minutes, display, Utc::now()))
-        .await
-        .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")))?
-        .map_err(ApiError::from)
+    guarded_async("keep_awake_start", async {
+        // Joins the previous worker thread, so keep it off the async runtime.
+        let engine = Arc::clone(&engine);
+        tauri::async_runtime::spawn_blocking(move || engine.start(minutes, display, Utc::now()))
+            .await
+            .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")))?
+            .map_err(ApiError::from)
+    })
+    .await
 }
 
 /// Stop keep-awake. Stopping when nothing runs is not an error.
@@ -1655,10 +1788,13 @@ pub async fn keep_awake_start(
 pub async fn keep_awake_stop(
     engine: State<'_, Arc<KeepAwake>>,
 ) -> Result<KeepAwakeStatus, ApiError> {
-    let engine = Arc::clone(&engine);
-    tauri::async_runtime::spawn_blocking(move || engine.stop())
-        .await
-        .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")).into())
+    guarded_async("keep_awake_stop", async {
+        let engine = Arc::clone(&engine);
+        tauri::async_runtime::spawn_blocking(move || engine.stop())
+            .await
+            .map_err(|err| CoreError::PowerAction(format!("keep-awake task failed: {err}")).into())
+    })
+    .await
 }
 
 /// Current keep-awake state.
@@ -1667,7 +1803,7 @@ pub async fn keep_awake_stop(
 /// Infallible today; keeps the shared `Result` shape.
 #[tauri::command(async)]
 pub fn keep_awake_status(engine: State<'_, Arc<KeepAwake>>) -> Result<KeepAwakeStatus, ApiError> {
-    Ok(engine.status())
+    guarded("keep_awake_status", || Ok(engine.status()))
 }
 
 /* -------------------------------------------------------------------------
@@ -1691,14 +1827,18 @@ fn unlocker_error(err: crate::core::platform::RmError) -> ApiError {
 pub async fn unlocker_query(
     paths: Vec<PathBuf>,
 ) -> Result<crate::modules::file_unlocker::UnlockerReport, ApiError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let rm = crate::core::platform::real_restart_manager();
-        crate::modules::file_unlocker::query(rm.as_ref(), &paths).map_err(unlocker_error)
+    guarded_async("unlocker_query", async {
+        tauri::async_runtime::spawn_blocking(move || {
+            let rm = crate::core::platform::real_restart_manager();
+            crate::modules::file_unlocker::query(rm.as_ref(), &paths).map_err(unlocker_error)
+        })
+        .await
+        .map_err(|err| {
+            ApiError::new("unlocker_failed", "the query did not finish")
+                .with_detail(err.to_string())
+        })?
     })
     .await
-    .map_err(|err| {
-        ApiError::new("unlocker_failed", "the query did not finish").with_detail(err.to_string())
-    })?
 }
 
 /// Ask one window or console program to close, politely (`RmShutdown` with no
@@ -1713,21 +1853,26 @@ pub async fn unlocker_request_close(
     pid: u32,
     start_time: String,
 ) -> Result<crate::modules::file_unlocker::CloseReport, ApiError> {
-    let start_time: u64 = start_time.parse().map_err(|_| {
-        ApiError::new(
-            "invalid_start_time",
-            "the process start time is not a number",
-        )
-    })?;
-    let process = crate::core::platform::UniqueProcess { pid, start_time };
-    tauri::async_runtime::spawn_blocking(move || {
-        let rm = crate::core::platform::real_restart_manager();
-        crate::modules::file_unlocker::request_close(rm.as_ref(), process).map_err(unlocker_error)
+    guarded_async("unlocker_request_close", async {
+        let start_time: u64 = start_time.parse().map_err(|_| {
+            ApiError::new(
+                "invalid_start_time",
+                "the process start time is not a number",
+            )
+        })?;
+        let process = crate::core::platform::UniqueProcess { pid, start_time };
+        tauri::async_runtime::spawn_blocking(move || {
+            let rm = crate::core::platform::real_restart_manager();
+            crate::modules::file_unlocker::request_close(rm.as_ref(), process)
+                .map_err(unlocker_error)
+        })
+        .await
+        .map_err(|err| {
+            ApiError::new("unlocker_failed", "the request did not finish")
+                .with_detail(err.to_string())
+        })?
     })
     .await
-    .map_err(|err| {
-        ApiError::new("unlocker_failed", "the request did not finish").with_detail(err.to_string())
-    })?
 }
 
 #[cfg(test)]
