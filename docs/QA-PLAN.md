@@ -123,7 +123,7 @@ Legend: **E2E** = a test name from `scripts/qa/e2e.mjs`; `snake_case` = a
 | Scenario | Coverage |
 |---|---|
 | Empty | `a_missing_root_yields_an_empty_walk`, `an_empty_scan_root_is_reported_but_a_drive_root_has_no_parent` |
-| Huge | E2E "empty folders: Stop on a whole-drive scan" (walks `C:\`) |
+| Huge | E2E "empty folders: Stop on a big folder" (runner tool cache; drive roots are refused as scan roots) |
 | Locked files | — (folders only) |
 | Access denied | `an_access_denied_subtree_is_treated_as_not_empty` |
 | Long/unicode paths | Sandbox |
