@@ -1974,6 +1974,7 @@ next click froze the window.
   - `reveal_in_explorer`;
   - `restore_point_open_settings`;
   - `legacy_panels_open`.
-- **e2e.** "duplicates: Stop returns to idle" scanned the tiny fixture, which
-  finished before Stop rendered. It now scans the big CI folder via `?root=`
+- **e2e.** "duplicates: Stop returns to idle" pressed "Scan again", which only
+  resets the page to idle, so Stop never rendered; the fixture scan was also
+  too small to catch running. It now scans the big CI folder via `?root=`
   and presses Stop once the walker names a path, as the Empty folders test does.

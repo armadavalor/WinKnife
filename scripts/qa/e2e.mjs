@@ -280,7 +280,9 @@ test("duplicates: Stop returns to idle", async () => {
       `document.body.append(a); a.click(); a.remove(); return true; })()`,
   );
   await sleep(SETTLE_MS);
-  await click("main button", (await has("main button", "Scan again")) ? "Scan again" : "Find duplicates");
+  // "Scan again" only resets the page to idle; "Find duplicates" starts the scan.
+  if (await has("main button", "Scan again")) await click("main button", "Scan again");
+  await click("main button", "Find duplicates");
   await waitFor("main *", BIG_DIR + "\\");
   await click("button", "Stop");
   await waitGone("button", "Stopping", null, STEP_TIMEOUT_MS);
