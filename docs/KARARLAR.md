@@ -19,5 +19,6 @@ Ayrıntılı mimar gerekçeleri: `docs/DECISIONS-NEEDED.md` ("Architect resoluti
 | K-010 | 2026-10-13 | AKTİF | npm Tauri paketleri Rust crate minor'una kilitli (`~2.11.1`, plugin-dialog `~2.7.3`); yükseltme crate + npm birlikte. | - | CI kırığı 18020bd |
 | K-011 | 2026-10-13 | AKTİF | İlk public sürüm 0.2.0 (0.1.0 hiç tag'lenmedi). Türkçe arayüz iddia edilmez (seçici yok). | - | kullanıcı |
 | K-012 | 2026-10-13 | AKTİF | CI GitHub windows-latest'te kalır (public repo = ücretsiz); ev sunucusu runner kullanılmaz. | - | kullanıcı |
-| K-013 | 2026-10-13 | AKTİF | Merge dışı her adım ajan için serbest; merge yalnız kullanıcı onayıyla. | - | kullanıcı |
+| K-013 | 2026-10-13 | GEÇERSİZ | Merge dışı her adım ajan için serbest; merge yalnız kullanıcı onayıyla. | - | kullanıcı |
 | K-014 | 2026-10-15 | AKTİF | SignPath Foundation başvurusu reddedildi (yıldız/fork/dış referans yetersiz). Ücretli SignPath alınmaz; sürümler şimdilik imzasız, SmartScreen/VT için README'de dürüst not + SHA256. Görünürlük artınca yeniden başvurulur. | - | kullanıcı, SignPath e-postası |
+| K-015 | 2026-10-18 | AKTİF | Merge de ajana bırakıldı: CI yeşil ve diff okunup doğrulandıktan sonra ajan kendisi merge eder. Sürüm tag'i/yayın, force-push, yıkıcı/geri alınamaz eylemler ve silme/karantina belirsizliği yine kullanıcıya. | K-013 | kullanıcı |

@@ -99,11 +99,6 @@ pub struct ProtectedEntry {
 #[derive(Debug, Clone, Default)]
 pub struct ProtectedPaths {
     entries: Vec<ProtectedEntry>,
-    /// Each entry's path already split into comparable components, index for
-    /// index with `entries`. [`ProtectedPaths::reason_for`] runs for every file
-    /// a scan examines, and re-splitting every entry on every call was most of
-    /// its cost on a 100 000-file `%TEMP%`. Same split, done once.
-    entry_parts: Vec<Vec<String>>,
 }
 
 impl ProtectedPaths {
@@ -121,11 +116,7 @@ impl ProtectedPaths {
         for entry in entries {
             widen(entry, &mut widened);
         }
-        let entry_parts = widened.iter().map(|entry| split(&entry.path)).collect();
-        Self {
-            entries: widened,
-            entry_parts,
-        }
+        Self { entries: widened }
     }
 
     /// Build a tree-scoped list from paths, with a generic reason. Used by
@@ -238,11 +229,6 @@ impl ProtectedPaths {
     /// known). Widened exactly as [`ProtectedPaths::new`] widens.
     pub fn push(&mut self, entry: ProtectedEntry) {
         widen(entry, &mut self.entries);
-        self.entry_parts = self
-            .entries
-            .iter()
-            .map(|entry| split(&entry.path))
-            .collect();
     }
 
     /// Every entry, for tests and diagnostics.
@@ -288,13 +274,14 @@ impl ProtectedPaths {
 
         let candidate_components: Vec<_> = split(path);
 
-        for (entry, entry_components) in self.entries.iter().zip(&self.entry_parts) {
+        for entry in &self.entries {
+            let entry_components: Vec<_> = split(&entry.path);
             if entry_components.is_empty() {
                 continue;
             }
 
             let matched = match entry.scope {
-                Scope::Exact => candidate_components == *entry_components,
+                Scope::Exact => candidate_components == entry_components,
                 Scope::Tree => {
                     // A single-component tree entry with no drive letter (the
                     // volume metadata folder) matches wherever it appears.
