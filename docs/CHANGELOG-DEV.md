@@ -1985,3 +1985,22 @@ next click froze the window.
   resets the page to idle, so Stop never rendered; the fixture scan was also
   too small to catch running. It now scans the big CI folder via `?root=`
   and presses Stop once the walker names a path, as the Empty folders test does.
+
+## 2026-10-18 — Fix: slow clean, Defender CPU on scan, huge list arrows
+
+**Fixed.** A clean of 20 GB junk (84,919 files) took 12 minutes, a scan held
+Defender at 85–90% CPU, and the findings list showed giant chevrons.
+
+- **Lock probe** (`core/platform/lock.rs`). The exclusive open asked for read
+  access, which Defender scans on access: ~8 ms per file, almost all of the
+  per-item cost in the log. It now asks for
+  `DELETE | FILE_READ_ATTRIBUTES (| FILE_WRITE_ATTRIBUTES)` (~0.1 ms) and falls
+  back to read access only on a denial. Windows' sharing check is our share
+  mode against the other handle's access, so detection is unchanged; a
+  sharing violation ends the search at once. Tests: a file held open with full
+  sharing is still in use; a read-only file is free.
+- **Arrows.** f793205 left a `` byte as the chevron's class in
+  FindingList and Duplicates, overriding the icon's size. Now `size-4`.
+- **Deferred.** The user's polish notes (progress detail, motion, logo and
+  background animation, animations-off) are queued in `modules/BACKLOG.md`;
+  direct delete is in DECISIONS-NEEDED.

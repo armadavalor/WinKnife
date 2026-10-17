@@ -167,7 +167,7 @@
           >
             <Icon
               name="chevron-right"
-              class=""
+              class="size-4 shrink-0 text-ink-muted transition-transform duration-150"
               style={open ? "transform: rotate(90deg)" : undefined}
             />
             <span>{group.packName}</span>

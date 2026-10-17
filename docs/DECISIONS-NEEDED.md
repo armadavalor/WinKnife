@@ -830,3 +830,7 @@ not ours to take.
 
 - [ ] 2026-10-17 (QA): long operations that can leave the UI spinning were audited, not fixed (docs/QA-PLAN.md, Audit). Priority to decide: the global DB mutex (#37), duplicates Stop with a stale scan id (#38), no cancel/busy guard on execute/restore/purge (#39), panics leaving promises pending (#40); medium items grouped in #41. Cleaner Stop button and `busy` stuck after a failed `attachProgress` (A3/A4) go with the cleaner scan-hang fix.
 - [ ] 2026-10-17 (QA): the e2e job runs only on PRs to main and manual dispatch, not on push to main, because it really cleans and restores on the runner. A nightly 100k-Temp run would catch scale regressions; not added (cost) — decide if wanted.
+
+## Open items raised by the user (2026-10-18)
+
+- [ ] 2026-10-18 (user): "offer a direct delete that skips the quarantine, it could make deleting faster". This contradicts CLAUDE.md's hard rule (never permanently delete user files; the recycle bin is the one documented exception) — destructive, so escalated, not implemented. Facts for the decision: the slow 20 GB clean was the lock probe, not the quarantine move (a same-volume rename is ~0.4 ms); after the probe fix a quarantine clean of 85k files should take ~1–2 min. Options: (a) keep quarantine-only; (b) a per-run "delete immediately" opt-in that still moves to quarantine and purges right after, so the executor's three gates and the log stay; (c) true direct delete (needs a new K- decision and a CLAUDE.md change). Recommendation: (a), revisit (b) if the faster clean still feels slow.
