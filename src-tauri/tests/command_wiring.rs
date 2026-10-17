@@ -413,7 +413,10 @@ fn declared_commands() -> BTreeSet<String> {
     while let Some(line) = lines.next() {
         // Exact match, so the module doc comment that quotes the attribute is
         // not mistaken for one.
-        if line.trim() != "#[tauri::command]" {
+        if !matches!(
+            line.trim(),
+            "#[tauri::command]" | "#[tauri::command(async)]"
+        ) {
             continue;
         }
         let Some(signature) = lines.peek() else {

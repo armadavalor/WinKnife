@@ -1454,31 +1454,38 @@ pub const fn startup_folder_approval_key() -> &'static str {
 
 /// The [`StartupControl`] the executor holds.
 ///
-/// It owns a database handle because a Startup-folder entry's state lives in the
-/// ledger, and the executor has no way to reach one otherwise.
+/// A Startup-folder entry's state lives in the ledger, so every call takes the
+/// connection the executor already holds. The adapter must not keep a database
+/// handle of its own: the executor runs inside the database lock, and locking
+/// it again here deadlocked every disable and froze the window.
 pub struct StartupControlAdapter {
     service: Arc<StartupService>,
-    db: Arc<crate::core::db::Database>,
 }
 
 impl StartupControlAdapter {
-    /// Wire a service and a database together for the executor.
-    pub fn new(service: Arc<StartupService>, db: Arc<crate::core::db::Database>) -> Self {
-        Self { service, db }
+    /// Wire a service in for the executor.
+    pub fn new(service: Arc<StartupService>) -> Self {
+        Self { service }
     }
 }
 
 impl StartupControl for StartupControlAdapter {
-    fn read(&self, source: StartupSource, key: &str) -> Result<Option<LiveStartupEntry>> {
-        self.db
-            .with(|conn| self.service.read_entry(conn, source, key))
+    fn read(
+        &self,
+        conn: &Connection,
+        source: StartupSource,
+        key: &str,
+    ) -> Result<Option<LiveStartupEntry>> {
+        self.service.read_entry(conn, source, key)
     }
 
-    fn disable(&self, source: StartupSource, key: &str) -> Result<Vec<MoveWarning>> {
-        self.db.with(|conn| {
-            self.service
-                .set_enabled(conn, source, key, false, Utc::now())
-        })
+    fn disable(
+        &self,
+        conn: &Connection,
+        source: StartupSource,
+        key: &str,
+    ) -> Result<Vec<MoveWarning>> {
+        self.service.set_enabled(conn, source, key, false, Utc::now())
     }
 }
 
@@ -2204,6 +2211,45 @@ mod tests {
         assert!(shortcut.is_file(), "back where it was");
     }
 
+    /// Disabling from the Startup screen hung on "Working" and then froze the
+    /// window: the executor runs inside `Database::with`, and the adapter locked
+    /// the same non-reentrant mutex again. Driven the way `commands::execute`
+    /// drives it, under the lock, on a thread so a regression fails instead of
+    /// hanging the test run.
+    #[test]
+    fn the_executor_adapter_works_inside_the_database_lock() {
+        const DEADLOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+        let World {
+            _dir: dir,
+            conn,
+            service,
+            user_startup,
+            ..
+        } = world(MapRegistry::new(), MapTaskScheduler::new());
+        std::fs::write(user_startup.join("Vendor.lnk"), b"link").expect("write");
+        let adapter = StartupControlAdapter::new(Arc::new(service));
+        let database = crate::core::db::Database::new(conn);
+
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let outcome = database.with(|conn| {
+                let live = adapter.read(conn, StartupSource::UserStartupFolder, "Vendor.lnk")?;
+                adapter.disable(conn, StartupSource::UserStartupFolder, "Vendor.lnk")?;
+                let after = adapter.read(conn, StartupSource::UserStartupFolder, "Vendor.lnk")?;
+                Ok((live, after))
+            });
+            let _ = done.send(outcome);
+        });
+
+        let (live, after) = finished
+            .recv_timeout(DEADLOCK_TIMEOUT)
+            .expect("the adapter deadlocked on the database lock")
+            .expect("read and disable");
+        assert!(live.expect("listed before").enabled);
+        assert!(!after.expect("still listed after").enabled);
+        drop(dir);
+    }
+
     /// Round-2 review, MEDIUM: the executor's door hands the warnings on.
     #[test]
     fn the_executor_adapter_hands_back_a_stash_warning() {
@@ -2217,17 +2263,14 @@ mod tests {
         } = world(MapRegistry::new(), MapTaskScheduler::new());
         let shortcut = user_startup.join("Vendor.lnk");
         std::fs::write(&shortcut, b"link").expect("write");
-        let adapter = StartupControlAdapter::new(
-            Arc::new(service),
-            Arc::new(crate::core::db::Database::new(conn)),
-        );
+        let adapter = StartupControlAdapter::new(Arc::new(service));
 
         let warnings = {
             let _cross = seams::force_cross_volume();
             let _fail = seams::fail_delete_at(0);
             let _unreadable = seams::fail_identity_read();
             adapter
-                .disable(StartupSource::UserStartupFolder, "Vendor.lnk")
+                .disable(&conn, StartupSource::UserStartupFolder, "Vendor.lnk")
                 .expect("disable")
         };
 
