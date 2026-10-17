@@ -47,6 +47,7 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+use crate::core::db::{with_db, DbAccess};
 use crate::core::error::Result;
 
 /// Proof that a ledger row already accounts for the move about to happen.
@@ -114,7 +115,7 @@ pub enum LedgerStep<'a> {
 /// [`LedgerStep::Claim`] whose move failed, the row is retracted first, so the
 /// error never leaves a phantom behind.
 pub fn ledgered_move<T>(
-    conn: &Connection,
+    db: &dyn DbAccess,
     what: &str,
     step: LedgerStep<'_>,
     perform: impl FnOnce(&Recorded) -> Result<T>,
@@ -123,7 +124,7 @@ pub fn ledgered_move<T>(
         LedgerStep::Claim { write, undo } => {
             // The row is durable before anything moves. This is the whole point
             // of the module.
-            in_transaction(conn, write)?;
+            with_db(db, |conn| in_transaction(conn, write))?;
             let recorded = Recorded(());
 
             match perform(&recorded) {
@@ -133,7 +134,7 @@ pub fn ledgered_move<T>(
                     // Retract it — and say so out loud if even that fails,
                     // because a swallowed failure here is exactly the phantom
                     // the retraction exists to prevent (security review M3).
-                    if let Err(cleanup) = in_transaction(conn, undo) {
+                    if let Err(cleanup) = with_db(db, |conn| in_transaction(conn, undo)) {
                         tracing::error!(
                             what,
                             error = %cleanup,
@@ -150,7 +151,7 @@ pub fn ledgered_move<T>(
             // accounts for this move exactly as much as a fresh `Claim` would.
             let value = perform(&Recorded(()))?;
 
-            if let Err(failure) = in_transaction(conn, write) {
+            if let Err(failure) = with_db(db, |conn| in_transaction(conn, write)) {
                 // The file is already back where the user can see it, so nothing
                 // is lost — but the ledger still claims custody of it, and that
                 // claim has to be visible rather than swallowed. `reconcile`

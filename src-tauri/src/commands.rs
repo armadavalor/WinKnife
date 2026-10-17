@@ -405,39 +405,37 @@ pub async fn execute<R: Runtime>(
 
         let mut throttle = ProgressThrottle::new();
         let module = scan.module.clone();
-        let report = db.with(|conn| {
-            let env = ExecEnvironment {
-                quarantine: &services.quarantine,
-                conn,
-                brain: &services.brain,
-                recycle_bin: services.recycle_bin.as_ref(),
-                startup: services.startup.as_ref(),
+        let env = ExecEnvironment {
+            quarantine: &services.quarantine,
+            db: &**db,
+            brain: &services.brain,
+            recycle_bin: services.recycle_bin.as_ref(),
+            startup: services.startup.as_ref(),
+        };
+        let mut emit = |done: u64, total: u64, finding: &crate::core::types::Finding| {
+            // The final tick always goes out; the rest are throttled.
+            if done != total && !throttle.should_emit() {
+                return;
+            }
+            let payload = ExecProgress {
+                scan_id,
+                module: module.clone(),
+                items_done: done,
+                items_total: total,
+                current_path: Some(finding.path.display().to_string()),
             };
-            let mut emit = |done: u64, total: u64, finding: &crate::core::types::Finding| {
-                // The final tick always goes out; the rest are throttled.
-                if done != total && !throttle.should_emit() {
-                    return;
-                }
-                let payload = ExecProgress {
-                    scan_id,
-                    module: module.clone(),
-                    items_done: done,
-                    items_total: total,
-                    current_path: Some(finding.path.display().to_string()),
-                };
-                if let Err(err) = events::emit_exec_progress(&app, &payload) {
-                    tracing::debug!(error = %err, "exec progress event was not delivered");
-                }
-            };
-            executor::execute(
-                &units,
-                &env,
-                &executor::ExecOptions {
-                    confirm_empty_recycle_bin,
-                },
-                Some(&mut emit),
-            )
-        })?;
+            if let Err(err) = events::emit_exec_progress(&app, &payload) {
+                tracing::debug!(error = %err, "exec progress event was not delivered");
+            }
+        };
+        let report = executor::execute(
+            &units,
+            &env,
+            &executor::ExecOptions {
+                confirm_empty_recycle_bin,
+            },
+            Some(&mut emit),
+        )?;
 
         notify_quarantine_changed(&app, &services, &db, report.batch_id);
         Ok(report)
@@ -890,9 +888,8 @@ pub fn treemap_children(
 ) -> Result<treemap::TreeLevel, ApiError> {
     guarded("treemap_children", || {
         let (root, path) = mappable_level(&root, &path)?;
-        Ok(db.with(|conn| {
-            treemap::children(&path, &root, &treemap::CacheOracle::new(conn, &root))
-        })?)
+        let oracle = treemap::CacheOracle::new(&**db, &root);
+        Ok(treemap::children(&path, &root, &oracle)?)
     })
 }
 
@@ -1008,7 +1005,7 @@ pub async fn startup_scan<R: Runtime>(
 ) -> Result<StartupScanResult, ApiError> {
     guarded_async("startup_scan", async {
         let started_at = Utc::now();
-        let scan = db.with(|conn| Ok(services.startup_service.scan(conn)))?;
+        let scan = services.startup_service.scan(&**db);
         let scan_id = Uuid::new_v4();
 
         let mut findings = Vec::with_capacity(scan.entries.len());
@@ -1199,6 +1196,9 @@ pub fn startup_enable(
     db: State<'_, Arc<Database>>,
 ) -> Result<Vec<crate::core::types::MoveWarning>, ApiError> {
     guarded("startup_enable", || {
+        // Re-enabling moves a held shortcut back out of the drawer, so it is
+        // refused while a clean, restore or purge is running.
+        let _busy = services.quarantine.begin(Operation::Restore)?;
         Ok(db.with(|conn| {
             services
                 .startup_service
@@ -1499,8 +1499,7 @@ pub fn quarantine_restore<R: Runtime>(
 ) -> Result<RestoreReport, ApiError> {
     guarded("quarantine_restore", || {
         let _busy = services.quarantine.begin(Operation::Restore)?;
-        let (restored, failed) =
-            db.with(|conn| services.quarantine.restore_batch(conn, batch_id))?;
+        let (restored, failed) = services.quarantine.restore_batch(&**db, batch_id)?;
         notify_quarantine_changed(&app, &services, &db, Some(batch_id));
         Ok(RestoreReport {
             restored,
@@ -1525,7 +1524,7 @@ pub fn quarantine_restore_item<R: Runtime>(
 ) -> Result<RestoreOutcome, ApiError> {
     guarded("quarantine_restore_item", || {
         let _busy = services.quarantine.begin(Operation::Restore)?;
-        let outcome = db.with(|conn| services.quarantine.restore_item(conn, item_id))?;
+        let outcome = services.quarantine.restore_item(&**db, item_id)?;
         notify_quarantine_changed(&app, &services, &db, None);
         Ok(outcome)
     })
@@ -1543,7 +1542,7 @@ pub fn quarantine_purge<R: Runtime>(
 ) -> Result<PurgeReport, ApiError> {
     guarded("quarantine_purge", || {
         let _busy = services.quarantine.begin(Operation::Purge)?;
-        let report = db.with(|conn| services.quarantine.purge(conn, Utc::now()))?;
+        let report = services.quarantine.purge(&**db, Utc::now())?;
         notify_quarantine_changed(&app, &services, &db, None);
         Ok(report)
     })
@@ -1565,7 +1564,7 @@ pub fn quarantine_purge_item<R: Runtime>(
 ) -> Result<PurgeReport, ApiError> {
     guarded("quarantine_purge_item", || {
         let _busy = services.quarantine.begin(Operation::Purge)?;
-        let report = db.with(|conn| services.quarantine.purge_item(conn, item_id))?;
+        let report = services.quarantine.purge_item(&**db, item_id)?;
         notify_quarantine_changed(&app, &services, &db, None);
         Ok(report)
     })

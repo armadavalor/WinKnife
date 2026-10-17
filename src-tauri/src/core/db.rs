@@ -185,6 +185,54 @@ impl Database {
     }
 }
 
+/// Something that can lend out the connection for one short piece of work.
+///
+/// Long operations (a clean, a restore, a purge, a startup scan) take this
+/// instead of a `&Connection` so they can lock per statement rather than for
+/// their whole run: the filesystem work between two ledger writes then happens
+/// with the lock released, and the drawer, the settings and the treemap stay
+/// responsive meanwhile (audit issue #37). A bare `Connection` implements it
+/// too, so tests and single-threaded start-up code keep passing one directly.
+///
+/// Object-safe on purpose; [`with_db`] is the typed way to call it.
+pub trait DbAccess {
+    /// Run `f` with the connection, holding whatever lock guards it only for
+    /// the length of the call.
+    ///
+    /// # Errors
+    /// Returns whatever `f` returned.
+    fn access(&self, f: &mut dyn FnMut(&Connection) -> Result<()>) -> Result<()>;
+}
+
+impl DbAccess for Connection {
+    fn access(&self, f: &mut dyn FnMut(&Connection) -> Result<()>) -> Result<()> {
+        f(self)
+    }
+}
+
+impl DbAccess for Database {
+    fn access(&self, f: &mut dyn FnMut(&Connection) -> Result<()>) -> Result<()> {
+        self.with(|conn| f(conn))
+    }
+}
+
+/// Run `f` through `db` and hand back its value.
+///
+/// # Errors
+/// Returns whatever `f` returned, or [`CoreError::Db`] if `db` never called
+/// it (no implementation here does that).
+pub fn with_db<T>(db: &dyn DbAccess, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+    let mut f = Some(f);
+    let mut out = None;
+    db.access(&mut |conn| {
+        if let Some(f) = f.take() {
+            out = Some(f(conn)?);
+        }
+        Ok(())
+    })?;
+    out.ok_or(CoreError::Db(rusqlite::Error::InvalidQuery))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

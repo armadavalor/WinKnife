@@ -793,7 +793,7 @@ mod tests {
         let bin = StubRecycleBin::default();
         let env = ExecEnvironment {
             quarantine: &rig.quarantine,
-            conn: &rig.conn,
+            db: &rig.conn,
             brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
