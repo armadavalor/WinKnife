@@ -44,11 +44,22 @@ pub trait LockProbe: Send + Sync {
     fn probe(&self, path: &Path) -> LockState;
 }
 
-/// The real probe: try to open the file for reading with no sharing allowed.
+/// The real probe: try to open the file with no sharing allowed.
 ///
-/// On Windows an exclusive open fails while any other handle exists, which is
-/// exactly the question being asked. Read access only, so a read-only file is
-/// not misreported as inaccessible.
+/// On Windows an exclusive open fails while any other handle with read, write
+/// or delete access exists, which is exactly the question being asked. The
+/// sharing check compares *our* share mode (none) against *their* access, so
+/// it gives the same answer whatever access we ask for ourselves.
+///
+/// # Why it asks for `DELETE`, not read
+///
+/// A read open is what Microsoft Defender scans on access. It cost ~7 ms per
+/// file on the development machine, so a clean of 85,000 junk files spent 12
+/// minutes almost entirely inside this probe, and a scan pinned Defender at
+/// 85–90% CPU. `DELETE | FILE_READ_ATTRIBUTES` reads no data and is not
+/// scanned (~0.1 ms), and `DELETE` is the right a rename into the quarantine
+/// needs anyway. Read access stays as the fallback for an ACL that grants read
+/// but not delete, so such a file is not misreported as inaccessible.
 ///
 /// # Why the open does not count as modifying the file
 ///
@@ -92,7 +103,7 @@ impl LockProbe for SystemLockProbe {
                     // ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33)
                     // both mean "someone else has it".
                     _ => match err.raw_os_error() {
-                        Some(32) | Some(33) => LockState::InUse,
+                        Some(SHARING_VIOLATION | LOCK_VIOLATION) => LockState::InUse,
                         _ => LockState::Inaccessible,
                     },
                 },
@@ -115,40 +126,71 @@ impl LockProbe for SystemLockProbe {
 
 /// Open `path` exclusively without letting the open move its last-access time.
 ///
-/// Two attempts, and the second is the reason this is a function rather than a
-/// line:
+/// Up to four attempts, cheapest first; a sharing violation ends the search at
+/// once, because it is the answer:
 ///
-/// 1. `FILE_GENERIC_READ | FILE_WRITE_ATTRIBUTES`. The extra right is what
-///    `SetFileTime` needs, and it is the only way to ask for the suppression.
-/// 2. `FILE_GENERIC_READ` alone, if the first was refused. An ACL that grants
-///    read but not write-attributes is unusual and entirely legal, and a probe
-///    that reported such a file `Inaccessible` would quietly stop the cleaner
+/// 1. `DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES`. No data access,
+///    so Defender does not scan the open, and the extra right is what
+///    `SetFileTime` needs for the last-access suppression.
+/// 2. `DELETE | FILE_READ_ATTRIBUTES`, for an ACL without write-attributes. A
+///    handle that reads no data moves no access time to begin with.
+/// 3. `FILE_GENERIC_READ | FILE_WRITE_ATTRIBUTES`, for an ACL that grants read
+///    but not delete. Slow (scanned on access) but rare.
+/// 4. `FILE_GENERIC_READ` alone. An ACL that grants read but neither delete
+///    nor write-attributes is unusual and entirely legal, and a probe that
+///    reported such a file `Inaccessible` would quietly stop the cleaner
 ///    offering anything in that tree. Losing the suppression is the smaller
 ///    harm — and `brain::score` already reads two clocks precisely so a bumped
 ///    access time cannot make a fresh file look forgotten.
 ///
-/// The error from the *second* attempt is the one returned, because it is the
+/// The error from the *last* attempt is the one returned, because it is the
 /// plain-read question the caller is actually asking: it classifies a sharing
 /// violation as `InUse` and a denial as `Inaccessible` exactly as before.
 #[cfg(windows)]
 fn open_leaving_the_clock_alone(path: &Path) -> std::io::Result<std::fs::File> {
-    use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_WRITE_ATTRIBUTES};
+    use windows::Win32::Storage::FileSystem::{
+        DELETE, FILE_GENERIC_READ, FILE_READ_ATTRIBUTES, FILE_WRITE_ATTRIBUTES,
+    };
 
-    if let Ok(file) = open_exclusive(path, FILE_GENERIC_READ.0 | FILE_WRITE_ATTRIBUTES.0) {
-        if suppress_access_time_updates(&file) {
-            return Ok(file);
+    let delete = DELETE.0 | FILE_READ_ATTRIBUTES.0;
+    let attempts = [
+        delete | FILE_WRITE_ATTRIBUTES.0,
+        delete,
+        FILE_GENERIC_READ.0 | FILE_WRITE_ATTRIBUTES.0,
+        FILE_GENERIC_READ.0,
+    ];
+
+    let mut last_error = None;
+    for access in attempts {
+        match open_exclusive(path, access) {
+            Ok(file) => {
+                if access & FILE_WRITE_ATTRIBUTES.0 != 0 && !suppress_access_time_updates(&file) {
+                    // The handle is good but the suppression was refused; a
+                    // re-open would only give the same answer, so keep this one.
+                    tracing::debug!(
+                        path = %path.display(),
+                        "could not suppress last-access updates for this handle"
+                    );
+                }
+                return Ok(file);
+            }
+            Err(err) if is_sharing_violation(&err) => return Err(err),
+            Err(err) => last_error = Some(err),
         }
-        // The handle is good but the suppression was refused; the fall-through
-        // would only re-open it for the same answer, so keep this one.
-        tracing::debug!(
-            path = %path.display(),
-            "could not suppress last-access updates for this handle"
-        );
-        return Ok(file);
     }
-
-    open_exclusive(path, FILE_GENERIC_READ.0)
+    Err(last_error.unwrap_or_else(|| std::io::Error::other("no open was attempted")))
 }
+
+/// `ERROR_SHARING_VIOLATION` or `ERROR_LOCK_VIOLATION`: someone else holds it.
+#[cfg(windows)]
+fn is_sharing_violation(err: &std::io::Error) -> bool {
+    matches!(err.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION))
+}
+
+#[cfg(windows)]
+const SHARING_VIOLATION: i32 = 32;
+#[cfg(windows)]
+const LOCK_VIOLATION: i32 = 33;
 
 /// One exclusive open with an explicit desired-access mask.
 #[cfg(windows)]
@@ -454,6 +496,49 @@ mod tests {
         drop(file);
 
         assert_eq!(SystemLockProbe.probe(&path), LockState::Free);
+    }
+
+    /// Most programs hold a file with read sharing on. The probe asks for
+    /// delete rather than read, and must still see such a handle: the sharing
+    /// check is our share mode (none) against their access, not the reverse.
+    #[cfg(windows)]
+    #[test]
+    fn a_file_held_open_with_full_sharing_is_still_in_use() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("shared.log");
+        std::fs::write(&path, b"payload").expect("write");
+
+        // FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE.
+        let _held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(7)
+            .open(&path)
+            .expect("hold the file open with every sharing flag");
+
+        assert_eq!(SystemLockProbe.probe(&path), LockState::InUse);
+    }
+
+    /// The delete-access open must not turn the read-only attribute into a
+    /// false "in use" or "inaccessible": cross-volume copies keep that flag
+    /// and the cleaner still has to be able to offer them.
+    #[cfg(windows)]
+    #[test]
+    fn a_read_only_file_is_reported_free() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("readonly.bin");
+        std::fs::write(&path, b"payload").expect("write");
+        let mut permissions = std::fs::metadata(&path).expect("metadata").permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions).expect("set read-only");
+
+        assert_eq!(SystemLockProbe.probe(&path), LockState::Free);
+
+        let mut permissions = std::fs::metadata(&path).expect("metadata").permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).expect("clear read-only for cleanup");
     }
 
     #[test]
