@@ -90,12 +90,22 @@ pub struct LiveStartupEntry {
 pub trait StartupControl: Send + Sync {
     /// Read the entry at `source`/`key` as it stands now.
     ///
+    /// `conn` is the ledger connection the executor already holds. The control
+    /// must use it and never lock the database itself: the executor runs inside
+    /// that lock, and the lock is not reentrant (a second lock froze the app on
+    /// every disable).
+    ///
     /// `Ok(None)` means it is no longer there, which gate 4 treats as a refusal
     /// rather than as success.
     ///
     /// # Errors
     /// Returns an error when the source itself could not be read.
-    fn read(&self, source: StartupSource, key: &str) -> Result<Option<LiveStartupEntry>>;
+    fn read(
+        &self,
+        conn: &Connection,
+        source: StartupSource,
+        key: &str,
+    ) -> Result<Option<LiveStartupEntry>>;
 
     /// Stop the entry running at the next logon, reversibly.
     ///
@@ -103,7 +113,12 @@ pub trait StartupControl: Send + Sync {
     /// Returns an error when the change was refused (an `HKLM` entry needs
     /// elevation) or the entry is unknown. On success, what the user should
     /// know about a shortcut move that happened only in part.
-    fn disable(&self, source: StartupSource, key: &str) -> Result<Vec<MoveWarning>>;
+    fn disable(
+        &self,
+        conn: &Connection,
+        source: StartupSource,
+        key: &str,
+    ) -> Result<Vec<MoveWarning>>;
 }
 
 /// A control that refuses everything, for the batches that contain no autostart
@@ -116,11 +131,21 @@ pub trait StartupControl: Send + Sync {
 pub struct NoStartupControl;
 
 impl StartupControl for NoStartupControl {
-    fn read(&self, _source: StartupSource, _key: &str) -> Result<Option<LiveStartupEntry>> {
+    fn read(
+        &self,
+        _conn: &Connection,
+        _source: StartupSource,
+        _key: &str,
+    ) -> Result<Option<LiveStartupEntry>> {
         Ok(None)
     }
 
-    fn disable(&self, _source: StartupSource, key: &str) -> Result<Vec<MoveWarning>> {
+    fn disable(
+        &self,
+        _conn: &Connection,
+        _source: StartupSource,
+        key: &str,
+    ) -> Result<Vec<MoveWarning>> {
         Err(crate::core::error::CoreError::UnknownStartupEntry(
             key.to_owned(),
         ))
@@ -639,7 +664,7 @@ fn disable_startup_entry(
         );
     };
 
-    match env.startup.disable(*source, key) {
+    match env.startup.disable(env.conn, *source, key) {
         // No bytes are reclaimed by turning something off, and saying otherwise
         // would put an invented figure in the report.
         // A shortcut moved only in part says so in the item's result
@@ -664,7 +689,7 @@ fn startup_refusal(
     command: &str,
     env: &ExecEnvironment<'_>,
 ) -> Option<String> {
-    let live = match env.startup.read(source, key) {
+    let live = match env.startup.read(env.conn, source, key) {
         Ok(Some(live)) => live,
         Ok(None) => {
             return Some(format!(
@@ -1052,7 +1077,12 @@ mod tests {
     struct WarningStartup;
 
     impl StartupControl for WarningStartup {
-        fn read(&self, _source: StartupSource, _key: &str) -> Result<Option<LiveStartupEntry>> {
+        fn read(
+            &self,
+            _conn: &Connection,
+            _source: StartupSource,
+            _key: &str,
+        ) -> Result<Option<LiveStartupEntry>> {
             Ok(Some(LiveStartupEntry {
                 command: r"C:\Vendor\vendor.exe".to_owned(),
                 enabled: true,
@@ -1060,7 +1090,12 @@ mod tests {
             }))
         }
 
-        fn disable(&self, _source: StartupSource, _key: &str) -> Result<Vec<MoveWarning>> {
+        fn disable(
+            &self,
+            _conn: &Connection,
+            _source: StartupSource,
+            _key: &str,
+        ) -> Result<Vec<MoveWarning>> {
             Ok(vec![MoveWarning {
                 path: r"C:\Startup\Vendor.lnk".to_owned(),
                 reason: "both kept".to_owned(),

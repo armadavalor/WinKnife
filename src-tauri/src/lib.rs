@@ -335,14 +335,13 @@ pub fn manage_state<R: tauri::Runtime>(
         quarantine,
         brain,
         recycle_bin: core::platform::real_recycle_bin(),
-        startup: Arc::new(modules::startup::StartupControlAdapter::new(
-            Arc::clone(&startup_service),
-            Arc::clone(&database),
-        )),
+        startup: Arc::new(modules::startup::StartupControlAdapter::new(Arc::clone(
+            &startup_service,
+        ))),
         startup_service,
         rules_dir,
     });
-    // `Arc<Database>`, because the startup adapter above holds a clone. Every
+    // `Arc<Database>`, as every
     // `db:` parameter in `commands.rs` and every `try_state` in this file has to
     // spell it the same way.
     app.manage(database);
