@@ -1926,3 +1926,12 @@ The lock probe stays per file; it now just runs in parallel.
 
 **Deferred.** The 81 MB IPC payload is sent in one piece. Streaming or paging
 it from the backend is a separate change.
+
+## 2026-10-18 — Stop sends the running scan's id (#38, A9)
+
+**Fixed.** Duplicates Stop cancelled `result.scanId`: null on a first scan,
+the previous finished scan on Scan again, so the UI sat on "Stopping…" until
+the scan ended by itself. It now takes the id from the scan's own progress
+events, as Empty folders and the cleaner do. In both Duplicates and Empty
+folders a Stop pressed before the first progress event is sent as soon as that
+event names the scan (A9). Frontend only; no backend change.

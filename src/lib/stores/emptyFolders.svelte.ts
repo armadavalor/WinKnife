@@ -152,7 +152,12 @@ class EmptyFoldersStore {
       if (payload.module !== MODULE_ID) {
         return;
       }
+      // A Stop pressed before the first event had no id to send; send it now.
+      const isFirstEvent = this.runningScanId === null;
       this.runningScanId = payload.scanId;
+      if (isFirstEvent && this.stopping) {
+        void cancelScan(payload.scanId);
+      }
       this.currentPath = payload.currentPath;
       this.pct = payload.pct;
     });
