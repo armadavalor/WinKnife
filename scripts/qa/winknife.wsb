@@ -1,0 +1,36 @@
+<!--
+  Windows Sandbox profile for WinKnife QA (docs/QA-PLAN.md).
+
+  Easiest: run scripts\qa\Start-QASandbox.ps1, which fills in the two host
+  paths below and opens the sandbox. To use this file by hand, replace both
+  HostFolder values with absolute paths on your machine:
+    - the repo's scripts\qa folder
+    - a folder holding one WinKnife_*_x64-setup.exe (release download or the
+      CI "winknife-installer" artifact)
+  Both are mapped read-only. Everything inside the sandbox is thrown away
+  when it closes.
+
+  Windows Sandbox is an optional Windows feature (Pro/Enterprise/Education).
+  Enable it yourself: Settings > Apps > Optional features > More Windows
+  features > "Windows Sandbox", then reboot.
+-->
+<Configuration>
+  <VGpu>Enable</VGpu>
+  <Networking>Disable</Networking>
+  <MemoryInMB>6144</MemoryInMB>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\path\to\WinKnife\scripts\qa</HostFolder>
+      <SandboxFolder>C:\qa\scripts</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\path\to\installer-folder</HostFolder>
+      <SandboxFolder>C:\qa\installer</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Normal -File C:\qa\scripts\sandbox-bootstrap.ps1 -TempFiles 100000</Command>
+  </LogonCommand>
+</Configuration>

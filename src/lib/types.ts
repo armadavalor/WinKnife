@@ -196,8 +196,6 @@ export interface ScanProgress {
   currentPath: string | null;
   /** 0-100 when it can be estimated at all. */
   pct: number | null;
-  /** Items to get through when the total is known (the cleaner's analyse phase). */
-  itemsTotal: number | null;
 }
 
 /** Payload of `scan:done`. */
@@ -240,8 +238,6 @@ export interface ScanResult {
   recommendations: Recommendation[];
   /** Rules that could not run, as `pack/rule: %VARIABLE%`. */
   skippedRules: string[];
-  /** Whether the scan was stopped early, so the lists are incomplete. */
-  cancelled: boolean;
 }
 
 /* -------------------------------------------------------------------------

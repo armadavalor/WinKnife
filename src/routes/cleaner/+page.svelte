@@ -133,31 +133,14 @@
       </div>
     </section>
   {:else if store.step === "scanning"}
-    {@const total = store.itemsTotal}
-    {@const label = total === null ? t("cleaner.scanning") : t("cleaner.analyzing")}
     <section class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-6">
-      <div class="flex items-center gap-3">
-        <p class="flex-1 text-sm">{label}</p>
-        <button
-          type="button"
-          class="btn-ghost px-3! py-1.5!"
-          disabled={store.stopping || !store.runningScanId}
-          onclick={() => store.stop()}
-        >
-          {store.stopping ? t("cleaner.stopping") : t("cleaner.stop")}
-        </button>
-      </div>
-      <ProgressBar
-        {label}
-        pct={total ? Math.floor((store.itemsScanned / total) * 100) : null}
-      />
+      <p class="text-sm">{t("cleaner.scanning")}</p>
+      <ProgressBar label={t("cleaner.scanning")} />
       <p class="font-mono text-xs text-ink-faint">
         {store.currentPath ? truncatePath(store.currentPath, 70) : "…"}
       </p>
       <p class="text-xs text-ink-faint">
-        {total === null
-          ? t("cleaner.itemsScanned", { count: store.itemsScanned })
-          : t("cleaner.analyzed", { done: store.itemsScanned, total })}
+        {t("cleaner.itemsScanned", { count: store.itemsScanned })}
       </p>
     </section>
   {:else if store.step === "executing"}
@@ -226,12 +209,6 @@
         {t("cleaner.scanAgain")}
       </button>
     </section>
-
-    {#if store.result?.cancelled}
-      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
-        {t("cleaner.cancelled")}
-      </p>
-    {/if}
 
     {#if store.result && store.result.skippedRules.length > 0}
       <details class="group">

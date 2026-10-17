@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      temp_files:
+        description: Temp fixture size for the e2e job (100000 = the "huge Temp" case)
+        required: false
+        default: "5000"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -108,3 +113,69 @@ jobs:
           name: winknife-installer
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
+
+  # Drives the installed app over the WebView2 DevTools protocol on a dirty
+  # fixture profile (docs/QA-PLAN.md). It really cleans and restores, so it
+  # only ever runs on this throwaway runner, against C:\Users\QA. Not on push
+  # to main: PRs and manual runs are where a regression should be caught.
+  e2e:
+    name: e2e on a dirty profile (windows)
+    needs: build
+    if: github.event_name != 'push'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      QA_HOME: C:\Users\QA
+      TEMP_FILES: ${{ inputs.temp_files || '5000' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: winknife-installer
+          path: dl
+
+      - name: Install
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dl -Filter *-setup.exe | Select-Object -First 1
+          Start-Process $exe.FullName -ArgumentList '/S' -Wait
+          $app = Join-Path $env:LOCALAPPDATA 'WinKnife\winknife.exe'
+          if (-not (Test-Path $app)) { throw "winknife.exe not installed" }
+          "APP=$app" >> $env:GITHUB_ENV
+
+      # Generator, app and tests share one step: the fixture's lock-helper
+      # process must still hold its file when the unlocker test runs.
+      - name: Dirty profile, launch, run e2e
+        shell: pwsh
+        run: |
+          ./scripts/qa/New-DirtyProfile.ps1 -Root $env:QA_HOME -TempFiles ([int]$env:TEMP_FILES)
+          $env:USERPROFILE = $env:QA_HOME
+          $env:HOMEPATH = '\Users\QA'
+          $env:LOCALAPPDATA = "$env:QA_HOME\AppData\Local"
+          $env:APPDATA = "$env:QA_HOME\AppData\Roaming"
+          $env:TEMP = "$env:QA_HOME\AppData\Local\Temp"
+          $env:TMP = $env:TEMP
+          $env:USERNAME = 'QA'
+          # Same as demo.yml: only the machine-wide per-app policy opens the
+          # DevTools port on the elevated runner. Throwaway runner only.
+          $key = 'HKLM:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+          New-Item -Force $key | Out-Null
+          New-ItemProperty -Force $key -Name 'winknife.exe' -Value '--remote-debugging-port=9222' | Out-Null
+          $p = Start-Process $env:APP -PassThru
+          node scripts/qa/e2e.mjs "$env:QA_HOME\winknife-fixture.json" e2e-out
+          $code = $LASTEXITCODE
+          if ($p.HasExited) { "app exited early with $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
+          exit $code
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: e2e-out
+          if-no-files-found: ignore
