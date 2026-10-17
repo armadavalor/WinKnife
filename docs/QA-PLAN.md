@@ -128,7 +128,7 @@ Legend: **E2E** = a test name from `scripts/qa/e2e.mjs`; `snake_case` = a
 | Access denied | `an_access_denied_subtree_is_treated_as_not_empty` |
 | Long/unicode paths | Sandbox |
 | Junctions/symlinks | `a_junction_is_not_followed_and_not_reported` |
-| Cancel mid-run | `cancelling_stops_the_scan_with_no_findings`; E2E "empty folders: Stop…" |
+| Cancel mid-run | `cancelling_stops_the_scan_with_no_findings`; E2E "empty folders: Stop on a big folder" |
 | Undo/restore | Sandbox (remove → restore from drawer) |
 | Restart mid-op | Sandbox |
 | Happy path | E2E "empty folders: finds the fixture tree…"; `a_nested_empty_tree_reports_only_its_top` |

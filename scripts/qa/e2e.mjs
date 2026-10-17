@@ -242,10 +242,16 @@ test("empty folders: finds the fixture tree, keeps the folder with a file", asyn
   expect(exists(fx.emptyKeep), `scan touched ${fx.emptyKeep}`);
 });
 
-test("empty folders: Stop on a whole-drive scan", async () => {
+// A drive root is refused as a scan root, and the protected trees are skipped,
+// so Stop needs a big unprotected folder: the runner's tool cache, or
+// WINKNIFE_QA_BIG_DIR (e.g. a large folder inside Windows Sandbox).
+const BIG_DIR = [process.env.WINKNIFE_QA_BIG_DIR, "C:\\hostedtoolcache"].find((d) => d && exists(d));
+
+test("empty folders: Stop on a big folder", async () => {
+  expect(BIG_DIR, "no big folder to scan; set WINKNIFE_QA_BIG_DIR");
   await goTo("empty-folders");
   if (await has("button", "Scan again")) await click("button", "Scan again");
-  await setInput('main input[type="text"]', "C:\\");
+  await setInput('main input[type="text"]', BIG_DIR);
   await click("button", "Find empty folders");
   await click("button", "Stop");
   await waitFor("*", "The scan was stopped early", null, STEP_TIMEOUT_MS);
@@ -282,7 +288,7 @@ test("treemap: map C:, Stop, button comes back", async () => {
 
 test("keep awake: start and stop", async () => {
   await goTo("keep-awake");
-  await click("main button", "Keep awake");
+  await click("main button", "30 minutes");
   await waitFor("*", "Staying awake for");
   await click("main button", "Stop");
   await waitFor("*", "The PC can sleep as usual.");
