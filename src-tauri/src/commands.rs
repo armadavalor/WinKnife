@@ -193,6 +193,7 @@ pub async fn start_scan<R: Runtime>(
                 items_scanned: items,
                 current_path: Some(path.display().to_string()),
                 pct: None,
+                items_total: None,
             };
             if let Err(err) = events::emit_scan_progress(&app, &payload) {
                 tracing::debug!(error = %err, "scan progress event was not delivered");
@@ -212,21 +213,64 @@ pub async fn start_scan<R: Runtime>(
         )
     };
 
+    tracing::info!(
+        scan = %scan_id,
+        findings = output.findings.len(),
+        cancelled = output.cancelled,
+        "scan walk finished, analysing"
+    );
+
+    // Judging every finding is the long half on a full `%TEMP%` (a path
+    // check and a lock probe each), so it reports progress against a known
+    // total and stays cancellable: the token is only released after it.
+    let analysed = {
+        let mut throttle = ProgressThrottle::new();
+        let mut emit = |done: u64, total: u64, path: &Path| {
+            // The final tick always goes out; the rest are throttled.
+            if done != total && !throttle.should_emit() {
+                return;
+            }
+            let payload = ScanProgress {
+                scan_id,
+                module: module_id.clone(),
+                items_scanned: done,
+                current_path: Some(path.display().to_string()),
+                pct: percent(done, total),
+                items_total: Some(total),
+            };
+            if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                tracing::debug!(error = %err, "scan progress event was not delivered");
+            }
+        };
+        cleaner::analyze_with(
+            &output.findings,
+            &services.brain,
+            Utc::now(),
+            &cancel,
+            Some(&mut emit),
+        )
+    };
+
     cancels.finish(scan_id);
 
-    let recommendations = cleaner::analyze(&output.findings, &services.brain);
+    // On a stop, only the judged prefix is kept: a finding without its
+    // recommendation must never reach the review screen.
+    let mut findings = output.findings;
+    findings.truncate(analysed.analyzed);
     let result = ScanResult {
         scan_id,
         module: module_id.clone(),
-        findings: output.findings,
-        recommendations,
+        findings,
+        recommendations: analysed.recommendations,
         skipped_rules: output.skipped_rules,
+        cancelled: output.cancelled || analysed.cancelled,
     };
 
     tracing::info!(
         scan = %scan_id,
         findings = result.findings.len(),
         unreadable = output.unreadable.len(),
+        cancelled = result.cancelled,
         "scan finished"
     );
 
@@ -237,7 +281,7 @@ pub async fn start_scan<R: Runtime>(
         started_at,
         result.findings.len() as u64,
         result.safe_bytes() + result.review_bytes(),
-        false,
+        result.cancelled,
     );
 
     let done = ScanDone {
@@ -421,6 +465,7 @@ pub async fn start_duplicate_scan<R: Runtime>(
             items_scanned: progress.done,
             current_path: Some(progress.current_path.display().to_string()),
             pct: percent(progress.done, progress.total),
+            items_total: None,
         };
         if let Err(err) = events::emit_scan_progress(&app, &payload) {
             tracing::debug!(error = %err, "duplicate progress event was not delivered");
@@ -458,6 +503,7 @@ pub async fn start_duplicate_scan<R: Runtime>(
         findings: scan.findings.clone(),
         recommendations: recommendations.clone(),
         skipped_rules: scan.skipped_roots.clone(),
+        cancelled: false,
     });
 
     remember(
@@ -561,6 +607,7 @@ pub async fn start_empty_folder_scan<R: Runtime>(
             items_scanned: visited,
             current_path: Some(current.display().to_string()),
             pct: None,
+            items_total: None,
         };
         if let Err(err) = events::emit_scan_progress(&app, &payload) {
             tracing::debug!(error = %err, "empty-folder progress event was not delivered");
@@ -584,6 +631,7 @@ pub async fn start_empty_folder_scan<R: Runtime>(
         findings: output.findings.clone(),
         recommendations: recommendations.clone(),
         skipped_rules: Vec::new(),
+        cancelled: false,
     });
     remember(
         &db,
@@ -688,6 +736,7 @@ pub async fn treemap_scan<R: Runtime>(
                 items_scanned: progress.entries,
                 current_path: Some(progress.current_path.display().to_string()),
                 pct: None,
+                items_total: None,
             };
             if let Err(err) = events::emit_scan_progress(&app, &payload) {
                 tracing::debug!(error = %err, "treemap progress event was not delivered");
@@ -892,6 +941,7 @@ pub async fn startup_scan<R: Runtime>(
         findings,
         recommendations: recommendations.clone(),
         skipped_rules: scan.unreadable.clone(),
+        cancelled: false,
     });
 
     remember(

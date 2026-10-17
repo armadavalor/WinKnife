@@ -1899,6 +1899,13 @@ runner. Duplicates Stop is `knownIssue` (xfail) until #38 is fixed. Audit of
 long operations that can spin silently recorded in QA-PLAN and filed as
 #37–#41; nothing fixed here, the cleaner hang is fixed separately.
 
+## 2026-10-18 — Cleaner at real `%TEMP%` scale
+
+**Problem.** On a machine with ~86 600 files in `%LOCALAPPDATA%\Temp`,
+"Scan for junk" walked every pack in about 50 s and then never logged
+`scan finished`. The work after the walk ran per finding and in sequence,
+showed no progress and could not be cancelled.
+
 **Measured** (`tests/cleaner_scale.rs`, ignored 100 000-file fixture, release,
 12 cores):
 

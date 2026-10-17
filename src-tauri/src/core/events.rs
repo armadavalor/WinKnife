@@ -46,6 +46,10 @@ pub struct ScanProgress {
     pub current_path: Option<String>,
     /// Completion percentage when it can be estimated at all.
     pub pct: Option<u8>,
+    /// How many items there are in all, once that is known (the cleaner's
+    /// analyse phase, after the walk). `None` while still counting.
+    #[serde(default)]
+    pub items_total: Option<u64>,
 }
 
 /// Payload of [`SCAN_DONE`].
@@ -222,6 +226,7 @@ mod tests {
             items_scanned: 7,
             current_path: None,
             pct: Some(50),
+            items_total: None,
         })
         .expect("serialize");
         assert!(json.get("itemsScanned").is_some(), "got {json}");
