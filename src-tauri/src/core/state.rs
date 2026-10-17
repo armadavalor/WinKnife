@@ -33,6 +33,10 @@ pub struct ScanResult {
     /// as `pack/rule: VARIABLE`. Surfaced so a partial scan says so.
     #[serde(default)]
     pub skipped_rules: Vec<String>,
+    /// Whether the scan was stopped early. The lists then hold only what was
+    /// fully judged before the stop.
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 impl ScanResult {
@@ -192,6 +196,7 @@ mod tests {
             findings: vec![finding],
             recommendations: vec![rec],
             skipped_rules: Vec::new(),
+            cancelled: false,
         }
     }
 
@@ -265,6 +270,7 @@ mod tests {
                 make(RiskBucket::DoNotDelete, 9_000),
             ],
             skipped_rules: Vec::new(),
+            cancelled: false,
         };
 
         assert_eq!(scan.safe_bytes(), 150);

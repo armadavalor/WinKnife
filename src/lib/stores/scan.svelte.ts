@@ -6,6 +6,7 @@
  * what you picked, here is what happened".
  */
 import {
+  cancelScan,
   execute as invokeExecute,
   onScanProgress,
   scanSummary,
@@ -37,16 +38,28 @@ function message(error: unknown): string {
 class ScanStore {
   /** Current step. */
   step = $state<Step>("idle");
-  /** The scan, once it has run. */
-  result = $state<ScanResult | null>(null);
+  /**
+   * The scan, once it has run.
+   *
+   * Raw, not deep: a full `%TEMP%` is a hundred thousand findings, and a deep
+   * proxy over every one of them cost more than rendering them. The result is
+   * replaced whole, never edited in place.
+   */
+  result = $state.raw<ScanResult | null>(null);
   /** Bucket totals. */
   summary = $state<CleanerSummary | null>(null);
   /** Selected recommendation ids. */
   selected = $state<Set<string>>(new Set());
   /** Path the scanner is currently looking at. */
   currentPath = $state<string | null>(null);
-  /** Items walked so far. */
+  /** Items walked so far (or, while analysing, findings judged so far). */
   itemsScanned = $state(0);
+  /** Findings to judge once the walk is over; `null` while still walking. */
+  itemsTotal = $state<number | null>(null);
+  /** Id of the running scan, from its first progress event. */
+  runningScanId = $state<string | null>(null);
+  /** Whether a stop was asked for and not yet answered. */
+  stopping = $state(false);
   /** Report of the last execute. */
   report = $state<ExecReport | null>(null);
   /** Message of the last failure. */
@@ -54,8 +67,14 @@ class ScanStore {
 
   private unlistenProgress: (() => void) | null = null;
 
-  /** Every recommendation paired with its finding, in scan order. */
-  get rows(): Row[] {
+  /**
+   * Every recommendation paired with its finding, in scan order.
+   *
+   * Derived once per scan, not rebuilt per read: every bucket, every total
+   * and every toggle reads it, and rebuilding a 100k-entry map on each read
+   * made a single checkbox click take seconds.
+   */
+  readonly rows: Row[] = $derived.by(() => {
     const scan = this.result;
     if (!scan) {
       return [];
@@ -65,11 +84,22 @@ class ScanStore {
       const finding = byId.get(recommendation.findingIds[0]);
       return finding ? [{ recommendation, finding }] : [];
     });
-  }
+  });
+
+  /** Rows split by bucket, once per scan. */
+  private readonly byBucket = $derived.by(() => {
+    const buckets = new Map<Recommendation["risk"], Row[]>();
+    for (const row of this.rows) {
+      const list = buckets.get(row.recommendation.risk) ?? [];
+      list.push(row);
+      buckets.set(row.recommendation.risk, list);
+    }
+    return buckets;
+  });
 
   /** Rows in one bucket. */
   rowsIn(risk: Recommendation["risk"]): Row[] {
-    return this.rows.filter((row) => row.recommendation.risk === risk);
+    return this.byBucket.get(risk) ?? [];
   }
 
   /** Bytes the current selection would reclaim. */
@@ -94,7 +124,10 @@ class ScanStore {
     this.error = null;
     this.report = null;
     this.itemsScanned = 0;
+    this.itemsTotal = null;
     this.currentPath = null;
+    this.stopping = false;
+    this.runningScanId = null;
     await this.attachProgress();
 
     try {
@@ -108,6 +141,19 @@ class ScanStore {
       this.step = "idle";
     } finally {
       this.detachProgress();
+      this.stopping = false;
+      this.runningScanId = null;
+    }
+  }
+
+  /**
+   * Ask the running scan to stop. What was judged before the stop is still
+   * shown; nothing unjudged is.
+   */
+  async stop(): Promise<void> {
+    this.stopping = true;
+    if (this.runningScanId) {
+      await cancelScan(this.runningScanId);
     }
   }
 
@@ -175,7 +221,12 @@ class ScanStore {
   private async attachProgress(): Promise<void> {
     this.detachProgress();
     this.unlistenProgress = await onScanProgress((payload) => {
+      if (payload.module !== "cleaner") {
+        return;
+      }
+      this.runningScanId = payload.scanId;
       this.itemsScanned = payload.itemsScanned;
+      this.itemsTotal = payload.itemsTotal;
       this.currentPath = payload.currentPath;
     });
   }
