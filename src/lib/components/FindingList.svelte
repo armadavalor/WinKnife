@@ -5,6 +5,10 @@
   is shown as one truncated line (full text in the tooltip, and on click). The
   red bucket has no checkboxes at all: it is informational, and offering a
   disabled checkbox would only look like a bug.
+
+  A full `%TEMP%` is tens of thousands of rows, so each group renders a page
+  at a time ("Show more"). The group checkbox and the totals still cover every
+  row, shown or not.
 -->
 <script lang="ts">
   import Icon from "$lib/components/Icon.svelte";
@@ -47,6 +51,20 @@
   let { risk, rows, selected, ontoggle, ontogglegroup }: Props = $props();
 
   const selectable = $derived(risk !== "doNotDelete");
+
+  /** Rows rendered per group before "Show more". */
+  const PAGE_SIZE = 200;
+
+  /** Rows rendered per pack, once somebody asked for more than one page. */
+  let shown = $state<Record<string, number>>({});
+
+  function shownIn(packId: string): number {
+    return shown[packId] ?? PAGE_SIZE;
+  }
+
+  function showMore(packId: string): void {
+    shown = { ...shown, [packId]: shownIn(packId) + PAGE_SIZE };
+  }
 
   /**
    * Packs the user has collapsed.
@@ -102,9 +120,10 @@
   });
 
   function groupState(group: Group): "all" | "some" | "none" {
-    const chosen = group.rows.filter((row) =>
-      selected.has(row.recommendation.id),
-    ).length;
+    let chosen = 0;
+    for (const row of group.rows) {
+      if (selected.has(row.recommendation.id)) chosen += 1;
+    }
     if (chosen === 0) return "none";
     return chosen === group.rows.length ? "all" : "some";
   }
@@ -117,6 +136,8 @@
     {#each groups as group (group.packId)}
       {@const state = groupState(group)}
       {@const open = !collapsed.has(group.packId)}
+      {@const limit = shownIn(group.packId)}
+      {@const hidden = Math.max(0, group.rows.length - limit)}
       <section class="rounded-xl border border-surface-2 bg-surface-1">
         <header
           class="flex items-center gap-3 border-b border-surface-2 px-4 py-3"
@@ -170,7 +191,7 @@
           class="divide-y divide-surface-2"
           class:hidden={!open}
         >
-          {#each group.rows as row (row.recommendation.id)}
+          {#each group.rows.slice(0, limit) as row (row.recommendation.id)}
             {@const isOpen = expanded.has(row.recommendation.id)}
             <li class="flex items-start gap-3 px-4 py-3">
               {#if selectable}
@@ -216,6 +237,20 @@
             </li>
           {/each}
         </ul>
+        {#if open && hidden > 0}
+          <div class="border-t border-surface-2 px-4 py-3">
+            <button
+              type="button"
+              class="btn-ghost px-3! py-1.5! text-xs"
+              onclick={() => showMore(group.packId)}
+            >
+              {t("cleaner.showMore", {
+                count: Math.min(PAGE_SIZE, hidden),
+                hidden,
+              })}
+            </button>
+          </div>
+        {/if}
       </section>
     {/each}
   </div>

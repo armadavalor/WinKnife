@@ -65,6 +65,13 @@ const en = {
   "cleaner.scanAgain": "Scan again",
   "cleaner.scanning": "Looking around…",
   "cleaner.itemsScanned": "{count} items looked at",
+  "cleaner.analyzing": "Checking each item before suggesting anything…",
+  "cleaner.analyzed": "{done} of {total} checked",
+  "cleaner.stop": "Stop",
+  "cleaner.stopping": "Stopping…",
+  "cleaner.cancelled":
+    "The scan was stopped early, so these lists are incomplete. Scan again for the full picture.",
+  "cleaner.showMore": "Show {count} more ({hidden} not shown yet)",
   "cleaner.executing": "Moving files to quarantine…",
   "cleaner.summary":
     "About {safe} can be reclaimed safely, and {review} needs your review.",
@@ -698,6 +705,13 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "duplicates.howBody":
     "Önce boyutlar, sonra her dosyanın başı ve sonu, en son da dosyanın tamamı karşılaştırılır.",
   "cleaner.skippedRulesDetails": "Hangi kontroller",
+  "cleaner.analyzing": "Bir şey önermeden önce her öğe kontrol ediliyor…",
+  "cleaner.analyzed": "{total} öğenin {done} tanesi kontrol edildi",
+  "cleaner.stop": "Durdur",
+  "cleaner.stopping": "Durduruluyor…",
+  "cleaner.cancelled":
+    "Tarama erken durduruldu, bu yüzden listeler eksik. Tam sonuç için yeniden tarayın.",
+  "cleaner.showMore": "{count} tane daha göster ({hidden} henüz gösterilmiyor)",
   "cleaner.cameFromSummary": "Klasörüm neden listelenmiyor?",
   "startup.leftoverSummary": "Bu neden iki kez listeleniyor?",
   "restorePoint.uacSummary": "Windows neden izin istiyor?",
