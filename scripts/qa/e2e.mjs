@@ -270,17 +270,13 @@ test("duplicates: finds the fixture's copy sets", async () => {
   expect(which === 0, "no duplicate sets found in the fixture");
 });
 
-test(
-  "duplicates: Stop returns to idle",
-  async () => {
-    await goTo("duplicates");
-    await click("button", "Scan again");
-    await click("button", "Stop");
-    await waitGone("button", "Stopping", null, STEP_TIMEOUT_MS);
-    await waitForAny([["main button", "Find duplicates"], ["main button", "Scan again"]], STEP_TIMEOUT_MS);
-  },
-  { knownIssue: "Stop uses a stale scan id (QA-PLAN audit A2)" },
-);
+test("duplicates: Stop returns to idle", async () => {
+  await goTo("duplicates");
+  await click("button", "Scan again");
+  await click("button", "Stop");
+  await waitGone("button", "Stopping", null, STEP_TIMEOUT_MS);
+  await waitForAny([["main button", "Find duplicates"], ["main button", "Scan again"]], STEP_TIMEOUT_MS);
+});
 
 test("treemap: map C:, Stop, button comes back", async () => {
   await goTo("treemap");
