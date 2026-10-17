@@ -1898,3 +1898,51 @@ dispatch only (`temp_files` input, 100000 = huge Temp).
 runner. Duplicates Stop is `knownIssue` (xfail) until #38 is fixed. Audit of
 long operations that can spin silently recorded in QA-PLAN and filed as
 #37–#41; nothing fixed here, the cleaner hang is fixed separately.
+
+## 2026-10-18 — Cleaner at real `%TEMP%` scale
+
+**Problem.** On a machine with ~86 600 files in `%LOCALAPPDATA%\Temp`,
+"Scan for junk" walked every pack in about 50 s and then never logged
+`scan finished`. The work after the walk ran per finding and in sequence,
+showed no progress and could not be cancelled.
+
+**Measured** (`tests/cleaner_scale.rs`, ignored 100 000-file fixture, release,
+12 cores):
+
+| phase | before | after |
+|---|---|---|
+| scan (walk + match + dedupe) | 37 961 ms | 11 108 ms |
+| analyze (gates + score) | 36 583 ms | 13 800 ms |
+| serialise (81 MB IPC payload) | 220 ms | 280 ms |
+| **scan + analyze** | **74.5 s** | **24.9 s** |
+
+**Built.**
+- `analyze` judges findings on rayon in chunks of 256. Between chunks it
+  checks the cancel token and emits `analyzing` progress
+  (`itemsDone/itemsTotal`). Cancelling keeps the judged prefix and marks the
+  result `cancelled`. Every finding still passes all three gates (K-006) in
+  the same order: path refusal (lexical, then canonical, K-003/K-004), the
+  per-file lock probe, then the rule. Nothing is batched, cached or skipped,
+  only run in parallel.
+- `dedupe_by_path` canonicalises its keys in parallel; the first finding
+  still wins, in the same order as before.
+- `ProtectedPaths` splits each entry into components once instead of on every
+  `reason_for` call. The comparison is unchanged.
+- Packs that name the same folder share one walk. The shipped
+  `windows-temp`, `crash-dumps-logs` and `installer-leftovers` packs used to
+  walk `%TEMP%` three times. Claims stay in pack order, then rule order, so
+  "first pack wins" holds, and rules whose root is spelled differently are
+  re-anchored onto the walked path.
+- UI: the cleaner page shows analyze progress and a Stop button, plus a
+  notice when a result was cancelled (EN + TR keys). `FindingList` renders
+  200 rows per group with "Show more"; the group checkbox and totals still
+  cover every row.
+- CI guard: `five_thousand_temp_files_scan_and_analyze_within_budget`
+  (not ignored) must finish scan + analyze of 5 000 files in under 20 s in a
+  debug build. It takes about 1.5 s locally.
+
+**Decisions.** No gate was weakened, so there is no DECISIONS-NEEDED entry.
+The lock probe stays per file; it now just runs in parallel.
+
+**Deferred.** The 81 MB IPC payload is sent in one piece. Streaming or paging
+it from the backend is a separate change.
