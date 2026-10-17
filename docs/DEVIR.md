@@ -23,7 +23,7 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - Rust crate'leri 2.12'ye çekmek windows 0.62 + wry 0.57 getiriyor; npm + crate birlikte yükseltilmeli.
 
 ## Sıradaki adım
-0. Kullanıcı notları (2026-10-18) `docs/modules/BACKLOG.md` "Polish queue": ilerleme detayı + bar animasyonu, logo animasyonu, 3 varyantlı mouse'a tepkili arka plan ışığı, animasyon kapatma. Direkt silme kararı kullanıcıda (DECISIONS-NEEDED 2026-10-18). Hız düzeltmesi kullanıcının PC'sinde doğrulanmadı.
+0. Kullanıcı notları (2026-10-18) `docs/modules/BACKLOG.md` "Polish queue": ilerleme detayı + bar animasyonu, logo animasyonu, 3 varyantlı mouse'a tepkili arka plan ışığı, animasyon kapatma. Direkt silme yok, yalnız karantina (K-016); hızlı temizlik denenince yeniden bakılır. Hız düzeltmesi kullanıcının PC'sinde doğrulanmadı.
 1. Demo GIF, sonra Codex for OSS başvurusu.
 2. winget PR'ı Microsoft onaylayınca birleşir; sonraki sürümler için `packaging/winget/README.md`.
 3. Kod imzalama (SmartScreen uyarısı + VT ML tespitleri): SignPath Foundation 2026-10-15 reddetti (görünürlük yetersiz, K-014). Şimdilik imzasız; görünürlük artınca yeniden başvur. Ücretli/ucuz yol: Certum Open Source sertifikası.
