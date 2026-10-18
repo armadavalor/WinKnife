@@ -1,4 +1,4 @@
-<!-- devir: 2026-10-18 | yazan: claude | commit: 3ec5fb7 -->
+<!-- devir: 2026-10-18 | yazan: claude | commit: 7af3ac9 -->
 # Devir notu
 <!-- /devir üzerine yazar; elle düzeltirsen "yazan: kullanıcı" yap. ≤40 satır. Geçmiş git log'da, kararlar KARARLAR.md'de. -->
 
@@ -11,7 +11,7 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - Temiz makine kabulü geçti (GitHub windows-latest, `install-smoke.yml`): indir + SHA + sessiz kurulum + açılış ekranı + kaldırma.
 - VirusTotal: 3/71 jenerik ML tespiti (Arctic Wolf, DeepInstinct, SecureAge); Microsoft temiz. URL raporu 0/93.
 - 2026-10-18: #45 (tarama Stop id), #47 (startup disable kilitlenmesi + async komutlar), #49 (cleaner hang) merge edildi, masaüstüne kuruldu. main branch protection açık (e2e dahil zorunlu check'ler). Merge yetkisi ajanda (K-015).
-- 2026-10-18: `fix/purge-speed-and-arrows`: kilit probu read değil DELETE erişimiyle açıyor (Defender taraması yok, ~8 ms → ~0,1 ms/dosya; 85k dosyalık temizlik 12 dk → ~1–2 dk beklenir), dev chevron'lar düzeldi.
+- 2026-10-18: #50 merge + masaüstüne kuruldu: kilit probu DELETE erişimiyle açıyor (Defender taraması yok, ~8 ms → ~0,1 ms/dosya), dev chevron'lar düzeldi. Kullanıcı: Defender CPU düştü.
 
 ## Yarım kalan
 - Demo GIF (senaryo `docs/DEMO-SCRIPT.md`): kullanıcının gerçek makinesinde çekilmez, gerçek klasör adları görünür.
@@ -23,14 +23,16 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - Rust crate'leri 2.12'ye çekmek windows 0.62 + wry 0.57 getiriyor; npm + crate birlikte yükseltilmeli.
 
 ## Sıradaki adım
-0. Kullanıcı notları (2026-10-18) `docs/modules/BACKLOG.md` "Polish queue": ilerleme detayı + bar animasyonu, logo animasyonu, 3 varyantlı mouse'a tepkili arka plan ışığı, animasyon kapatma. Direkt silme yok, yalnız karantina (K-016); hızlı temizlik denenince yeniden bakılır. Hız düzeltmesi kullanıcının PC'sinde doğrulanmadı.
-1. Demo GIF, sonra Codex for OSS başvurusu.
-2. winget PR'ı Microsoft onaylayınca birleşir; sonraki sürümler için `packaging/winget/README.md`.
-3. Kod imzalama (SmartScreen uyarısı + VT ML tespitleri): SignPath Foundation 2026-10-15 reddetti (görünürlük yetersiz, K-014). Şimdilik imzasız; görünürlük artınca yeniden başvur. Ücretli/ucuz yol: Certum Open Source sertifikası.
+0. **QA/QC turu (kullanıcı, 2026-10-18):** her şey, özellikle silme/temizlik/karantina ve arama/tarama akışları; BACKLOG Polish queue madde 9.
+1. Kullanıcı notları (2026-10-18) `docs/modules/BACKLOG.md` "Polish queue": ilerleme detayı + bar animasyonu, logo animasyonu, 3 varyantlı mouse'a tepkili arka plan ışığı, animasyon kapatma. Direkt silme yok, yalnız karantina (K-016); hızlı temizlik denenince yeniden bakılır. Temizlik süresi kullanıcının PC'sinde ölçülmedi.
+2. Demo GIF, sonra Codex for OSS başvurusu.
+3. winget PR'ı Microsoft onaylayınca birleşir; sonraki sürümler için `packaging/winget/README.md`.
+4. Kod imzalama (SmartScreen uyarısı + VT ML tespitleri): SignPath Foundation 2026-10-15 reddetti (görünürlük yetersiz, K-014). Şimdilik imzasız; görünürlük artınca yeniden başvur. Ücretli/ucuz yol: Certum Open Source sertifikası.
 
 ## Bilinen tuzaklar
 - 5 symlink testi lokal Developer Mode olmadan düşer (CI'da geçer). EFS testleri `WINKNIFE_EFS_TESTS=1` ile.
 - CI yalnız main'e push/PR'da tetiklenir; başka base'li PR için `gh workflow run ci.yml --ref <dal>`.
 - `src-tauri/target-review/` (eski derleme önbelleği) ve `chatgpt Pocketknife addon.txt` kullanıcının; dokunma.
 - Repo PUBLIC: Armada'nın otomatik "Son oturum" bloğu (`oto:başla` işaretli) kullanıcı isteklerini DEVIR'e yazar; commit'e girmeden sil.
+- e2e `duplicates: Stop returns to idle` #50'de bir kez 61 s zaman aşımıyla düştü, yeniden çalışınca geçti: flaky, QA turunda bak.
 - winget kurulumu CI'da SmartScreen'de takılır (imzasız installer); CI yalnız `winget validate` yapar.
