@@ -273,11 +273,15 @@ const test = (name, fn, opts = {}) => tests.push({ name, fn, ...opts });
 test("cleaner: scan, clean safe items, nothing protected or fresh touched", async () => {
   expect(exists(fx.tempOld), `fixture missing ${fx.tempOld}`);
   await goTo("cleaner");
+  let mark = Date.now();
   await click("button", "Scan for junk");
   await waitFor("main button", "Clean up", null, SCAN_TIMEOUT_MS);
+  console.log(`      phase: scan ${Date.now() - mark} ms`);
   await click("main button", "Clean up");
+  mark = Date.now();
   await click('[role="alertdialog"] button', "Clean up");
   await waitFor("button", "Open quarantine", null, SCAN_TIMEOUT_MS);
+  console.log(`      phase: clean ${Date.now() - mark} ms`);
   expect(!exists(fx.tempOld), `old temp sentinel still in place: ${fx.tempOld}`);
   expect(exists(fx.tempFresh), `fresh temp file was moved: ${fx.tempFresh}`);
   expect(exists(fx.downloadsRecent), `recent download was moved: ${fx.downloadsRecent}`);
@@ -286,8 +290,10 @@ test("cleaner: scan, clean safe items, nothing protected or fresh touched", asyn
 
 test("quarantine: restore the cleaner batch", async () => {
   await click("button", "Open quarantine");
+  const mark = Date.now();
   await click("button", "Restore", 'aside[aria-label="Quarantine"]');
   await waitFor("*", "Restored ", 'aside[aria-label="Quarantine"]', SCAN_TIMEOUT_MS);
+  console.log(`      phase: restore ${Date.now() - mark} ms`);
   expect(exists(fx.tempOld), `old temp sentinel not restored: ${fx.tempOld}`);
   await click("button", "Close", 'aside[aria-label="Quarantine"]');
   await sleep(SETTLE_MS);
