@@ -43,8 +43,9 @@
 
 use std::collections::HashMap;
 
-use crate::core::db::DbAccess;
+use crate::core::db::{with_db, DbAccess};
 use chrono::{DateTime, Utc};
+use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::core::brain::Brain;
@@ -670,7 +671,7 @@ fn disable_startup_entry(
         );
     };
 
-    match env.startup.disable(env.conn, *source, key) {
+    match with_db(env.db, |conn| env.startup.disable(conn, *source, key)) {
         // No bytes are reclaimed by turning something off, and saying otherwise
         // would put an invented figure in the report.
         // A shortcut moved only in part says so in the item's result
@@ -695,7 +696,7 @@ fn startup_refusal(
     command: &str,
     env: &ExecEnvironment<'_>,
 ) -> Option<String> {
-    let live = match env.startup.read(env.conn, source, key) {
+    let live = match with_db(env.db, |conn| env.startup.read(conn, source, key)) {
         Ok(Some(live)) => live,
         Ok(None) => {
             return Some(format!(
