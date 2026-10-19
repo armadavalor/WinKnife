@@ -1,0 +1,6 @@
+participant,profile,date,t1,t1_min,t2,t2_min,t3,t3_min,t4,t4_min,t5,t5_min,t6,t6_min,t7,t7_min,stopped_at,stop_reason,warnings_seen,wrong_selections,unexplained_errors,confidence_before,confidence_after,verify_verdict,restore_ok,unapproved_changes,notes
+P1,ordinary,,,,,,,,,,,,,,,,,,,,,,,,,,
+P2,ordinary,,,,,,,,,,,,,,,,,,,,,,,,,,
+P3,technical,,,,,,,,,,,,,,,,,,,,,,,,,,
+P4,technical,,,,,,,,,,,,,,,,,,,,,,,,,,
+P5,it_support,,,,,,,,,,,,,,,,,,,,,,,,,,

@@ -2118,3 +2118,12 @@ and the dashboard stay responsive while those run.
   event. Stopped items are summed up in one line, not listed one by one.
 - Deferred: purge has no cancel yet; the remaining long-operation items stay in
   #41.
+
+## 2026-10-19 — Cold-test kit and launch drafts
+
+- `scripts/coldtest/`: Windows Sandbox kit for the five-person cold first-run test. `Start-ColdTest.ps1` fills in and opens `cold-test.wsb`. Inside the sandbox, `coldtest-bootstrap.ps1` runs a smaller `New-DirtyProfile.ps1`, adds eight old important-looking files, hashes every fixture file into `<P>-manifest.json` (keep or offerable) and opens Edge on the repo. WinKnife is not preinstalled. `Test-ColdTestResult.ps1` classifies each file as unchanged, missing, changed or unreadable; it FAILs on a missing or changed keep file or on any content change.
+- The bootstrap only runs as `WDAGUtilityAccount`, so it can't fill a real profile with junk.
+- Checked locally on a scratch profile (300 temp files): 2,497 files, 11 keep. Untouched → PASS. One installer moved away → listed as missing offerable; moved back → unchanged. One byte appended to a keep file → FAIL, exit 1.
+- Found during the check: PowerShell 5.1 reads the BOM-less UTF-8 manifest as ANSI, so the Unicode-named Temp file showed as missing. Both JSON reads now pass `-Encoding UTF8`. Profile root is `GetFullPath`-normalized like `New-DirtyProfile`, otherwise 8.3 paths missed three keep sentinels.
+- Not yet run inside a real Windows Sandbox; the first live session is the end-to-end test.
+- `docs/launch/COLD-TEST.md` (protocol, tasks T1–T7, scoring, launch gate), `cold-test-scores.csv`, `POSTS.md` (Show HN, r/software, r/Windows11 drafts checked against v0.3.0, schedule, do-not-claim list). Nothing is posted without the maintainer.
