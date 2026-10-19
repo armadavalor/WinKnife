@@ -1,0 +1,37 @@
+<!--
+  Windows Sandbox profile for the cold first-run test (docs/launch/COLD-TEST.md).
+
+  Run scripts\coldtest\Start-ColdTest.ps1 instead of opening this file: it
+  fills in the three host paths below. Networking stays ON because the
+  participant downloads the release from GitHub in Edge, exactly like a real
+  first visit. The two script folders are read-only; the results folder is
+  the only writable mapping, so the verification report survives the sandbox
+  closing. Everything else is thrown away on close, which gives every
+  participant a fresh machine.
+-->
+<Configuration>
+  <VGpu>Enable</VGpu>
+  <Networking>Enable</Networking>
+  <ClipboardRedirection>Disable</ClipboardRedirection>
+  <MemoryInMB>6144</MemoryInMB>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\path\to\WinKnife\scripts\qa</HostFolder>
+      <SandboxFolder>C:\coldtest\qa</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\path\to\WinKnife\scripts\coldtest</HostFolder>
+      <SandboxFolder>C:\coldtest\scripts</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\path\to\results</HostFolder>
+      <SandboxFolder>C:\coldtest\results</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File C:\coldtest\scripts\coldtest-bootstrap.ps1 -Participant P0</Command>
+  </LogonCommand>
+</Configuration>

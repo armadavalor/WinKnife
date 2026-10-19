@@ -19,6 +19,7 @@ Bir şey değişince: eski dosya `_arsiv/`e, bu tablo güncellenir, KARARLAR'a s
 | Sürüm yayın akışı | docs/RELEASING.md + .github/workflows/release.yml | |
 | winget manifesti | packaging/winget/manifests/ (yeni sürüm adımları packaging/winget/README.md) | |
 | Codex sınırları | AGENTS.md | |
+| Lansman: soğuk test + gönderi taslakları | docs/launch/ (COLD-TEST.md, POSTS.md, cold-test-scores.csv) | Kit: scripts/coldtest/ |
 
 ## İstisna
 <!-- Adı arşiv/kopya gibi görünen ama bilerek AKTİF yollar: "- `yol/` | neden". kontrol ve kapı bunları arşiv/geçici saymaz. -->
