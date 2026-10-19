@@ -388,6 +388,8 @@ pub fn scan_summary(
 /// Returns an error if the scan is unknown or the ledger is unusable. Item
 /// failures land in the report.
 #[tauri::command]
+// Tauri injects each piece of managed state as its own argument.
+#[allow(clippy::too_many_arguments)]
 pub async fn execute<R: Runtime>(
     app: AppHandle<R>,
     scan_id: Uuid,
@@ -396,10 +398,13 @@ pub async fn execute<R: Runtime>(
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
     db: State<'_, Arc<Database>>,
+    cancels: State<'_, CancelRegistry>,
 ) -> Result<ExecReport, ApiError> {
     guarded_async("execute", async {
         // Before the database lock: a second click must be refused, not queued.
         let _busy = services.quarantine.begin(Operation::Clean)?;
+        // Stop goes through `cancel_scan` with the same id (issue #39).
+        let ticket = cancels.track(scan_id);
         let scan = store.get(scan_id)?;
         let units = executor::plan(&approved, &scan.recommendations, &scan.findings);
 
@@ -433,6 +438,7 @@ pub async fn execute<R: Runtime>(
             &env,
             &executor::ExecOptions {
                 confirm_empty_recycle_bin,
+                cancel: Some(ticket.token()),
             },
             Some(&mut emit),
         )?;
@@ -1473,6 +1479,9 @@ pub struct RestoreReport {
     pub restored: Vec<RestoreOutcome>,
     /// Items that did not, with the reason.
     pub failed: Vec<RestoreFailure>,
+    /// The user pressed Stop; the rest of the batch is still in quarantine.
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 /// One item that could not be restored.
@@ -1487,6 +1496,9 @@ pub struct RestoreFailure {
 
 /// Restore a whole batch.
 ///
+/// Reports progress on [`events::RESTORE_PROGRESS`] and stops between items
+/// when `cancel_scan` is called with the batch id (issue #39).
+///
 /// # Errors
 /// Returns an error only if the ledger cannot be read; per-item failures are
 /// in the report.
@@ -1496,19 +1508,49 @@ pub fn quarantine_restore<R: Runtime>(
     batch_id: Uuid,
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
+    cancels: State<'_, CancelRegistry>,
 ) -> Result<RestoreReport, ApiError> {
     guarded("quarantine_restore", || {
         let _busy = services.quarantine.begin(Operation::Restore)?;
-        let (restored, failed) = services.quarantine.restore_batch(&**db, batch_id)?;
+        let ticket = cancels.track(batch_id);
+        let mut throttle = ProgressThrottle::new();
+        let mut emit = |done: u64, total: u64, path: &std::path::Path| {
+            if done != total && !throttle.should_emit() {
+                return;
+            }
+            let payload = events::RestoreProgress {
+                batch_id,
+                items_done: done,
+                items_total: total,
+                current_path: Some(path.display().to_string()),
+            };
+            if let Err(err) = events::emit_restore_progress(&app, &payload) {
+                tracing::debug!(error = %err, "restore progress event was not delivered");
+            }
+        };
+        let outcome = services.quarantine.restore_batch_controlled(
+            &**db,
+            batch_id,
+            Some(ticket.token()),
+            Some(&mut emit),
+        )?;
         notify_quarantine_changed(&app, &services, &db, Some(batch_id));
-        Ok(RestoreReport {
-            restored,
-            failed: failed
+        Ok(RestoreReport::from(outcome))
+    })
+}
+
+impl From<crate::core::quarantine::BatchRestore> for RestoreReport {
+    fn from(outcome: crate::core::quarantine::BatchRestore) -> Self {
+        Self {
+            restored: outcome.restored,
+            failed: outcome
+                .failed
                 .into_iter()
                 .map(|(item_id, error)| RestoreFailure { item_id, error })
                 .collect(),
-        })
-    })
+            cancelled: outcome.cancelled,
+        }
+    }
 }
 
 /// Restore one item.
@@ -2005,8 +2047,14 @@ mod tests {
                 item_id: uuid::Uuid::nil(),
                 error: "locked".to_owned(),
             }],
+            cancelled: true,
         })
         .expect("serialize");
+        assert_eq!(
+            json.get("cancelled"),
+            Some(&serde_json::json!(true)),
+            "got {json}"
+        );
         assert!(
             json.get("failed")
                 .and_then(|f| f.get(0))

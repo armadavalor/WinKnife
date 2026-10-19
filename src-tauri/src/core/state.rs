@@ -153,6 +153,16 @@ impl CancelRegistry {
         }
     }
 
+    /// Register a token like [`Self::start`], and forget it when the returned
+    /// ticket drops, so an error or a panic cannot leave it registered.
+    pub fn track(&self, id: Uuid) -> CancelTicket<'_> {
+        CancelTicket {
+            token: self.start(id),
+            registry: self,
+            id,
+        }
+    }
+
     /// How many scans are running.
     pub fn running(&self) -> usize {
         self.lock().len()
@@ -167,6 +177,26 @@ impl CancelRegistry {
         self.tokens
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// A registered cancel token that unregisters itself on drop.
+pub struct CancelTicket<'a> {
+    token: crate::core::scanner::CancellationToken,
+    registry: &'a CancelRegistry,
+    id: Uuid,
+}
+
+impl CancelTicket<'_> {
+    /// The token the long operation polls.
+    pub fn token(&self) -> &crate::core::scanner::CancellationToken {
+        &self.token
+    }
+}
+
+impl Drop for CancelTicket<'_> {
+    fn drop(&mut self) {
+        self.registry.finish(self.id);
     }
 }
 
@@ -300,6 +330,23 @@ mod tests {
         registry.finish(scan_id);
         assert_eq!(registry.running(), 0);
         assert!(!registry.cancel(scan_id));
+    }
+
+    #[test]
+    fn a_ticket_unregisters_its_token_when_dropped() {
+        let registry = CancelRegistry::new();
+        let id = Uuid::new_v4();
+        {
+            let ticket = registry.track(id);
+            assert_eq!(registry.running(), 1);
+            assert!(registry.cancel(id));
+            assert!(ticket.token().is_cancelled());
+        }
+        assert_eq!(registry.running(), 0);
+        assert!(
+            !registry.cancel(id),
+            "a finished operation cannot be stopped"
+        );
     }
 
     #[test]

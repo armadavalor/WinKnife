@@ -20,6 +20,7 @@ import {
   type Recommendation,
   type ScanResult,
 } from "$lib/types";
+import { ExecTracker } from "./execProgress.svelte";
 import { initialSelection } from "./selection";
 
 /** Which step of the 3-step pattern the route is on. */
@@ -62,6 +63,8 @@ class ScanStore {
   stopping = $state(false);
   /** Report of the last execute. */
   report = $state<ExecReport | null>(null);
+  /** Progress and Stop for the running execute. */
+  readonly exec = new ExecTracker();
   /** Message of the last failure. */
   error = $state<string | null>(null);
 
@@ -196,10 +199,8 @@ class ScanStore {
     this.step = "executing";
     this.error = null;
     try {
-      this.report = await invokeExecute(
-        scan.scanId,
-        [...this.selected],
-        confirmEmptyRecycleBin,
+      this.report = await this.exec.run(scan.scanId, () =>
+        invokeExecute(scan.scanId, [...this.selected], confirmEmptyRecycleBin),
       );
       this.step = "done";
     } catch (error: unknown) {

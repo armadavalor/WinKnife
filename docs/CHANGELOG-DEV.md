@@ -2099,3 +2099,22 @@ and the dashboard stay responsive while those run.
 - Version 0.3.0 in package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json; CHANGELOG `[Unreleased]` cut to `[0.3.0]`.
 - README: signing section now says releases are unsigned (K-014); Legacy Panels added to the tool table; stale "preparing v0.2.0" status removed.
 - Bulk clean/restore perf (PR #56, closed, probes only): ~1.3 ms/item take and ~1.1 ms/item restore locally (release, on-disk DB); the CI runner is ~8x slower. About half is the per-item ledger commit. Batching commits would widen the crash window (a restore claim marks up to N rows restored before their files move), so it is deferred; `synchronous=NORMAL` was not considered without a decision.
+
+## 2026-10-19 — Cancel and progress for clean and restore (#39)
+
+- Executor takes a `CancellationToken`; between items it checks the token and
+  marks every item it did not reach `Skipped` with `CANCELLED_REASON`. An item
+  already moving finishes, so nothing is left half-moved.
+- `execute` registers the token in `CancelRegistry` under the scan id through a
+  drop guard (`CancelTicket`), so `cancel_scan` stops a clean the same way it
+  stops a scan, and the registry never keeps a stale entry.
+- `Quarantine::restore_batch_controlled` restores with a token and a progress
+  callback; `quarantine_restore` emits `quarantine:restore-progress` (throttled
+  to 10/s) keyed by batch id and returns `RestoreReport.cancelled`.
+- UI: cleaner, duplicates and empty folders share `ExecTracker` +
+  `ExecutingPanel` (bar, current path, "n of m", Stop). The quarantine drawer
+  shows restore progress and a Stop button on the running batch. A Stop pressed
+  before the backend registered the token is resent on the first progress
+  event. Stopped items are summed up in one line, not listed one by one.
+- Deferred: purge has no cancel yet; the remaining long-operation items stay in
+  #41.

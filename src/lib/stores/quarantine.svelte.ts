@@ -6,7 +6,9 @@
  * badge whichever route the user is looking at when it finishes.
  */
 import {
+  cancelScan,
   onQuarantineChanged,
+  onRestoreProgress,
   quarantineBatchItems,
   quarantineList,
   quarantinePurge,
@@ -23,6 +25,19 @@ import {
   type QuarantineStats,
   type RestoreReport,
 } from "$lib/types";
+
+/** A batch restore under way. */
+export interface RestoreRun {
+  batchId: string;
+  /** Items restored or failed so far. */
+  done: number;
+  /** Items the batch held when the restore started; null until known. */
+  total: number | null;
+  /** Original path of the item being put back. */
+  currentPath: string | null;
+  /** Stop was pressed and the restore has not ended yet. */
+  stopping: boolean;
+}
 
 /** Lifecycle of the drawer's fetch. */
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
@@ -60,6 +75,10 @@ class QuarantineStore {
   items = $state<Record<string, QuarantineItem[]>>({});
   /** Result of the last restore, shown inline. */
   lastRestore = $state<RestoreReport | null>(null);
+  /** The batch restore under way, if any, and how far it is (issue #39). */
+  restoring = $state<RestoreRun | null>(null);
+  /** Stop was pressed before the backend had registered the restore. */
+  private restoreCancelPending = false;
   /**
    * Result of the last purge, shown inline.
    *
@@ -124,15 +143,51 @@ class QuarantineStore {
     }
   }
 
-  /** Put a whole batch back. */
+  /** Put a whole batch back, reporting progress until it ends. */
   async restore(batchId: string): Promise<void> {
     this.actionError = null;
+    this.restoring = { batchId, done: 0, total: null, currentPath: null, stopping: false };
+    this.restoreCancelPending = false;
+    const unlisten = await onRestoreProgress((payload) => {
+      const run = this.restoring;
+      if (!run || payload.batchId !== batchId) {
+        return;
+      }
+      if (this.restoreCancelPending) {
+        this.restoreCancelPending = false;
+        void cancelScan(batchId);
+      }
+      this.restoring = {
+        ...run,
+        done: payload.itemsDone,
+        total: payload.itemsTotal,
+        currentPath: payload.currentPath,
+      };
+    });
     try {
       this.lastRestore = await quarantineRestore(batchId);
       await this.reload();
     } catch (error: unknown) {
       this.actionError = message(error);
+    } finally {
+      unlisten();
+      this.restoring = null;
     }
+  }
+
+  /**
+   * Stop the running restore before its next item. What was put back stays
+   * put back; the rest of the batch stays in quarantine.
+   */
+  async stopRestore(): Promise<void> {
+    const run = this.restoring;
+    if (!run || run.stopping) {
+      return;
+    }
+    this.restoring = { ...run, stopping: true };
+    // The restore registers its stop token only once it starts; a press
+    // before that is resent with the first progress event.
+    this.restoreCancelPending = !(await cancelScan(run.batchId));
   }
 
   /** Run the retention purge and the size cap now. */

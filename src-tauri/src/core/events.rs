@@ -21,6 +21,8 @@ pub const SCAN_DONE: &str = "scan:done";
 pub const EXEC_PROGRESS: &str = "exec:progress";
 /// The quarantine contents changed (item added, restored or purged).
 pub const QUARANTINE_CHANGED: &str = "quarantine:changed";
+/// A batch restore reported progress.
+pub const RESTORE_PROGRESS: &str = "quarantine:restore-progress";
 /// A keep-awake session started, stopped or expired. No payload: the UI
 /// re-reads `keep_awake_status`.
 pub const KEEP_AWAKE_CHANGED: &str = "keep-awake:changed";
@@ -80,6 +82,20 @@ pub struct ExecProgress {
     pub current_path: Option<String>,
 }
 
+/// Payload of [`RESTORE_PROGRESS`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreProgress {
+    /// Batch being restored; also the id `cancel_scan` stops it by.
+    pub batch_id: Uuid,
+    /// Items restored or failed so far.
+    pub items_done: u64,
+    /// Items the batch still held when the restore started.
+    pub items_total: u64,
+    /// Original path of the item being put back.
+    pub current_path: Option<String>,
+}
+
 /// Payload of [`QUARANTINE_CHANGED`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +143,17 @@ pub fn emit_scan_done<R: Runtime>(app: &AppHandle<R>, payload: &ScanDone) -> Res
 /// See [`CoreError::Emit`].
 pub fn emit_exec_progress<R: Runtime>(app: &AppHandle<R>, payload: &ExecProgress) -> Result<()> {
     emit(app, EXEC_PROGRESS, payload)
+}
+
+/// Emit [`RESTORE_PROGRESS`]. Callers should gate this with a [`ProgressThrottle`].
+///
+/// # Errors
+/// See [`CoreError::Emit`].
+pub fn emit_restore_progress<R: Runtime>(
+    app: &AppHandle<R>,
+    payload: &RestoreProgress,
+) -> Result<()> {
+    emit(app, RESTORE_PROGRESS, payload)
 }
 
 /// Emit [`QUARANTINE_CHANGED`].
@@ -231,6 +258,20 @@ mod tests {
         .expect("serialize");
         assert!(json.get("itemsScanned").is_some(), "got {json}");
         assert!(json.get("scanId").is_some(), "got {json}");
+    }
+
+    #[test]
+    fn restore_progress_uses_camel_case_field_names() {
+        let payload = RestoreProgress {
+            batch_id: Uuid::nil(),
+            items_done: 1,
+            items_total: 3,
+            current_path: Some(r"C:\x".into()),
+        };
+        let json = serde_json::to_value(&payload).expect("serialise");
+        for key in ["batchId", "itemsDone", "itemsTotal", "currentPath"] {
+            assert!(json.get(key).is_some(), "missing {key}");
+        }
     }
 
     #[test]
