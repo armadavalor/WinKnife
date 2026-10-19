@@ -540,17 +540,10 @@ test("quarantine: a second restore while one runs is refused (Busy), one restore
   await closeDrawer();
 });
 
-test(
-  "quarantine: the drawer shows the Busy refusal to the user",
-  async () => {
-    expect(busyRun, "the double-restore test did not run");
-    expect(busyRun.sawText, "no 'already running' text was ever visible in the drawer");
-  },
-  {
-    knownIssue:
-      "QuarantineDrawer only renders store.error when status is 'error'; a refused restore sets error but leaves status 'ready', and reload() clears it",
-  },
-);
+test("quarantine: the drawer shows the Busy refusal to the user", async () => {
+  expect(busyRun, "the double-restore test did not run");
+  expect(busyRun.sawText, "no 'already running' text was ever visible in the drawer");
+});
 
 test("quarantine: drawer shows the empty state once everything is restored", async () => {
   const left = await ledgerItems();
