@@ -2127,3 +2127,20 @@ and the dashboard stay responsive while those run.
 - Found during the check: PowerShell 5.1 reads the BOM-less UTF-8 manifest as ANSI, so the Unicode-named Temp file showed as missing. Both JSON reads now pass `-Encoding UTF8`. Profile root is `GetFullPath`-normalized like `New-DirtyProfile`, otherwise 8.3 paths missed three keep sentinels.
 - Not yet run inside a real Windows Sandbox; the first live session is the end-to-end test.
 - `docs/launch/COLD-TEST.md` (protocol, tasks T1–T7, scoring, launch gate), `cold-test-scores.csv`, `POSTS.md` (Show HN, r/software, r/Windows11 drafts checked against v0.3.0, schedule, do-not-claim list). Nothing is posted without the maintainer.
+
+## 2026-10-19 — Cold-test kit: Windows Sandbox dry run
+
+**Built.** A full P9 dry run of the cold-test kit in a real Windows Sandbox
+on a Windows 10 host: bootstrap, fixture, download and install of v0.3.0 from
+GitHub, a Disk Cleaner run (5,931 items, 99 MB to quarantine) and the
+verifier. Verdict PASS: 0 keep files touched, 0 changed, and the report
+reached the host results folder.
+
+- **Fix.** The Windows 10 sandbox image has no working Edge (the taskbar pin
+  is dead, `microsoft-edge:` has no handler). The bootstrap now installs Edge
+  from Microsoft's online installer, refuses it unless Authenticode-valid and
+  signed by Microsoft, and launches `msedge.exe` by path. A failed install
+  only prints a warning; the fixture still counts as ready.
+- **Doc.** `COLD-TEST.md` notes the Edge install, that the sandbox does show
+  SmartScreen, and that Defender real-time protection is off inside it, so
+  the separate VM session is now for antivirus behaviour.

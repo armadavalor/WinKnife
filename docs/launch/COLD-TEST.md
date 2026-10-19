@@ -51,20 +51,26 @@ What happens:
      is classed as **keep** or **offerable**. Keep covers the eight files
      above, the recent `Downloads\this-week-report.pdf`, the fresh Temp file
      and the `main.rs` inside the empty-folder tree;
-   - opens Edge on <https://github.com/armadavalor/WinKnife>.
+   - opens Edge on <https://github.com/armadavalor/WinKnife>. The Windows 10
+     sandbox image has no working Edge, so on a Windows 10 host the bootstrap
+     first installs it from Microsoft (signature checked). That adds a few
+     minutes. If the install fails, the log says so and you type the URL.
 3. WinKnife is **not** installed. Finding, downloading and installing it is
    task 2.
 
 Closing the sandbox throws everything away, so the next participant starts
-from a clean machine. Only one sandbox can run at a time. SmartScreen and
-Defender stay on.
+from a clean machine. Only one sandbox can run at a time. SmartScreen stays
+on: the 2026-10-19 dry run on a Windows 10 host showed both Edge's "isn't
+commonly downloaded" warning and the "Windows protected your PC" block.
+Defender real-time protection reports itself off inside the sandbox, so
+antivirus warnings will not appear there.
 
 The two script folders are mapped read-only at `C:\coldtest\`. The results
 folder is the only writable mapping. The participant has no reason to open
 `C:\coldtest`. If they do, note it, but don't stop them.
 
-**If the sandbox hides the SmartScreen warning** (the sandbox can behave
-differently from a real install), run at least one session (preferably P1
+**To see antivirus behaviour** (real-time protection is off in the
+sandbox, and a few engines flag the unsigned installer), run at least one session (preferably P1
 or P2) on a fresh Windows VM snapshot. On that VM, copy `scripts\qa` and
 `scripts\coldtest` to `C:\coldtest\qa` and `C:\coldtest\scripts`, then run
 the bootstrap as a throwaway local user named `WDAGUtilityAccount`. The name
