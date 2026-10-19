@@ -225,6 +225,18 @@ impl DuplicateScan {
     pub fn wasted_bytes(&self) -> u64 {
         self.sets.iter().map(|set| set.wasted_bytes).sum()
     }
+
+    /// The same run, reported as stopped: a Stop that landed after the last
+    /// cancel check still drops the answer, like any other cancelled scan.
+    #[must_use]
+    pub fn stopped(self) -> Self {
+        Self {
+            findings: Vec::new(),
+            sets: Vec::new(),
+            cancelled: true,
+            ..self
+        }
+    }
 }
 
 /// Which stage a progress report came from.
@@ -300,6 +312,17 @@ pub fn scan(ctx: &DuplicateContext<'_>, progress: Option<ProgressSink<'_>>) -> D
             tracing::warn!(root = %root.display(), why, "duplicate scan root refused");
             output.skipped_roots.push(why);
             continue;
+        }
+
+        // Name the root before the first candidate turns up: the UI learns
+        // the scan id from progress, and a tree of small files has none.
+        if let Some(report) = progress {
+            report(&DuplicateProgress {
+                stage: Stage::Walking,
+                done: candidates.len() as u64,
+                total: 0,
+                current_path: root.clone(),
+            });
         }
 
         let summary = scanner::walk(root, ctx.cancel, &mut |entry| {
@@ -1142,7 +1165,8 @@ mod tests {
 
         // Progress must actually be reported, in every stage, and the full-hash
         // stage must know its total.
-        assert_eq!(count(Stage::Walking), FILES);
+        // One walking tick per file, plus the one that names the root up front.
+        assert_eq!(count(Stage::Walking), FILES + 1);
         assert_eq!(count(Stage::PartialHashing), FILES);
         assert_eq!(count(Stage::FullHashing), FILES);
         assert!(ticks
@@ -1231,6 +1255,49 @@ mod tests {
         let scan = run(dir.path(), MIN_ALLOWED_SIZE_BYTES);
         assert_eq!(scan.unreadable, 1, "{scan:?}");
         assert_eq!(scan.sets.len(), 1, "the readable pair is still found");
+    }
+
+    /// The UI only learns the scan id from a progress event, so a Stop pressed
+    /// before the first one waits for it. A tree with no qualifying file must
+    /// still produce that first event, or the Stop is never sent.
+    #[test]
+    fn a_scan_reports_its_root_before_finding_any_candidate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write(&dir.path().join("tiny.txt"), b"too small to qualify");
+        let events = std::sync::Mutex::new(Vec::new());
+        let sink = |progress: &DuplicateProgress| {
+            events.lock().expect("events").push(progress.clone());
+        };
+
+        run_with(
+            dir.path(),
+            MIN_ALLOWED_SIZE_BYTES,
+            &CancellationToken::new(),
+            Some(&sink),
+        );
+
+        let events = events.into_inner().expect("events");
+        let first = events.first().expect("at least one progress event");
+        assert_eq!(first.stage, Stage::Walking);
+        assert_eq!(first.done, 0);
+        assert_eq!(first.current_path, dir.path());
+    }
+
+    #[test]
+    fn a_stopped_scan_keeps_no_half_answer() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bytes = payload(32 * 1024, 23, None);
+        write(&dir.path().join("a.bin"), &bytes);
+        write(&dir.path().join("b.bin"), &bytes);
+        let full = run(dir.path(), MIN_ALLOWED_SIZE_BYTES);
+        assert_eq!(full.sets.len(), 1);
+
+        let stopped = full.stopped();
+
+        assert!(stopped.cancelled);
+        assert!(stopped.sets.is_empty());
+        assert!(stopped.findings.is_empty());
+        assert_eq!(stopped.wasted_bytes(), 0);
     }
 
     #[test]

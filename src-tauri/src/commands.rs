@@ -551,7 +551,14 @@ pub async fn start_duplicate_scan<R: Runtime>(
                 Some(&emit),
             )
         };
-        cancels.finish(scan_id);
+        // A Stop accepted after the pipeline's last check was still promised
+        // to the UI (`cancel_scan` said true), so the run is reported stopped.
+        let stopped_late = cancels.finish(scan_id);
+        let scan = if stopped_late && !scan.cancelled {
+            scan.stopped()
+        } else {
+            scan
+        };
 
         let recommendations = duplicates::analyze(&scan, &services.brain);
         tracing::info!(
@@ -570,7 +577,7 @@ pub async fn start_duplicate_scan<R: Runtime>(
             findings: scan.findings.clone(),
             recommendations: recommendations.clone(),
             skipped_rules: scan.skipped_roots.clone(),
-            cancelled: false,
+            cancelled: scan.cancelled,
         });
 
         remember(

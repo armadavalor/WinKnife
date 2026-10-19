@@ -406,6 +406,7 @@
         <button
           type="button"
           class="btn-outline px-3! py-1.5!"
+          disabled={store.stopping}
           onclick={() => store.stop()}
         >
           {t("treemap.stop")}

@@ -10,7 +10,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
-    "test:ui": "node --test \"src/lib/**/*.test.ts\" && node scripts/startup-regression.mjs"
+    "test:ui": "node --test \"src/lib/**/*.test.ts\" && node scripts/startup-regression.mjs && node scripts/scan-stop-regression.mjs"
   },
   "license": "MIT",
   "dependencies": {
