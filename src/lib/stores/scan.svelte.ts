@@ -131,9 +131,8 @@ class ScanStore {
     this.currentPath = null;
     this.stopping = false;
     this.runningScanId = null;
-    await this.attachProgress();
-
     try {
+      await this.attachProgress();
       const result = await startScan(moduleId);
       this.result = result;
       this.selected = initialSelection(result.recommendations, result.findings);

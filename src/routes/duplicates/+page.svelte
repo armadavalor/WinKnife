@@ -247,6 +247,12 @@
       </p>
     {/if}
 
+    {#if scan.unreadable > 0}
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
+        {t("duplicates.unreadable", { count: scan.unreadable })}
+      </p>
+    {/if}
+
     <section class="flex flex-wrap items-center gap-3 text-sm">
       <label class="flex items-center gap-2">
         <span class="text-ink-muted">{t("duplicates.filterClass")}</span>

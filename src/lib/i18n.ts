@@ -137,6 +137,8 @@ const en = {
   "duplicates.classOther": "Other",
   "duplicates.linkedTitle": "Excluded: same file under another name",
   "duplicates.skippedRoots": "Some folders were not scanned: {roots}",
+  "duplicates.unreadable":
+    "{count} files could not be read and were left out of the comparison.",
   "duplicates.selection": "{count} copies selected · {size}",
   "duplicates.remove": "Move copies to quarantine",
   "duplicates.confirmTitle": "Move {count} copies to quarantine?",

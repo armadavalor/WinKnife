@@ -686,6 +686,20 @@ pub async fn start_empty_folder_scan<R: Runtime>(
             }
         };
 
+        // Name the scan to the UI before the walk starts, so a Stop pressed
+        // right away has an id to cancel instead of waiting for the first folder.
+        let initial = ScanProgress {
+            scan_id,
+            module: empty_folders::MODULE_ID.to_owned(),
+            items_scanned: 0,
+            current_path: Some(root.display().to_string()),
+            pct: None,
+            items_total: None,
+        };
+        if let Err(err) = events::emit_scan_progress(&app, &initial) {
+            tracing::debug!(error = %err, "initial empty-folder progress event was not delivered");
+        }
+
         let output = empty_folders::scan(
             &empty_folders::ScanContext {
                 root: &root,

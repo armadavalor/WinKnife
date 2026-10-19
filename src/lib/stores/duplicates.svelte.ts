@@ -175,9 +175,8 @@ class DuplicatesStore {
     this.runningScanId = null;
     this.selected = new Set();
     this.keeperOverrides = new Map();
-    await this.attachProgress();
-
     try {
+      await this.attachProgress();
       this.result = await startDuplicateScan(
         this.pinnedRoot === null ? undefined : [this.pinnedRoot],
       );

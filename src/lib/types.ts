@@ -364,6 +364,8 @@ export interface DuplicateScan {
   linkedNames: LinkedName[];
   skippedRoots: string[];
   filesHashed: number;
+  /** Candidates that could not be read and were left out. */
+  unreadable: number;
   cancelled: boolean;
 }
 

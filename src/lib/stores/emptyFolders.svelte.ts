@@ -74,9 +74,8 @@ class EmptyFoldersStore {
     this.stopping = false;
     this.runningScanId = null;
     this.selected = new Set();
-    await this.attachProgress();
-
     try {
+      await this.attachProgress();
       const root = this.root.trim();
       this.result = await startEmptyFolderScan(root === "" ? undefined : root);
       this.step = "review";
@@ -90,7 +89,11 @@ class EmptyFoldersStore {
     }
   }
 
-  /** Ask the running scan to stop. */
+  /**
+   * Ask the running scan to stop. The backend names the scan in an initial
+   * progress event as soon as it starts; a Stop pressed before that event is
+   * sent the moment it arrives (see `attachProgress`).
+   */
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.runningScanId) {
