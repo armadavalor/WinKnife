@@ -59,6 +59,40 @@ function New-KeepFiles([string] $profileRoot) {
   $keep | ForEach-Object { Join-Path $profileRoot $_ }
 }
 
+# Windows 10's sandbox image has no working browser (the taskbar Edge pin is
+# dead; Windows 11 ships Edge). Install it from Microsoft's online installer,
+# refusing anything not validly signed by Microsoft. A missing browser must
+# not fail the fixture: the operator can still type the URL.
+$EDGE_SETUP_URL = 'https://go.microsoft.com/fwlink/?linkid=2109047&Channel=Stable&language=en&consent=1'
+$EDGE_INSTALL_TIMEOUT_S = 300
+
+function Get-EdgePath {
+  @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+function Install-Edge {
+  try {
+    Write-Host 'Installing Microsoft Edge (not in this sandbox image)...'
+    $setup = Join-Path $env:TEMP 'MicrosoftEdgeSetup.exe'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $EDGE_SETUP_URL -OutFile $setup -UseBasicParsing
+    $sig = Get-AuthenticodeSignature $setup
+    if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+      throw "Edge installer signature not trusted: $($sig.Status) $($sig.SignerCertificate.Subject)"
+    }
+    $proc = Start-Process -FilePath $setup -ArgumentList '/silent', '/install' -PassThru
+    $deadline = (Get-Date).AddSeconds($EDGE_INSTALL_TIMEOUT_S)
+    while (-not (Get-EdgePath) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 3 }
+    if (-not $proc.HasExited) { Write-Host 'Edge installer still finishing in the background.' }
+    return Get-EdgePath
+  } catch {
+    Write-Host "Edge install failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    return $null
+  }
+}
+
 try {
   if ($env:USERNAME -ne 'WDAGUtilityAccount') {
     throw "This script only runs inside Windows Sandbox (user is $env:USERNAME)."
@@ -101,7 +135,13 @@ try {
   $keepCount = @($entries | Where-Object { $_.class -eq 'keep' }).Count
   Write-Host ("Manifest: {0} files ({1} keep). {2}" -f $entries.Count, $keepCount, $manifestPath)
 
-  Start-Process "microsoft-edge:$StartUrl"
+  $edge = Get-EdgePath
+  if (-not $edge) { $edge = Install-Edge }
+  if ($edge) {
+    Start-Process -FilePath $edge -ArgumentList $StartUrl
+  } else {
+    Write-Host "No browser. Open $StartUrl by hand." -ForegroundColor Yellow
+  }
   Write-Host 'Ready. Hand over to the participant.'
 } catch {
   Write-Host "BOOTSTRAP FAILED: $($_.Exception.Message)" -ForegroundColor Red
