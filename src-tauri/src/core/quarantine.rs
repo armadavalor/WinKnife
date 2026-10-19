@@ -3189,6 +3189,47 @@ mod tests {
         }
     }
 
+    /// Timing probe for the bulk clean/restore path; run with
+    /// `cargo test --release perf_probe -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn perf_probe_bulk_take_and_restore() {
+        let count: usize = std::env::var("PERF_N")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2000);
+        for (label, on_disk) in [("memory", false), ("disk", true)] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let work = dir.path().join("work");
+            fs::create_dir_all(&work).expect("work");
+            let conn = if on_disk {
+                db::open(&dir.path().join("app")).expect("db")
+            } else {
+                db::open_in_memory().expect("db")
+            };
+            let q =
+                Quarantine::with_root(dir.path().join("quarantine"), RetentionPolicy::default());
+            let files: Vec<PathBuf> = (0..count)
+                .map(|i| write(&work, &format!("f{i}.tmp"), b"x"))
+                .collect();
+            let batch = Uuid::new_v4();
+            let t = std::time::Instant::now();
+            for f in &files {
+                q.take(&conn, batch, f).expect("take");
+            }
+            let take = t.elapsed();
+            let t = std::time::Instant::now();
+            let (ok, failed) = q.restore_batch(&conn, batch).expect("restore");
+            let restore = t.elapsed();
+            assert_eq!((ok.len(), failed.len()), (count, 0));
+            eprintln!(
+                "{label}: n={count} take={take:?} ({:?}/item) restore={restore:?} ({:?}/item)",
+                take / count as u32,
+                restore / count as u32
+            );
+        }
+    }
+
     fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
         let path = dir.join(name);
         if let Some(parent) = path.parent() {

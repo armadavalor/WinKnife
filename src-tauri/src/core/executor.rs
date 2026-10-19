@@ -897,6 +897,67 @@ mod tests {
     /// phase 3 a mutating action *cannot be constructed* without a justification
     /// gate 4 can re-derive, so a test that wants to reach the quarantine has to
     /// supply one that resolves — which is exactly the property being asserted.
+    /// Timing probe for the bulk clean path with the gates the app builds;
+    /// `cargo test --release perf_probe -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn perf_probe_execute_gates() {
+        let count: usize = std::env::var("PERF_N")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2000);
+        let h = harness();
+        let scratch = h._dir.path();
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::from_env(
+                &crate::core::platform::SystemEnv,
+                &scratch.join("app-data"),
+                &scratch.join("quarantine"),
+            ))
+            .packs(vec![fixture_pack()])
+            .lock_probe(Arc::new(crate::core::platform::SystemLockProbe))
+            .build();
+        let files: Vec<PathBuf> = (0..count)
+            .map(|i| write(&h.work, &format!("f{i}.tmp"), b"x"))
+            .collect();
+        let t = std::time::Instant::now();
+        for f in &files {
+            assert!(brain.path_refusal(f).is_none());
+        }
+        eprintln!("path_refusal: {:?}/item", t.elapsed() / count as u32);
+        let t = std::time::Instant::now();
+        for f in &files {
+            assert!(brain.lock_state(f).is_free());
+        }
+        eprintln!("lock_state: {:?}/item", t.elapsed() / count as u32);
+        let findings: Vec<Finding> = files.iter().map(|f| finding_at(f, 1)).collect();
+        let recs: Vec<Recommendation> = findings.iter().map(quarantine_rec).collect();
+        let units: Vec<ExecUnit<'_>> = findings
+            .iter()
+            .zip(&recs)
+            .map(|(finding, recommendation)| ExecUnit {
+                recommendation,
+                finding,
+            })
+            .collect();
+        let database = crate::core::db::Database::new(db::open(&scratch.join("app")).expect("db"));
+        let bin = StubRecycleBin::default();
+        let env = ExecEnvironment {
+            quarantine: &h.quarantine,
+            db: &database,
+            brain: &brain,
+            recycle_bin: &bin,
+            startup: &NoStartupControl,
+        };
+        let t = std::time::Instant::now();
+        let report = execute(&units, &env, &ExecOptions::default(), None).expect("execute");
+        eprintln!(
+            "execute: {:?}/item succeeded={}",
+            t.elapsed() / count as u32,
+            report.succeeded()
+        );
+    }
+
     fn fixture_pack() -> crate::core::brain::RulePack {
         const JSON: &str = r#"{
             "id": "executor-fixture",

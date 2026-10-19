@@ -84,6 +84,13 @@ jobs:
           WINKNIFE_EFS_TESTS: "1"
         run: cargo test
 
+      # TEMPORARY (perf/bulk-clean-restore): per-item timings on the runner.
+      - name: Perf probe
+        working-directory: src-tauri
+        env:
+          PERF_N: "5000"
+        run: cargo test --lib perf_probe -- --ignored --nocapture --test-threads=1
+
       - name: TypeScript / Svelte check
         run: npm run check
 
