@@ -83,19 +83,19 @@ Legend: **E2E** = a test name from `scripts/qa/e2e.mjs`; `snake_case` = a
 | Huge (100k+) | E2E "cleaner: scan, clean safe items…" with `temp_files=100000`; Sandbox (100k default). Known hang on huge Temp, fixed separately |
 | Locked files | `a_locked_file_is_skipped_and_reported`, `a_locked_file_is_gated_to_red_even_with_a_safe_rule`, `a_lock_probe_reporting_in_use_blocks_every_move` |
 | Access denied | `an_unreadable_directory_is_recorded_in_the_summary`; Sandbox (deny-ACE dir) |
-| Long/unicode paths | `a_rename_handles_paths_longer_than_max_path`; Sandbox (unicode + long sentinels) |
+| Long/unicode paths | `a_rename_handles_paths_longer_than_max_path`; E2E "cleaner: unicode and >260-char paths…" (clean, restore, exact names) |
 | Junctions/symlinks | `junctions_are_never_followed`, `a_link_pointing_into_a_protected_directory_is_refused`, `a_walk_root_that_is_a_junction_into_a_protected_location_is_refused`, `junctions_are_never_quarantined` |
 | Cancel mid-run | `cancellation_stops_a_scan_and_says_so`, `cancellation_stops_the_walk`, `a_running_scan_can_be_cancelled_and_a_finished_one_cannot`. **No UI Stop** (audit A3) |
 | Undo/restore | E2E "quarantine: restore the cleaner batch" |
-| Restart mid-op | Sandbox: kill the app during Clean up, reopen, check quarantine ledger vs. disk |
+| Restart mid-op | E2E `e2e-kill.mjs` (taskkill during Clean up, relaunch, ledger vs. disk) |
 
 ### Quarantine (restore / purge)
 
 | Scenario | Coverage |
 |---|---|
-| Empty | Sandbox (fresh profile: drawer shows the empty state) |
+| Empty | E2E "quarantine: drawer shows the empty state…" |
 | Huge | Sandbox (clean the 100k Temp, restore the whole batch) |
-| Locked files | `a_restore_never_replaces_an_occupied_destination`; Sandbox (lock the destination, restore) |
+| Locked files | `a_restore_never_replaces_an_occupied_destination`; E2E "quarantine: restore onto an occupied destination loses nothing"; E2E double-restore Busy guard |
 | Access denied | `a_failed_restore_puts_the_ledger_row_back`, `purge_refuses_paths_outside_the_quarantine_root` |
 | Long/unicode paths | `a_rename_handles_paths_longer_than_max_path` |
 | Junctions/symlinks | `junctions_are_never_quarantined`, `a_directory_containing_a_junction_is_never_moved_across_volumes`, `a_source_directory_swapped_for_a_junction_is_never_walked_through` |
@@ -111,10 +111,10 @@ Legend: **E2E** = a test name from `scripts/qa/e2e.mjs`; `snake_case` = a
 | Huge | Sandbox (100k profile; Pictures/Downloads sets) |
 | Locked files | Sandbox (locked sentinel is in a duplicate set; check it is reported, not silently dropped — audit A8) |
 | Access denied | Sandbox (deny-ACE dir) |
-| Long/unicode paths | Sandbox |
+| Long/unicode paths | E2E "cleaner: unicode and >260-char paths…" (same quarantine path; no duplicates-specific unicode set yet) |
 | Junctions/symlinks | `a_hardlinked_pair_is_excluded_and_reported`, `a_link_inside_a_real_set_collapses_without_losing_the_set` |
 | Cancel mid-run | `cancellation_before_hashing_stops_the_walk`, `cancellation_during_hashing_stops_the_scan`; E2E "duplicates: Stop…" (**xfail**, audit A2) |
-| Undo/restore | Sandbox (move copies to quarantine, restore from drawer) |
+| Undo/restore | E2E "duplicates: quarantine one copy, twins stay, restore brings it back" |
 | Restart mid-op | Sandbox |
 | Happy path | E2E "duplicates: finds the fixture's copy sets" |
 
@@ -129,7 +129,7 @@ Legend: **E2E** = a test name from `scripts/qa/e2e.mjs`; `snake_case` = a
 | Long/unicode paths | Sandbox |
 | Junctions/symlinks | `a_junction_is_not_followed_and_not_reported` |
 | Cancel mid-run | `cancelling_stops_the_scan_with_no_findings`; E2E "empty folders: Stop on a big folder" |
-| Undo/restore | Sandbox (remove → restore from drawer) |
+| Undo/restore | E2E "empty folders: quarantine the found folders, then restore them" |
 | Restart mid-op | Sandbox |
 | Happy path | E2E "empty folders: finds the fixture tree…"; `a_nested_empty_tree_reports_only_its_top` |
 

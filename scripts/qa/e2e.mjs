@@ -13,8 +13,17 @@
 // Output: <out-dir>/results.json plus a screenshot per failed test.
 // Exit code: 1 if any test not marked knownIssue failed.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 const PORT = 9222;
 const WIDTH = 1280;
@@ -199,6 +208,60 @@ function expect(condition, message) {
 
 const exists = (p) => p && existsSync(p);
 
+// Node adds the \\?\ prefix itself for long absolute paths; spell it out so a
+// path over 260 characters resolves whatever the OS long-path policy says.
+const longOf = (p) => (p.startsWith("\\\\?\\") ? p : "\\\\?\\" + p);
+const existsLong = (p) => existsSync(longOf(p));
+
+const DRAWER = 'aside[aria-label="Quarantine"]';
+const drawerOpen = () => evaluate(`!!document.querySelector(${q(DRAWER)})`);
+
+async function openDrawer() {
+  if (!(await drawerOpen())) await click("button", "Quarantine");
+  await waitFor("*", null, DRAWER);
+  await waitGone("*", "Loading", DRAWER).catch(() => {});
+  await sleep(SETTLE_MS);
+}
+
+async function closeDrawer() {
+  if (await drawerOpen()) {
+    await click("button", "Close", DRAWER);
+    await sleep(SETTLE_MS);
+  }
+}
+
+// Restores the first batch the drawer lists (the newest) and waits for the
+// report. Returns the drawer's text once the report is on screen.
+async function restoreFirstBatch() {
+  await openDrawer();
+  await click("button", "Restore", DRAWER);
+  await waitFor("*", "Restored ", DRAWER, SCAN_TIMEOUT_MS);
+  await sleep(SETTLE_MS);
+  return evaluate(`document.querySelector(${q(DRAWER)}).innerText`);
+}
+
+// Every item the quarantine ledger holds, read from the backend.
+const ledgerItems = () =>
+  evaluate(`(async () => {
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const items = [];
+    for (const b of await invoke("quarantine_list")) {
+      items.push(...(await invoke("quarantine_batch_items", { batchId: b.batchId })));
+    }
+    return items;
+  })()`);
+
+// Scans the cleaner and cleans what it ticked; the batch stays in quarantine.
+async function cleanTemp() {
+  await goTo("cleaner");
+  if (await has("main button", "Scan again")) await click("main button", "Scan again");
+  await click("button", "Scan for junk");
+  await waitFor("main button", "Clean up", null, SCAN_TIMEOUT_MS);
+  await click("main button", "Clean up");
+  await click('[role="alertdialog"] button', "Clean up");
+  await waitFor("button", "Open quarantine", null, SCAN_TIMEOUT_MS);
+}
+
 /* ---------------------------------------------------------------------------
  * Tests. Order matters: quarantine restore uses the cleaner's batch.
  * knownIssue: a filed bug; a failure is reported but does not fail the run.
@@ -242,6 +305,28 @@ test("empty folders: finds the fixture tree, keeps the folder with a file", asyn
   expect(exists(fx.emptyKeep), `scan touched ${fx.emptyKeep}`);
 });
 
+test("empty folders: quarantine the found folders, then restore them", async () => {
+  const buildDir = join(fx.emptyRoot, "proj000", "build");
+  const deepest = join(buildDir, "out0", "empty");
+  expect(exists(deepest), `fixture missing ${deepest}`);
+  await goTo("empty-folders");
+  if (await has("main button", "Scan again")) await click("main button", "Scan again");
+  await setInput('main input[type="text"]', fx.emptyRoot);
+  await click("button", "Find empty folders");
+  await waitFor("*", "empty folders found", null, SCAN_TIMEOUT_MS);
+  await click("main button", "Select all");
+  await click("main button", "Move folders to quarantine");
+  await click('[role="alertdialog"] button', "Move folders to quarantine");
+  await waitFor("*", "moved to quarantine", null, SCAN_TIMEOUT_MS);
+  expect(!exists(buildDir), `empty folder tree still in place: ${buildDir}`);
+  // The folder that holds a file must survive, file included.
+  expect(exists(fx.emptyKeep), `folder with a file was removed: ${fx.emptyKeep}`);
+  expect(exists(join(fx.emptyKeep, "main.rs")), "main.rs vanished from the kept folder");
+  await restoreFirstBatch();
+  expect(exists(deepest), `empty folder not restored: ${deepest}`);
+  await closeDrawer();
+});
+
 // A drive root is refused as a scan root, and the protected trees are skipped,
 // so Stop needs a big unprotected folder: the runner's tool cache, or
 // WINKNIFE_QA_BIG_DIR (e.g. a large folder inside Windows Sandbox).
@@ -268,6 +353,35 @@ test("duplicates: finds the fixture's copy sets", async () => {
     SCAN_TIMEOUT_MS,
   );
   expect(which === 0, "no duplicate sets found in the fixture");
+});
+
+test("duplicates: quarantine one copy, twins stay, restore brings it back", async () => {
+  // Candidates are matched by suffix so a \\?\ prefix on the page's path
+  // cannot hide the fixture copy.
+  const set = fx.duplicateSet.map((p) => p.toLowerCase());
+  const target = await evaluate(`(() => {
+    const set = ${q(set)};
+    const box = [...document.querySelectorAll('main input[type="checkbox"]')].find((c) => {
+      const label = (c.getAttribute("aria-label") ?? "").toLowerCase();
+      return set.some((s) => label.endsWith(s));
+    });
+    if (!box) return null;
+    if (!box.checked) box.click();
+    return box.getAttribute("aria-label");
+  })()`);
+  expect(target, "no non-keeper checkbox for the fixture's first copy set");
+  const twins = fx.duplicateSet.filter((p) => !target.toLowerCase().endsWith(p.toLowerCase()));
+  expect(twins.length >= 1 && twins.every((p) => exists(p)), "fixture twins missing before the move");
+  await sleep(SETTLE_MS);
+  await click("main button", "Move copies to quarantine");
+  await click('[role="alertdialog"] button', "Move copies to quarantine");
+  await waitFor("button", "Open quarantine", null, SCAN_TIMEOUT_MS);
+  expect(!exists(target), `quarantined copy still on disk: ${target}`);
+  for (const twin of twins) expect(exists(twin), `a twin was removed too: ${twin}`);
+  await restoreFirstBatch();
+  expect(exists(target), `copy not restored: ${target}`);
+  for (const twin of twins) expect(exists(twin), `a twin vanished on restore: ${twin}`);
+  await closeDrawer();
 });
 
 test("duplicates: Stop cancels the scan", async () => {
@@ -314,6 +428,135 @@ test("duplicates: Stop cancels the scan", async () => {
   expect(outcome === "stopped", outcome);
   await waitFor("main button", "Scan again", null, STEP_TIMEOUT_MS);
   await waitFor("main *", "Stopped before it finished", null, STEP_TIMEOUT_MS);
+});
+
+test("cleaner: unicode and >260-char paths go to quarantine and come back by exact name", async () => {
+  expect(existsLong(fx.unicode), `fixture missing ${fx.unicode}`);
+  expect(existsLong(fx.longPath), `fixture missing the long-path file`);
+  expect(fx.longPath.length > 260, `long-path fixture is only ${fx.longPath.length} characters`);
+  await cleanTemp();
+  expect(!existsLong(fx.unicode), `unicode file not quarantined: ${fx.unicode}`);
+  expect(!existsLong(fx.longPath), "long-path file not quarantined");
+  const report = await restoreFirstBatch();
+  expect(existsLong(fx.unicode), `unicode file not restored: ${fx.unicode}`);
+  expect(existsLong(fx.longPath), "long-path file not restored");
+  // Exact names, not a lookalike: the directory listing must hold the stored name.
+  for (const p of [fx.unicode, fx.longPath]) {
+    const names = readdirSync(longOf(dirname(p)));
+    expect(names.includes(basename(p)), `restored name differs from ${basename(p)}; found ${names}`);
+  }
+  expect(!/could not|failed/i.test(report), `restore report mentions a failure: ${report.slice(0, 300)}`);
+  await closeDrawer();
+});
+
+test("quarantine: restore onto an occupied destination loses nothing", async () => {
+  const occupant = Buffer.from("not-the-original");
+  await cleanTemp();
+  expect(!exists(fx.tempOld), "sentinel was not quarantined");
+  writeFileSync(fx.tempOld, occupant);
+  const report = await restoreFirstBatch();
+  // The occupant is somebody else's file: it must be untouched.
+  expect(
+    exists(fx.tempOld) && readFileSync(fx.tempOld).equals(occupant),
+    "the file occupying the destination was replaced or removed",
+  );
+  // The quarantined copy must survive somewhere: restored beside the occupant
+  // under another name, or still in the ledger with its file present.
+  const dir = dirname(fx.tempOld);
+  const stem = basename(fx.tempOld, ".tmp");
+  const beside = readdirSync(dir).filter(
+    (n) => n.startsWith(stem) && join(dir, n) !== fx.tempOld && sizeOf(join(dir, n)) === 2048,
+  );
+  const held = (await ledgerItems()).filter((i) => i.originalPath.toLowerCase() === fx.tempOld.toLowerCase());
+  const keptInLedger = held.some((i) => exists(i.quarantinePath));
+  expect(
+    beside.length > 0 || keptInLedger,
+    `the quarantined sentinel is neither beside the occupant nor in the ledger. Drawer: ${report.slice(0, 300)}`,
+  );
+  // Put the sentinel back for later tests: drop the occupant, rename the sibling.
+  rmSync(fx.tempOld);
+  if (beside.length > 0) renameSync(join(dir, beside[0]), fx.tempOld);
+  else if (keptInLedger) {
+    await closeDrawer();
+    await restoreFirstBatch();
+  }
+  expect(exists(fx.tempOld), "could not put the sentinel back");
+  await closeDrawer();
+});
+
+const sizeOf = (p) => statSync(p).size;
+
+// The two Busy tests share one run: the drawer's text can only be observed
+// while the double-click is happening.
+let busyRun = null;
+
+test("quarantine: a second restore while one runs is refused (Busy), one restore applied", async () => {
+  await cleanTemp();
+  await openDrawer();
+  busyRun = await evaluate(`(async () => {
+    const internals = window.__TAURI_INTERNALS__;
+    const original = internals.invoke;
+    const calls = [];
+    internals.invoke = function (cmd, ...rest) {
+      const promise = original.call(this, cmd, ...rest);
+      if (cmd === "quarantine_restore") {
+        const rec = { state: "pending" };
+        calls.push(rec);
+        promise.then(
+          (v) => { rec.state = "ok"; rec.restored = v.restored.length; rec.failed = v.failed.length; },
+          (e) => { rec.state = "err"; rec.message = typeof e === "string" ? e : JSON.stringify(e); },
+        );
+      }
+      return promise;
+    };
+    const aside = document.querySelector(${q(DRAWER)});
+    let sawText = false;
+    const watcher = setInterval(() => {
+      if (aside.innerText.includes("already running")) sawText = true;
+    }, 10);
+    const button = window.__qa.find("button", "Restore", ${q(DRAWER)});
+    button.click();
+    button.click();
+    const deadline = Date.now() + ${SCAN_TIMEOUT_MS};
+    while (Date.now() < deadline && !(calls.length === 2 && calls.every((c) => c.state !== "pending"))) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    clearInterval(watcher);
+    internals.invoke = original;
+    return { calls, sawText };
+  })()`);
+  const { calls } = busyRun;
+  expect(calls.length === 2, `expected two restore calls, saw ${calls.length}`);
+  const ok = calls.filter((c) => c.state === "ok");
+  const refused = calls.filter((c) => c.state === "err");
+  expect(ok.length === 1 && refused.length === 1, `expected one success and one refusal: ${JSON.stringify(calls)}`);
+  expect(/already running/i.test(refused[0].message), `refusal is not the Busy message: ${refused[0].message}`);
+  expect(ok[0].failed === 0 && ok[0].restored > 0, `the applied restore reported ${JSON.stringify(ok[0])}`);
+  expect(exists(fx.tempOld), "sentinel not restored by the applied restore");
+  const left = await ledgerItems();
+  expect(left.length === 0, `${left.length} items left in the ledger after the only restore`);
+  await closeDrawer();
+});
+
+test(
+  "quarantine: the drawer shows the Busy refusal to the user",
+  async () => {
+    expect(busyRun, "the double-restore test did not run");
+    expect(busyRun.sawText, "no 'already running' text was ever visible in the drawer");
+  },
+  {
+    knownIssue:
+      "QuarantineDrawer only renders store.error when status is 'error'; a refused restore sets error but leaves status 'ready', and reload() clears it",
+  },
+);
+
+test("quarantine: drawer shows the empty state once everything is restored", async () => {
+  const left = await ledgerItems();
+  expect(left.length === 0, `ledger still holds ${left.length} items`);
+  await openDrawer();
+  await waitFor("*", "Nothing is waiting in quarantine.", DRAWER);
+  await closeDrawer();
 });
 
 test("treemap: map C:, Stop, button comes back", async () => {

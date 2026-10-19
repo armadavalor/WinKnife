@@ -170,7 +170,13 @@ jobs:
           node scripts/qa/e2e.mjs "$env:QA_HOME\winknife-fixture.json" e2e-out
           $code = $LASTEXITCODE
           if ($p.HasExited) { "app exited early with $($p.ExitCode)" }
-          Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
+          # Kill-mid-clean check: runs last because it kills the app and
+          # relaunches it (the registry policy and this step's env carry over).
+          if (-not $p.HasExited) {
+            node scripts/qa/e2e-kill.mjs "$env:QA_HOME\winknife-fixture.json" e2e-out
+            if ($LASTEXITCODE -ne 0) { $code = $LASTEXITCODE }
+          }
+          Get-Process winknife -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           exit $code
 
       - uses: actions/upload-artifact@v4

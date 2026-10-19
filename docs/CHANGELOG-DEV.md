@@ -2034,3 +2034,24 @@ unguarded.
 
 **Deferred.** Progress and cancel for execute/restore/purge (rest of #39, #41).
 
+
+## 2026-10-19 — E2E: Sandbox-only cells moved onto the CI runner
+
+**Built.** `scripts/qa/e2e.mjs` gains the scenarios QA-PLAN listed as manual:
+duplicates quarantine/restore (twin untouched), empty folders quarantine/restore
+(folder with a file survives), unicode and over-260-character paths round trip
+through the cleaner and a restore, restore onto an occupied destination (no
+data loss), the double-restore Busy guard (#39/#46: one applied, one refused with
+"already running"), and the drawer empty state. New `scripts/qa/e2e-kill.mjs`
+runs last in the same CI step: it starts a clean, `taskkill`s WinKnife as soon
+as files start moving, relaunches it, and checks that every Temp file is either
+at its original path or in the ledger with its quarantined copy present.
+
+**Decisions.** The refusal-is-visible check is a separate `knownIssue` test:
+`QuarantineDrawer` renders `store.error` only when status is `error`, so a
+refused restore shows nothing (and `reload()` clears the error). App code was
+not touched. No new fixture sentinels were needed.
+
+**Deferred.** Kill during restore, kill during duplicates/empty-folders moves,
+the 100k "Huge" restore, and locked-destination restore with a real OS lock
+(the occupied-destination test uses a plain file) stay manual.
