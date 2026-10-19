@@ -23,12 +23,14 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::core::busy::{Operation, OperationGuard, OperationLock};
 use crate::core::error::{CoreError, Result};
 use crate::core::ledger;
 use crate::core::path_compare;
@@ -277,6 +279,9 @@ impl PurgeReport {
 pub struct Quarantine {
     root: PathBuf,
     policy: RetentionPolicy,
+    /// One clean-up, restore or purge at a time (issue #39). Shared by clones,
+    /// so every handle to this quarantine sees the same lock.
+    operations: Arc<OperationLock>,
 }
 
 impl Quarantine {
@@ -289,6 +294,7 @@ impl Quarantine {
         Self {
             root: app_data_dir.join(QUARANTINE_DIR_NAME),
             policy: RetentionPolicy::validated(policy.retention_days, policy.max_bytes),
+            operations: Arc::default(),
         }
     }
 
@@ -298,7 +304,15 @@ impl Quarantine {
         Self {
             root: root.into(),
             policy,
+            operations: Arc::default(),
         }
+    }
+
+    /// Start a clean-up, restore or purge, or refuse with
+    /// [`CoreError::Busy`] while another one runs. Callers take this before
+    /// the database lock and hold the guard for the whole operation.
+    pub fn begin(&self, operation: Operation) -> Result<OperationGuard<'_>> {
+        self.operations.begin(operation)
     }
 
     /// The quarantine directory. Also a protected path — the brain refuses to
