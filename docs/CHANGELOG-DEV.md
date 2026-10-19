@@ -2206,3 +2206,12 @@ theme (0.5 / 0.55 / 0.7). Layers only animate transform and opacity.
 cursor light parks in the middle; the global `data-animations="off"` rule
 already stops the keyframes. The PNG stays the canonical logo source; the SVG
 is a drawing of it (KANONIK).
+
+## 2026-10-20 — Background light reaches the whole window
+
+**Built.** Feedback on Polish 7: the light stayed at the top. Aurora now has
+one blob from the top-left and one from the bottom-right that drift past each
+other through the middle. Waves adds a fainter band layer that rises from the
+bottom and rolls the other way. Spotlight adds a dimmer floor pool that
+breathes out of step with the top light. Still transform and opacity only;
+`data-animations="off"` stops everything as before.
