@@ -359,6 +359,12 @@ test("duplicates: quarantine one copy, twins stay, restore brings it back", asyn
   // Candidates are matched by suffix so a \\?\ prefix on the page's path
   // cannot hide the fixture copy.
   const set = fx.duplicateSet.map((p) => p.toLowerCase());
+  // Sets render collapsed; open them all so the copies' checkboxes exist.
+  await evaluate(`(() => {
+    for (const b of document.querySelectorAll('main button[aria-expanded="false"]')) b.click();
+    return true;
+  })()`);
+  await sleep(SETTLE_MS);
   const target = await evaluate(`(() => {
     const set = ${q(set)};
     const box = [...document.querySelectorAll('main input[type="checkbox"]')].find((c) => {
@@ -492,50 +498,45 @@ let busyRun = null;
 
 test("quarantine: a second restore while one runs is refused (Busy), one restore applied", async () => {
   await cleanTemp();
+  // Part 1, backend: two concurrent restores of one batch. The guard must
+  // refuse exactly one and the other must restore everything.
+  const direct = await evaluate(`(async () => {
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const [batch] = await invoke("quarantine_list");
+    const settle = (p) => p.then((v) => ({ state: "ok", restored: v.restored.length, failed: v.failed.length }),
+      (e) => ({ state: "err", message: typeof e === "string" ? e : JSON.stringify(e) }));
+    return Promise.all([settle(invoke("quarantine_restore", { batchId: batch.batchId })),
+      settle(invoke("quarantine_restore", { batchId: batch.batchId }))]);
+  })()`);
+  const ok = direct.filter((c) => c.state === "ok");
+  const refused = direct.filter((c) => c.state === "err");
+  expect(ok.length === 1 && refused.length === 1, `expected one success and one refusal: ${JSON.stringify(direct)}`);
+  expect(/already running/i.test(refused[0].message), `refusal is not the Busy message: ${refused[0].message}`);
+  expect(ok[0].failed === 0 && ok[0].restored > 0, `the applied restore reported ${JSON.stringify(ok[0])}`);
+  expect(exists(fx.tempOld), "sentinel not restored by the applied restore");
+  expect((await ledgerItems()).length === 0, "items left in the ledger after the only restore");
+
+  // Part 2, UI: a restore started behind the drawer's back holds the lock;
+  // the drawer's own Restore click is refused. Watch whether the user can see it.
+  await cleanTemp();
   await openDrawer();
   busyRun = await evaluate(`(async () => {
-    const internals = window.__TAURI_INTERNALS__;
-    const original = internals.invoke;
-    const calls = [];
-    internals.invoke = function (cmd, ...rest) {
-      const promise = original.call(this, cmd, ...rest);
-      if (cmd === "quarantine_restore") {
-        const rec = { state: "pending" };
-        calls.push(rec);
-        promise.then(
-          (v) => { rec.state = "ok"; rec.restored = v.restored.length; rec.failed = v.failed.length; },
-          (e) => { rec.state = "err"; rec.message = typeof e === "string" ? e : JSON.stringify(e); },
-        );
-      }
-      return promise;
-    };
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const [batch] = await invoke("quarantine_list");
     const aside = document.querySelector(${q(DRAWER)});
     let sawText = false;
     const watcher = setInterval(() => {
       if (aside.innerText.includes("already running")) sawText = true;
     }, 10);
-    const button = window.__qa.find("button", "Restore", ${q(DRAWER)});
-    button.click();
-    button.click();
-    const deadline = Date.now() + ${SCAN_TIMEOUT_MS};
-    while (Date.now() < deadline && !(calls.length === 2 && calls.every((c) => c.state !== "pending"))) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    await new Promise((r) => setTimeout(r, 500));
+    const hidden = invoke("quarantine_restore", { batchId: batch.batchId }).then(() => "ok", (e) => String(e));
+    window.__qa.find("button", "Restore", ${q(DRAWER)}).click();
+    const outcome = await hidden;
+    await new Promise((r) => setTimeout(r, 1500));
     clearInterval(watcher);
-    internals.invoke = original;
-    return { calls, sawText };
+    return { outcome, sawText };
   })()`);
-  const { calls } = busyRun;
-  expect(calls.length === 2, `expected two restore calls, saw ${calls.length}`);
-  const ok = calls.filter((c) => c.state === "ok");
-  const refused = calls.filter((c) => c.state === "err");
-  expect(ok.length === 1 && refused.length === 1, `expected one success and one refusal: ${JSON.stringify(calls)}`);
-  expect(/already running/i.test(refused[0].message), `refusal is not the Busy message: ${refused[0].message}`);
-  expect(ok[0].failed === 0 && ok[0].restored > 0, `the applied restore reported ${JSON.stringify(ok[0])}`);
-  expect(exists(fx.tempOld), "sentinel not restored by the applied restore");
-  const left = await ledgerItems();
-  expect(left.length === 0, `${left.length} items left in the ledger after the only restore`);
+  expect(busyRun.outcome === "ok", `the background restore did not apply: ${busyRun.outcome}`);
+  expect((await ledgerItems()).length === 0, "items left in the ledger after the background restore");
   await closeDrawer();
 });
 
