@@ -270,9 +270,9 @@ test("duplicates: finds the fixture's copy sets", async () => {
   expect(which === 0, "no duplicate sets found in the fixture");
 });
 
-test("duplicates: Stop returns to idle", async () => {
+test("duplicates: Stop cancels the scan", async () => {
   // The fixture scan ends before Stop renders, so scan a big folder through
-  // the treemap's `?root=` cross-link and Stop it once the walker names a path.
+  // the treemap's `?root=` cross-link.
   expect(BIG_DIR, "no big folder to scan; set WINKNIFE_QA_BIG_DIR");
   const href = `/duplicates?root=${encodeURIComponent(BIG_DIR)}`;
   await evaluate(
@@ -282,11 +282,38 @@ test("duplicates: Stop returns to idle", async () => {
   await sleep(SETTLE_MS);
   // "Scan again" only resets the page to idle; "Find duplicates" starts the scan.
   if (await has("main button", "Scan again")) await click("main button", "Scan again");
-  await click("main button", "Find duplicates");
-  await waitFor("main *", BIG_DIR + "\\");
-  await click("button", "Stop");
-  await waitGone("button", "Stopping", null, STEP_TIMEOUT_MS);
-  await waitForAny([["main button", "Find duplicates"], ["main button", "Scan again"]], STEP_TIMEOUT_MS);
+  await waitFor("main button", "Find duplicates");
+  await ensureHelpers();
+  // Arm the observer before starting the scan. A CDP round trip plus 250 ms
+  // polling can miss both the first progress path and the short-lived Stop UI.
+  // Stop before the first progress event is supported: the store sends cancel
+  // when that event supplies the scan id.
+  const outcome = await evaluate(`new Promise((resolve) => {
+    const main = document.querySelector("main");
+    const start = window.__qa.find("main button", "Find duplicates");
+    const observer = new MutationObserver(check);
+    const timeout = setTimeout(() => finish("Stop never appeared"), ${STEP_TIMEOUT_MS});
+    function finish(value) {
+      observer.disconnect();
+      clearTimeout(timeout);
+      resolve(value);
+    }
+    function check() {
+      const stop = window.__qa.find("main button", "Stop");
+      if (stop) {
+        stop.click();
+        finish("stopped");
+      } else if (window.__qa.find("main button", "Scan again")) {
+        finish("scan completed before Stop appeared");
+      }
+    }
+    observer.observe(main, { childList: true, subtree: true, characterData: true });
+    start.click();
+    check();
+  })`);
+  expect(outcome === "stopped", outcome);
+  await waitFor("main button", "Scan again", null, STEP_TIMEOUT_MS);
+  await waitFor("main *", "Stopped before it finished", null, STEP_TIMEOUT_MS);
 });
 
 test("treemap: map C:, Stop, button comes back", async () => {
