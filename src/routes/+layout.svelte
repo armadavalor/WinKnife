@@ -18,6 +18,7 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import { t } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
+  import { motion } from "$lib/stores/motion.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
   import { theme } from "$lib/stores/theme.svelte";
 
@@ -28,6 +29,7 @@
   // then re-trigger the very call that moved it.
   onMount(() => {
     theme.init();
+    motion.init();
     void moduleStore.load();
     void quarantineStore.reload();
     void openLaunchRoute();
