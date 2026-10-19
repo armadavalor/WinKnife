@@ -508,6 +508,11 @@ const en = {
     "Off while Windows asks apps to reduce motion (Settings › Accessibility › Visual effects).",
   "settings.animationsOn": "On",
   "settings.animationsOff": "Off",
+  "settings.glowLabel": "Background light",
+  "settings.glowHint": "Moves slowly and leans toward the mouse. Still when animations are off.",
+  "settings.glow.aurora": "Aurora",
+  "settings.glow.waves": "Waves",
+  "settings.glow.spotlight": "Spotlight",
   // --- copy audit (WP-C) ---
   "dashboard.status.default": "Ready when you are.",
   "dashboard.status.file-unlocker": "Drop a file here to see what is holding it.",
@@ -709,6 +714,11 @@ const tr: Partial<Record<TranslationKey, string>> = {
     "Windows uygulamalardan hareketi azaltmalarını istediği sürece kapalı (Ayarlar › Erişilebilirlik › Görsel efektler).",
   "settings.animationsOn": "Açık",
   "settings.animationsOff": "Kapalı",
+  "settings.glowLabel": "Arka plan ışığı",
+  "settings.glowHint": "Yavaşça hareket eder ve fareye doğru kayar. Animasyonlar kapalıyken durur.",
+  "settings.glow.aurora": "Kutup ışığı",
+  "settings.glow.waves": "Dalgalar",
+  "settings.glow.spotlight": "Spot ışığı",
   // --- copy audit (WP-C) ---
   "dashboard.status.default": "Hazır olduğunuzda başlayabilirsiniz.",
   "dashboard.action.cleaner": "Gereksizleri tara",

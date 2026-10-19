@@ -14,6 +14,7 @@
     the size of the program and the known-app list, not a boot-time measurement.
 -->
 <script lang="ts">
+  import LoadingNote from "$lib/components/LoadingNote.svelte";
   import { onMount } from "svelte";
 
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
@@ -100,7 +101,7 @@
   {/if}
 
   {#if store.status === "loading" || store.status === "idle"}
-    <p class="text-sm text-ink-faint">{t("startup.loading")}</p>
+    <LoadingNote text={t("startup.loading")} />
   {:else if store.status === "error"}
     <div class="flex flex-col items-start gap-3 rounded-xl border border-surface-3 bg-surface-1 p-5">
       <p class="text-sm">{t("startup.loadError")}</p>

@@ -4,11 +4,13 @@
   the app can do.
 -->
 <script lang="ts">
+  import LoadingNote from "$lib/components/LoadingNote.svelte";
   import { getVersion } from "@tauri-apps/api/app";
   import { onMount } from "svelte";
 
   import { page } from "$app/state";
 
+  import KnifeLogo from "$lib/components/KnifeLogo.svelte";
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
   import { t, tModuleName } from "$lib/i18n";
   import type { ModuleManifest } from "$lib/types";
@@ -55,17 +57,10 @@
 >
   <a
     href="/dashboard"
-    class="flex items-center gap-3 rounded-lg px-1 py-1 outline-none focus-visible:outline-2 focus-visible:outline-accent"
+    class="group flex items-center gap-3 rounded-lg px-1 py-1 outline-none focus-visible:outline-2 focus-visible:outline-accent"
     aria-label={t("app.name")}
   >
-    <img
-      src="/favicon.png"
-      alt=""
-      width="32"
-      height="32"
-      class="size-8 shrink-0 rounded-lg"
-      draggable="false"
-    />
+    <KnifeLogo size={32} {loading} />
     <div class="min-w-0 leading-tight">
       <p class="truncate text-base font-semibold tracking-tight text-ink">
         {t("app.name")}
@@ -103,7 +98,7 @@
     </p>
 
     {#if loading}
-      <p class="px-3 text-sm text-ink-faint">{t("dashboard.loading")}</p>
+      <LoadingNote text={t("dashboard.loading")} class="px-3" />
     {:else if modules.length === 0}
       <p class="px-3 text-sm text-ink-faint">{t("dashboard.empty")}</p>
     {:else}

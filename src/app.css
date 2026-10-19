@@ -41,7 +41,7 @@
 :root {
   color-scheme: dark;
   --grain-opacity: 0.035;
-  --glow-opacity: 0.35;
+  --glow-opacity: 0.5;
 }
 
 :root[data-theme="forest"] {
@@ -60,7 +60,7 @@
   --color-risk-warning: oklch(80% 0.13 60);
   --color-risk-danger: oklch(70% 0.15 25);
   --grain-opacity: 0.045;
-  --glow-opacity: 0.4;
+  --glow-opacity: 0.55;
 }
 
 /* Light theme: the surface ladder inverts, each step keeps its role. */
@@ -82,7 +82,7 @@
   --color-risk-danger: oklch(52% 0.17 25);
   --color-scrim: oklch(20% 0.01 265 / 0.35);
   --grain-opacity: 0.06;
-  --glow-opacity: 0.6;
+  --glow-opacity: 0.7;
 }
 
 html,
@@ -114,9 +114,153 @@ body {
   mix-blend-mode: soft-light;
 }
 
+/* Background light (Polish 7). The variant lives on <html data-glow>, the
+   pointer on --glow-x/--glow-y (src/lib/stores/glow.svelte.ts). Layers only
+   animate transform/opacity so the GPU does the work. Registered properties
+   let the cursor light ease toward the mouse instead of jumping. */
+@property --glow-x {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 50%;
+}
+@property --glow-y {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 50%;
+}
+
+:root {
+  transition:
+    --glow-x 0.8s ease-out,
+    --glow-y 0.8s ease-out;
+}
+
 .bg-glow {
+  overflow: hidden;
   opacity: var(--glow-opacity);
   background: radial-gradient(60% 45% at 50% -8%, var(--color-accent-soft) 0%, transparent 70%);
+}
+
+.bg-glow > span {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+}
+
+.glow-cursor {
+  inset: 0;
+  background: radial-gradient(
+    28vmax 28vmax at var(--glow-x) var(--glow-y),
+    var(--color-accent-soft) 0%,
+    transparent 70%
+  );
+  opacity: 0.55;
+}
+
+/* Aurora: two soft blobs drifting past each other. */
+:root[data-glow="aurora"] .glow-a,
+:root[data-glow="aurora"] .glow-b,
+:root:not([data-glow]) .glow-a,
+:root:not([data-glow]) .glow-b {
+  width: 70vmax;
+  height: 45vmax;
+  border-radius: 50%;
+  filter: blur(60px);
+  background: radial-gradient(closest-side, var(--color-accent-soft), transparent);
+}
+:root[data-glow="aurora"] .glow-a,
+:root:not([data-glow]) .glow-a {
+  top: -25vmax;
+  left: -10vmax;
+  animation: glow-drift-a 18s ease-in-out infinite alternate;
+}
+:root[data-glow="aurora"] .glow-b,
+:root:not([data-glow]) .glow-b {
+  top: -20vmax;
+  right: -15vmax;
+  background: radial-gradient(closest-side, var(--color-accent), transparent);
+  opacity: 0.35;
+  animation: glow-drift-b 22s ease-in-out infinite alternate;
+}
+
+/* Waves: slanted bands of light rolling across, fading out downward. */
+:root[data-glow="waves"] .glow-a {
+  inset: -30% -50% 30% -50%;
+  background: repeating-linear-gradient(
+    105deg,
+    transparent 0 6vmax,
+    var(--color-accent-soft) 9vmax,
+    transparent 12vmax 18vmax
+  );
+  filter: blur(28px);
+  mask-image: linear-gradient(to bottom, black 0%, transparent 85%);
+  animation: glow-roll 14s linear infinite;
+}
+:root[data-glow="waves"] .glow-b {
+  display: none;
+}
+
+/* Spotlight: a brighter top light that breathes, plus a bigger cursor spot. */
+:root[data-glow="spotlight"] .glow-a {
+  inset: -20% 15% 40% 15%;
+  border-radius: 50%;
+  filter: blur(50px);
+  background: radial-gradient(closest-side, var(--color-accent-soft), transparent);
+  animation: glow-breathe 7s ease-in-out infinite;
+}
+:root[data-glow="spotlight"] .glow-b {
+  display: none;
+}
+:root[data-glow="spotlight"] .glow-cursor {
+  background: radial-gradient(
+    40vmax 40vmax at var(--glow-x) var(--glow-y),
+    var(--color-accent-soft) 0%,
+    transparent 70%
+  );
+  opacity: 0.8;
+}
+
+/* Animations off: keyframes already stop via the global rule; also park
+   the cursor light in the middle so nothing follows the mouse. */
+:root[data-animations="off"] .bg-glow {
+  --glow-x: 50%;
+  --glow-y: 50%;
+}
+
+@keyframes glow-drift-a {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(35vw, 12vh) scale(1.2);
+  }
+}
+@keyframes glow-drift-b {
+  from {
+    transform: translate(0, 0) scale(1.1);
+  }
+  to {
+    transform: translate(-40vw, 18vh) scale(0.9);
+  }
+}
+@keyframes glow-roll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(18.64vmax); /* one band period along x at 105deg */
+  }
+}
+@keyframes glow-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
 }
 
 /* Buttons: one look per role, used by every route. */

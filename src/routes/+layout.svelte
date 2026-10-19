@@ -18,6 +18,7 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import { t } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
+  import { glow } from "$lib/stores/glow.svelte";
   import { motion } from "$lib/stores/motion.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
   import { theme } from "$lib/stores/theme.svelte";
@@ -30,6 +31,7 @@
   onMount(() => {
     theme.init();
     motion.init();
+    glow.init();
     void moduleStore.load();
     void quarantineStore.reload();
     void openLaunchRoute();
@@ -75,8 +77,12 @@
 </a>
 
 <div class="relative isolate flex h-screen w-screen overflow-hidden">
-  <!-- Decorative: accent glow, then film grain. Neither takes clicks or layout. -->
-  <div class="bg-glow pointer-events-none fixed inset-0 -z-10" aria-hidden="true"></div>
+  <!-- Decorative: moving accent light, then film grain. Neither takes clicks or layout. -->
+  <div class="bg-glow pointer-events-none fixed inset-0 -z-10" aria-hidden="true">
+    <span class="glow-a"></span>
+    <span class="glow-b"></span>
+    <span class="glow-cursor"></span>
+  </div>
   <svg class="bg-grain pointer-events-none fixed inset-0 -z-10 h-full w-full" aria-hidden="true" focusable="false">
     <defs>
       <filter id="wk-grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">

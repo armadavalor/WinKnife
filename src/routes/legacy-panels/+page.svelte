@@ -6,6 +6,7 @@
   (and shows its own UAC prompt where one is needed).
 -->
 <script lang="ts">
+  import LoadingNote from "$lib/components/LoadingNote.svelte";
   import { onMount } from "svelte";
 
   import { legacyPanelsList, legacyPanelsOpen } from "$lib/api";
@@ -78,7 +79,7 @@
   {/if}
 
   {#if panels === null && !error}
-    <p class="text-sm text-ink-faint">{t("legacyPanels.loading")}</p>
+    <LoadingNote text={t("legacyPanels.loading")} />
   {/if}
 
   {#each groups as section (section.group)}

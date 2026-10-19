@@ -7,6 +7,7 @@
   as "nothing to find" rather than "nobody has looked".
 -->
 <script lang="ts">
+  import LoadingNote from "$lib/components/LoadingNote.svelte";
   import { onMount } from "svelte";
 
   import InfoTip from "$lib/components/InfoTip.svelte";
@@ -123,7 +124,7 @@
 
   <!-- One card per module -->
   {#if moduleStore.status === "loading" || moduleStore.status === "idle"}
-    <p class="text-sm text-ink-faint">{t("dashboard.loading")}</p>
+    <LoadingNote text={t("dashboard.loading")} />
   {:else if moduleStore.modules.length === 0}
     <p class="text-sm text-ink-faint">{t("dashboard.empty")}</p>
   {:else}
