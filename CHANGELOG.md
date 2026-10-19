@@ -30,6 +30,8 @@ live in [docs/CHANGELOG-DEV.md](docs/CHANGELOG-DEV.md).
 - **Startup** — disabling an entry no longer stalls on Working or freezes the
   app window.
 - **Finding lists** — restored normal-sized chevrons in Cleaner and Duplicates.
+- **Quarantine** — a restore or purge refused because another operation is
+  running now says so in the drawer instead of failing silently.
 
 ## [0.2.0] — 2026-10-13
 
