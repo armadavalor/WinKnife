@@ -50,6 +50,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::core::db::{with_db, DbAccess};
 use crate::core::error::{CoreError, Result};
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
 use crate::core::path_compare::CanonicalPath;
@@ -901,15 +902,17 @@ pub fn cached_scan(conn: &Connection, root: &Path) -> Result<Option<CachedScan>>
 
 /// A [`SizeOracle`] backed by the SQLite cache.
 pub struct CacheOracle<'a> {
-    conn: &'a Connection,
+    db: &'a dyn DbAccess,
     drive: String,
 }
 
 impl<'a> CacheOracle<'a> {
     /// Read totals for `root`'s cached scan.
-    pub fn new(conn: &'a Connection, root: &Path) -> Self {
+    /// The connection is locked per lookup, so a long `children` walk never
+    /// holds it for its whole run (#37).
+    pub fn new(db: &'a dyn DbAccess, root: &Path) -> Self {
         Self {
-            conn,
+            db,
             drive: key_of(root),
         }
     }
@@ -917,8 +920,8 @@ impl<'a> CacheOracle<'a> {
 
 impl SizeOracle for CacheOracle<'_> {
     fn aggregate(&self, path: &Path) -> Option<DirAggregate> {
-        self.conn
-            .query_row(
+        with_db(self.db, |conn| {
+            Ok(conn.query_row(
                 "SELECT total_bytes, own_bytes, file_count, dir_count, readable,
                         unreadable_below, compressed_below
                  FROM treemap_dir WHERE drive = ?1 AND path = ?2",
@@ -936,9 +939,10 @@ impl SizeOracle for CacheOracle<'_> {
                     })
                 },
             )
-            .optional()
-            .ok()
-            .flatten()
+            .optional()?)
+        })
+        .ok()
+        .flatten()
     }
 }
 

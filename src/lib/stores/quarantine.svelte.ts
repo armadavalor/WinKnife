@@ -45,8 +45,15 @@ class QuarantineStore {
   });
   /** Where the fetch is. */
   status = $state<LoadStatus>("idle");
-  /** Message of the last failure. */
+  /** Message of the last failed fetch. */
   error = $state<string | null>(null);
+  /**
+   * Message of the last refused or failed action (restore, purge, batch
+   * items). Kept apart from `error` because the reload that follows another
+   * operation's `quarantine:changed` would otherwise wipe it before the user
+   * could read it: a restore refused as Busy vanished this way (e2e QA).
+   */
+  actionError = $state<string | null>(null);
   /** Whether the drawer panel is showing. */
   open = $state(false);
   /** Items of the expanded batch, keyed by batch id. */
@@ -100,6 +107,7 @@ class QuarantineStore {
     this.lastRestore = null;
     this.lastPurge = null;
     this.removeFailed = null;
+    this.actionError = null;
   }
 
   /** Load (or drop) the item list of one batch. */
@@ -112,29 +120,29 @@ class QuarantineStore {
     try {
       this.items = { ...this.items, [batchId]: await quarantineBatchItems(batchId) };
     } catch (error: unknown) {
-      this.error = message(error);
+      this.actionError = message(error);
     }
   }
 
   /** Put a whole batch back. */
   async restore(batchId: string): Promise<void> {
-    this.error = null;
+    this.actionError = null;
     try {
       this.lastRestore = await quarantineRestore(batchId);
       await this.reload();
     } catch (error: unknown) {
-      this.error = message(error);
+      this.actionError = message(error);
     }
   }
 
   /** Run the retention purge and the size cap now. */
   async purge(): Promise<void> {
-    this.error = null;
+    this.actionError = null;
     try {
       this.lastPurge = await quarantinePurge();
       await this.reload();
     } catch (error: unknown) {
-      this.error = message(error);
+      this.actionError = message(error);
     }
   }
 
@@ -144,7 +152,7 @@ class QuarantineStore {
    * (decision b, 2026-10-12).
    */
   async purgeItem(item: QuarantineItem): Promise<void> {
-    this.error = null;
+    this.actionError = null;
     this.removeFailed = null;
     let failure: RemovalFailure | null;
     try {
@@ -161,7 +169,7 @@ class QuarantineStore {
       this.items = { ...this.items, [item.batchId]: remaining };
       await this.reload();
     } catch (error: unknown) {
-      this.error = message(error);
+      this.actionError = message(error);
     }
   }
 

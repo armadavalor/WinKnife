@@ -43,6 +43,7 @@
 
 use std::collections::HashMap;
 
+use crate::core::db::{with_db, DbAccess};
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use uuid::Uuid;
@@ -156,8 +157,9 @@ impl StartupControl for NoStartupControl {
 pub struct ExecEnvironment<'a> {
     /// Where removed items go.
     pub quarantine: &'a Quarantine,
-    /// The ledger.
-    pub conn: &'a Connection,
+    /// The ledger. Locked per statement, never for the whole run, so the
+    /// rest of the app stays responsive while a clean moves files (#37).
+    pub db: &'a dyn DbAccess,
     /// Re-checks protected paths and locks at execute time.
     pub brain: &'a Brain,
     /// The recycle bin, for the one action that is not a quarantine move.
@@ -392,7 +394,7 @@ fn apply_one(
 
     match env
         .quarantine
-        .take_reporting(env.conn, batch, &unit.finding.path)
+        .take_reporting(env.db, batch, &unit.finding.path)
     {
         Ok(taken) => {
             state.moved_anything = true;
@@ -669,7 +671,7 @@ fn disable_startup_entry(
         );
     };
 
-    match env.startup.disable(env.conn, *source, key) {
+    match with_db(env.db, |conn| env.startup.disable(conn, *source, key)) {
         // No bytes are reclaimed by turning something off, and saying otherwise
         // would put an invented figure in the report.
         // A shortcut moved only in part says so in the item's result
@@ -694,7 +696,7 @@ fn startup_refusal(
     command: &str,
     env: &ExecEnvironment<'_>,
 ) -> Option<String> {
-    let live = match env.startup.read(env.conn, source, key) {
+    let live = match with_db(env.db, |conn| env.startup.read(conn, source, key)) {
         Ok(Some(live)) => live,
         Ok(None) => {
             return Some(format!(
@@ -834,6 +836,7 @@ mod tests {
     use crate::core::scanner::CancellationToken;
     use crate::core::types::RiskBucket;
     use crate::modules::duplicates::{self, DuplicateContext, DuplicateScan, DuplicatesSettings};
+    use rusqlite::Connection;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
@@ -954,11 +957,97 @@ mod tests {
     fn env<'a>(h: &'a Harness, brain: &'a Brain, bin: &'a StubRecycleBin) -> ExecEnvironment<'a> {
         ExecEnvironment {
             quarantine: &h.quarantine,
-            conn: &h.conn,
+            db: &h.conn,
             brain,
             recycle_bin: bin,
             startup: &NoStartupControl,
         }
+    }
+
+    /// A lock probe that takes its time over one file, standing in for any
+    /// slow step of a clean: a large move, a slow disk, an antivirus scan.
+    struct SlowProbe {
+        entered: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+        hold: std::time::Duration,
+    }
+
+    impl LockProbe for SlowProbe {
+        fn probe(&self, _path: &Path) -> LockState {
+            if let Some(entered) = self.entered.lock().expect("sender").take() {
+                entered.send(()).expect("signal");
+                std::thread::sleep(self.hold);
+            }
+            LockState::Free
+        }
+    }
+
+    /// Audit issue #37: a clean used to hold the one database connection for
+    /// its whole run, so every other command waited behind it. The executor
+    /// now locks per statement; a read from another thread must get through
+    /// while the clean is still busy with a file.
+    #[test]
+    fn a_long_clean_does_not_hold_the_database() {
+        const HOLD: std::time::Duration = std::time::Duration::from_millis(1500);
+        const FAST_ENOUGH: std::time::Duration = std::time::Duration::from_millis(750);
+
+        let h = harness();
+        let database = crate::core::db::Database::new(db::open_in_memory().expect("db"));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::empty())
+            .packs(vec![fixture_pack()])
+            .lock_probe(Arc::new(SlowProbe {
+                entered: std::sync::Mutex::new(Some(entered_tx)),
+                hold: HOLD,
+            }))
+            .build();
+        let bin = StubRecycleBin::default();
+        let first = write(&h.work, "first.tmp", b"one");
+        let second = write(&h.work, "second.tmp", b"two");
+        let (f1, f2) = (finding_at(&first, 3), finding_at(&second, 3));
+        let (r1, r2) = (quarantine_rec(&f1), quarantine_rec(&f2));
+        let units = vec![
+            ExecUnit {
+                recommendation: &r1,
+                finding: &f1,
+            },
+            ExecUnit {
+                recommendation: &r2,
+                finding: &f2,
+            },
+        ];
+        let (report, waited) = std::thread::scope(|scope| {
+            let clean = scope.spawn(|| {
+                let env = ExecEnvironment {
+                    quarantine: &h.quarantine,
+                    db: &database,
+                    brain: &brain,
+                    recycle_bin: &bin,
+                    startup: &NoStartupControl,
+                };
+                execute(&units, &env, &ExecOptions::default(), None)
+            });
+            entered_rx.recv().expect("the clean reached its slow step");
+            let asked = std::time::Instant::now();
+            database
+                .with(|conn| h.quarantine.stats(conn))
+                .expect("a read during the clean");
+            let waited = asked.elapsed();
+            (
+                clean.join().expect("clean thread").expect("execute"),
+                waited,
+            )
+        });
+
+        assert!(
+            waited < FAST_ENOUGH,
+            "a read waited {waited:?} behind a clean that was busy for {HOLD:?}"
+        );
+        assert_eq!(report.succeeded(), 2);
+        let held = database
+            .with(|conn| h.quarantine.stats(conn))
+            .expect("stats");
+        assert_eq!(held.item_count, 2, "the ledger still records both moves");
     }
 
     #[test]

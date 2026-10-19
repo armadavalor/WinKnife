@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::busy::{Operation, OperationGuard, OperationLock};
+use crate::core::db::{with_db, DbAccess};
 use crate::core::error::{CoreError, Result};
 use crate::core::ledger;
 use crate::core::path_compare;
@@ -338,9 +339,8 @@ impl Quarantine {
     /// Returns [`CoreError::Quarantine`] if the path does not exist or cannot
     /// be moved, and [`CoreError::VerifyFailed`] if a cross-volume copy did not
     /// match the source (in which case the original is still there).
-    pub fn take(&self, conn: &Connection, batch: Uuid, path: &Path) -> Result<QuarantineItem> {
-        self.take_reporting(conn, batch, path)
-            .map(|taken| taken.item)
+    pub fn take(&self, db: &dyn DbAccess, batch: Uuid, path: &Path) -> Result<QuarantineItem> {
+        self.take_reporting(db, batch, path).map(|taken| taken.item)
     }
 
     /// [`Self::take`], also returning what the move left the user to know
@@ -350,7 +350,7 @@ impl Quarantine {
     /// As [`Self::take`].
     pub fn take_reporting(
         &self,
-        conn: &Connection,
+        db: &dyn DbAccess,
         batch: Uuid,
         path: &Path,
     ) -> Result<TakeOutcome> {
@@ -439,7 +439,7 @@ impl Quarantine {
             Ok(())
         };
         let moved = ledger::ledgered_move(
-            conn,
+            db,
             "quarantine take",
             ledger::LedgerStep::Claim {
                 write: &mut write,
@@ -475,9 +475,8 @@ impl Quarantine {
     /// Returns [`CoreError::UnknownQuarantineItem`] when the id is not in the
     /// ledger or was already restored, and [`CoreError::Quarantine`] when the
     /// move back fails.
-    pub fn restore_item(&self, conn: &Connection, item_id: Uuid) -> Result<RestoreOutcome> {
-        let item = self
-            .find_item(conn, item_id)?
+    pub fn restore_item(&self, db: &dyn DbAccess, item_id: Uuid) -> Result<RestoreOutcome> {
+        let item = with_db(db, |conn| self.find_item(conn, item_id))?
             .ok_or_else(|| CoreError::UnknownQuarantineItem(item_id.to_string()))?;
         if !item.is_held() {
             return Err(CoreError::UnknownQuarantineItem(format!(
@@ -493,11 +492,21 @@ impl Quarantine {
         // "held" after the file has gone home is a phantom the drawer offers to
         // restore a second time (security review M2).
         let now = Utc::now();
+        //
+        // Conditional on the row still being held: the connection lock is not
+        // held between the lookup above and this write (audit issue #37), so
+        // a second restore of the same item may have claimed it meanwhile.
+        // Exactly one of them gets the row; the other moves nothing.
         let mut write = |tx: &Connection| {
-            tx.execute(
-                "UPDATE quarantine SET restored_at = ?2 WHERE id = ?1",
+            let claimed = tx.execute(
+                "UPDATE quarantine SET restored_at = ?2 WHERE id = ?1 AND restored_at IS NULL",
                 rusqlite::params![item_id.to_string(), timestamp(now)],
             )?;
+            if claimed == 0 {
+                return Err(CoreError::UnknownQuarantineItem(format!(
+                    "{item_id} was already restored"
+                )));
+            }
             Ok(())
         };
         let mut undo = |tx: &Connection| {
@@ -509,7 +518,7 @@ impl Quarantine {
         };
         let mut refused_encrypted = false;
         let moved = ledger::ledgered_move(
-            conn,
+            db,
             "quarantine restore",
             ledger::LedgerStep::Claim {
                 write: &mut write,
@@ -532,7 +541,8 @@ impl Quarantine {
                 // an item whose encrypted restore was refused out of the
                 // automatic purge.
                 if refused_encrypted {
-                    let marked = mark_restore_refused(conn, item_id);
+                    let marked = with_db(db, |conn| Ok(mark_restore_refused(conn, item_id)))
+                        .unwrap_or(false);
                     return Err(encrypted_restore_refused(&item, &err, marked));
                 }
                 return Err(err);
@@ -619,15 +629,15 @@ impl Quarantine {
     #[allow(clippy::type_complexity)]
     pub fn restore_batch(
         &self,
-        conn: &Connection,
+        db: &dyn DbAccess,
         batch: Uuid,
     ) -> Result<(Vec<RestoreOutcome>, Vec<(Uuid, String)>)> {
-        let items = self.items_in_batch(conn, batch)?;
+        let items = with_db(db, |conn| self.items_in_batch(conn, batch))?;
         let mut restored = Vec::new();
         let mut failed = Vec::new();
 
         for item in items.iter().filter(|i| i.is_held()) {
-            match self.restore_item(conn, item.id) {
+            match self.restore_item(db, item.id) {
                 Ok(outcome) => restored.push(outcome),
                 Err(err) => {
                     tracing::warn!(item = %item.id, error = %err, "restore failed");
@@ -648,9 +658,8 @@ impl Quarantine {
     /// Returns [`CoreError::UnknownQuarantineItem`] when the id is not held,
     /// and [`CoreError::QuarantineItemNotMarked`] when its restore was never
     /// refused.
-    pub fn purge_item(&self, conn: &Connection, item_id: Uuid) -> Result<PurgeReport> {
-        let item = self
-            .find_item(conn, item_id)?
+    pub fn purge_item(&self, db: &dyn DbAccess, item_id: Uuid) -> Result<PurgeReport> {
+        let item = with_db(db, |conn| self.find_item(conn, item_id))?
             .filter(QuarantineItem::is_held)
             .ok_or_else(|| CoreError::UnknownQuarantineItem(item_id.to_string()))?;
         if item.restore_refused_at.is_none() {
@@ -658,7 +667,7 @@ impl Quarantine {
                 item.original_path.display().to_string(),
             ));
         }
-        self.destroy(conn, &[item], "removed by the user after a refused restore")
+        self.destroy(db, &[item], "removed by the user after a refused restore")
     }
 
     /// Remove everything whose retention window has expired, then enforce the
@@ -666,9 +675,9 @@ impl Quarantine {
     ///
     /// # Errors
     /// Returns an error only if the ledger cannot be read.
-    pub fn purge(&self, conn: &Connection, now: DateTime<Utc>) -> Result<PurgeReport> {
-        let mut report = self.purge_expired(conn, now)?;
-        report.merge(self.enforce_size_cap(conn)?);
+    pub fn purge(&self, db: &dyn DbAccess, now: DateTime<Utc>) -> Result<PurgeReport> {
+        let mut report = self.purge_expired(db, now)?;
+        report.merge(self.enforce_size_cap(db)?);
         Ok(report)
     }
 
@@ -677,17 +686,19 @@ impl Quarantine {
     ///
     /// # Errors
     /// Returns an error only if the ledger cannot be read.
-    pub fn purge_expired(&self, conn: &Connection, now: DateTime<Utc>) -> Result<PurgeReport> {
-        let mut stmt = conn.prepare(
-            "SELECT id, batch_id, original_path, quarantine_path, size_bytes,
-                    quarantined_at, purge_after, restored_at, restore_refused_at
-             FROM quarantine
-             WHERE restored_at IS NULL AND restore_refused_at IS NULL
-               AND purge_after <= ?1
-             ORDER BY purge_after ASC",
-        )?;
-        let (expired, unreadable) = collect_items(stmt.query_map([timestamp(now)], row_to_item)?)?;
-        drop(stmt);
+    pub fn purge_expired(&self, db: &dyn DbAccess, now: DateTime<Utc>) -> Result<PurgeReport> {
+        let (expired, unreadable) = with_db(db, |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, batch_id, original_path, quarantine_path, size_bytes,
+                        quarantined_at, purge_after, restored_at, restore_refused_at
+                 FROM quarantine
+                 WHERE restored_at IS NULL AND restore_refused_at IS NULL
+                   AND purge_after <= ?1
+                 ORDER BY purge_after ASC",
+            )?;
+            let rows = stmt.query_map([timestamp(now)], row_to_item)?;
+            Ok(collect_items(rows)?)
+        })?;
         if unreadable > 0 {
             tracing::error!(
                 rows = unreadable,
@@ -695,7 +706,7 @@ impl Quarantine {
             );
         }
 
-        self.destroy(conn, &expired, "retention window expired")
+        self.destroy(db, &expired, "retention window expired")
     }
 
     /// Purge oldest-first until the unmarked held size is back under the cap.
@@ -708,23 +719,25 @@ impl Quarantine {
     ///
     /// # Errors
     /// Returns an error only if the ledger cannot be read.
-    pub fn enforce_size_cap(&self, conn: &Connection) -> Result<PurgeReport> {
-        let held = self.stats(conn)?;
+    pub fn enforce_size_cap(&self, db: &dyn DbAccess) -> Result<PurgeReport> {
+        let held = with_db(db, |conn| self.stats(conn))?;
         let unmarked_bytes = held.total_bytes.saturating_sub(held.refused_bytes);
         if unmarked_bytes <= self.policy.max_bytes {
             return Ok(PurgeReport::default());
         }
 
         let mut over_by = unmarked_bytes - self.policy.max_bytes;
-        let mut stmt = conn.prepare(
-            "SELECT id, batch_id, original_path, quarantine_path, size_bytes,
-                    quarantined_at, purge_after, restored_at, restore_refused_at
-             FROM quarantine
-             WHERE restored_at IS NULL AND restore_refused_at IS NULL
-             ORDER BY quarantined_at ASC",
-        )?;
-        let (candidates, _) = collect_items(stmt.query_map([], row_to_item)?)?;
-        drop(stmt);
+        let (candidates, _) = with_db(db, |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, batch_id, original_path, quarantine_path, size_bytes,
+                        quarantined_at, purge_after, restored_at, restore_refused_at
+                 FROM quarantine
+                 WHERE restored_at IS NULL AND restore_refused_at IS NULL
+                 ORDER BY quarantined_at ASC",
+            )?;
+            let rows = stmt.query_map([], row_to_item)?;
+            Ok(collect_items(rows)?)
+        })?;
 
         let mut doomed = Vec::new();
         // `candidates` is a finite snapshot and every arm of the loop consumes
@@ -765,7 +778,7 @@ impl Quarantine {
             purging = doomed.len(),
             "quarantine over its size cap, purging oldest first"
         );
-        self.destroy(conn, &doomed, "quarantine size cap exceeded")
+        self.destroy(db, &doomed, "quarantine size cap exceeded")
     }
 
     /// Every item still held, newest first.
@@ -898,7 +911,7 @@ impl Quarantine {
     /// somehow points outside is left alone and reported.
     fn destroy(
         &self,
-        conn: &Connection,
+        db: &dyn DbAccess,
         items: &[QuarantineItem],
         why: &'static str,
     ) -> Result<PurgeReport> {
@@ -946,10 +959,13 @@ impl Quarantine {
 
             match removed {
                 Ok(()) => {
-                    conn.execute(
-                        "DELETE FROM quarantine WHERE id = ?1",
-                        [item.id.to_string()],
-                    )?;
+                    with_db(db, |conn| {
+                        conn.execute(
+                            "DELETE FROM quarantine WHERE id = ?1",
+                            [item.id.to_string()],
+                        )?;
+                        Ok(())
+                    })?;
                     report.purged_items += 1;
                     report.freed_bytes += item.size_bytes;
                     report.touched(item.batch_id);
@@ -3151,6 +3167,7 @@ fn directory_size(path: &Path) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::core::db;
 
     struct Harness {

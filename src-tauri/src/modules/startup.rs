@@ -46,6 +46,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::core::db::{with_db, DbAccess};
 use crate::core::error::{CoreError, Result};
 use crate::core::executor::{LiveStartupEntry, StartupControl};
 use crate::core::content_hash::full_hash;
@@ -364,12 +365,12 @@ impl StartupService {
     /// A source that cannot be read is *named* in the result rather than
     /// dropped: a startup list missing `HKLM` because the read failed looks
     /// exactly like a machine with nothing in `HKLM`.
-    pub fn scan(&self, conn: &Connection) -> StartupScan {
+    pub fn scan(&self, db: &dyn DbAccess) -> StartupScan {
         let mut entries = Vec::new();
         let mut unreadable = Vec::new();
 
         self.collect_registry(&mut entries, &mut unreadable);
-        self.collect_folders(conn, &mut entries, &mut unreadable);
+        self.collect_folders(db, &mut entries, &mut unreadable);
         self.collect_tasks(&mut entries, &mut unreadable);
 
         entries.sort_by(|a, b| {
@@ -439,7 +440,7 @@ impl StartupService {
 
     fn collect_folders(
         &self,
-        conn: &Connection,
+        db: &dyn DbAccess,
         out: &mut Vec<StartupEntry>,
         unreadable: &mut Vec<String>,
     ) {
@@ -455,7 +456,7 @@ impl StartupService {
             // Shortcuts this app holds are read first, so one that is both held
             // and still in the folder (the "both kept" arm, issue #21) is listed
             // once, as held and flagged, instead of twice under the same id.
-            let held = disabled_links(conn, source);
+            let held = with_db(db, |conn| disabled_links(conn, source));
             let held_names: Vec<String> = held
                 .as_ref()
                 .map(|h| h.links.iter().map(|l| l.file_name.to_lowercase()).collect())
