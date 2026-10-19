@@ -2144,3 +2144,21 @@ reached the host results folder.
 - **Doc.** `COLD-TEST.md` notes the Edge install, that the sandbox does show
   SmartScreen, and that Defender real-time protection is off inside it, so
   the separate VM session is now for antivirus behaviour.
+
+## 2026-10-19 — Audit #41 leftovers (A4, A7–A10)
+
+- **A4.** `attachProgress` now runs inside the `try` in the cleaner,
+  duplicates and empty-folders stores, so a failure resets `step` to idle and
+  records the error instead of leaving the scan "running" forever.
+- **A7.** `core::content_hash::full_hash_cancellable` checks a cancel callback
+  before every chunk and returns `ErrorKind::Interrupted`; duplicates stage 4
+  uses it. `full_hash` is unchanged for the executor.
+- **A8.** `DuplicateScan.unreadable` counts candidates that failed the partial
+  or full read (cancellation excluded) and the duplicates page shows
+  `duplicates.unreadable` (English only, like the other duplicates strings).
+- **A9.** The empty-folder scan command emits an initial progress event with
+  the scan id before walking; the store already forwards a pending Stop on the
+  first event.
+- **A10.** The treemap cache save was not atomic (separate DELETE and INSERT
+  statements). It is now one transaction; a failed save keeps the old cache.
+- Deferred: the cleaner walk on `spawn_blocking` (second half of A4).

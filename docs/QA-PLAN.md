@@ -217,13 +217,13 @@ to that session.
 | A1 (#37) | high | Sync commands run under the global DB mutex with no timeout; one slow command (execute, treemap scan, startup scan, restore/purge) blocks every other command, so unrelated pages spin. | `core/db.rs:179` (`Database::with`), `commands.rs` |
 | A2 (#38) | high | Duplicates Stop cancels `this.result?.scanId`: null on the first scan, the *previous* scan on "Scan again". Stop never cancels; UI sits on "Stopping…" until the scan ends by itself. Verified. Empty folders does it right (`runningScanId` from progress). | `src/lib/stores/duplicates.svelte.ts` `stop()` |
 | A3 | high | Cleaner has no Stop button although `cancel_scan` exists; a slow scan can only be ended by killing the app. | `src/routes/cleaner/+page.svelte` |
-| A4 | high | Cleaner `attachProgress` is awaited outside the `try`, so a failure there leaves `busy` true forever; the blocking walk is not on `spawn_blocking`. | `src/lib/stores/scan.svelte.ts`, cleaner command |
+| A4 | high | Cleaner `attachProgress` is awaited outside the `try`, so a failure there leaves `busy` true forever; the blocking walk is not on `spawn_blocking`. | `src/lib/stores/scan.svelte.ts`, cleaner command. Fixed (2026-10-19: attachProgress moved inside the try in the cleaner, duplicates and empty-folders stores; the spawn_blocking half is not part of this fix) |
 | A5 (#39) | high | `execute`, restore and purge have no cancel, progress or timeout; restore/purge have no busy flag (double-click runs twice). | `core/executor.rs`, `core/quarantine.rs` |
 | A6 (#40) | high (inferred) | No `catch_unwind` around command bodies: a panic likely leaves the JS promise pending and the spinner on. | `commands.rs` |
-| A7 (#41) | med | `full_hash` reads the whole file without checking the cancel flag; Stop waits for the largest file. | `core/content_hash.rs` |
-| A8 | med | Unreadable files are dropped from duplicate sets without a warning. | `modules/duplicates.rs` |
-| A9 | med | Empty-folders Stop only works after the first progress event arrives. | `src/lib/stores/empty_folders*` |
-| A10 | med | Treemap cache save may not be transactional; a kill mid-save could leave a partial cache. | `modules/treemap.rs` |
+| A7 (#41) | med | `full_hash` reads the whole file without checking the cancel flag; Stop waits for the largest file. | `core/content_hash.rs`. Fixed (2026-10-19: `full_hash_cancellable` checks per chunk, returns Interrupted; duplicates stage 4 uses it) |
+| A8 | med | Unreadable files are dropped from duplicate sets without a warning. | `modules/duplicates.rs`. Fixed (2026-10-19: `DuplicateScan.unreadable` counts stage 3 and 4 read failures, not cancellations; shown on the duplicates page) |
+| A9 | med | Empty-folders Stop only works after the first progress event arrives. | `src/lib/stores/empty_folders*`. Fixed (2026-10-19: backend emits an initial progress event with the scan id before the walk; the store already sends a pending Stop on the first event) |
+| A10 | med | Treemap cache save may not be transactional; a kill mid-save could leave a partial cache. | `modules/treemap.rs`. Fixed (2026-10-19: `save_cache` runs delete and inserts in one transaction; rollback keeps the old cache) |
 | A11 | med | Restore point waits up to 5 min on UAC/WMI with no cancel; `busy` is not reset on panic. | `modules/restore_point.rs` |
 | A12 | med | `RmShutdown` (close the program holding a file) has no timeout. | `core/platform/restart_manager.rs` |
 | A13 | low | Unlocker query has no timeout. | `core/platform/restart_manager.rs` |

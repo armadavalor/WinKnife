@@ -48,7 +48,7 @@ use uuid::Uuid;
 use crate::core::brain::{self, Brain, GateVerdict, ProtectedPaths};
 // The same hash the executor recomputes to confirm a copy is still a copy
 // (review H10) — one implementation, so the two numbers are comparable.
-use crate::core::content_hash::full_hash;
+use crate::core::content_hash::full_hash_cancellable;
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
 use crate::core::path_compare;
 use crate::core::platform::{file_identity, EnvResolver, FileId};
@@ -212,6 +212,10 @@ pub struct DuplicateScan {
     pub skipped_roots: Vec<String>,
     /// Files whose contents were read for a full hash.
     pub files_hashed: u64,
+    /// Candidates that could not be read for hashing, and so were left out. A
+    /// cancelled hash is not counted: the user stopped it, the file did not fail.
+    #[serde(default)]
+    pub unreadable: u64,
     /// Whether the run stopped early.
     pub cancelled: bool,
 }
@@ -364,11 +368,14 @@ pub fn scan(ctx: &DuplicateContext<'_>, progress: Option<ProgressSink<'_>>) -> D
                 Ok(hash) => keyed.push((hash, candidate)),
                 // Unreadable now is unreadable at execute time too; leaving it
                 // out is the honest answer, not a silent loss of a duplicate.
-                Err(err) => tracing::debug!(
-                    path = %candidate.path.display(),
-                    error = %err,
-                    "candidate skipped: could not read its ends"
-                ),
+                Err(err) => {
+                    output.unreadable += 1;
+                    tracing::debug!(
+                        path = %candidate.path.display(),
+                        error = %err,
+                        "candidate skipped: could not read its ends"
+                    );
+                }
             }
         }
         survivors.extend(group_by(keyed, |(hash, _)| hash.clone()).into_iter().map(
@@ -379,17 +386,31 @@ pub fn scan(ctx: &DuplicateContext<'_>, progress: Option<ProgressSink<'_>>) -> D
     // Stage 4: full hash, in parallel, cancellable.
     let stage4_total: u64 = survivors.iter().map(|group| group.len() as u64).sum();
     let done = AtomicU64::new(0);
+    let unreadable = AtomicU64::new(0);
     let flat: Vec<Candidate> = survivors.into_iter().flatten().collect();
 
     let hashed: Vec<Option<(String, Candidate)>> = flat
         .into_par_iter()
         .map(|candidate| {
-            // Checked per file rather than per chunk: a single file's hash is
-            // bounded work, and stopping between files leaves nothing half-done.
+            // Checked per file and, inside the hash, per chunk, so one huge file
+            // cannot keep a cancelled scan alive.
             if ctx.cancel.is_cancelled() {
                 return None;
             }
-            let hash = full_hash(&candidate.path).ok()?;
+            let hash = match full_hash_cancellable(&candidate.path, &|| ctx.cancel.is_cancelled())
+            {
+                Ok(hash) => hash,
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => return None,
+                Err(err) => {
+                    unreadable.fetch_add(1, Ordering::Relaxed);
+                    tracing::debug!(
+                        path = %candidate.path.display(),
+                        error = %err,
+                        "candidate skipped: could not be read in full"
+                    );
+                    return None;
+                }
+            };
             let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(sink) = progress {
                 sink(&DuplicateProgress {
@@ -404,6 +425,7 @@ pub fn scan(ctx: &DuplicateContext<'_>, progress: Option<ProgressSink<'_>>) -> D
         .collect();
 
     output.files_hashed = done.load(Ordering::Relaxed);
+    output.unreadable += unreadable.load(Ordering::Relaxed);
     if ctx.cancel.is_cancelled() {
         output.cancelled = true;
         return output;
@@ -851,6 +873,7 @@ impl ToolModule for DuplicatesModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::content_hash::full_hash;
     use crate::core::platform::{AlwaysUnlocked, MapEnv, StubProcessProbe};
     use std::fs;
     use std::sync::Arc;
@@ -1185,6 +1208,42 @@ mod tests {
             scan.files_hashed,
             PAIRS * 2
         );
+    }
+
+    /// Audit A8: a candidate that cannot be opened is counted, not silently lost.
+    #[cfg(windows)]
+    #[test]
+    fn an_unreadable_candidate_is_counted_in_the_scan() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bytes = payload(32 * 1024, 21, None);
+        write(&dir.path().join("a.bin"), &bytes);
+        write(&dir.path().join("b.bin"), &bytes);
+        let locked = dir.path().join("c.bin");
+        write(&locked, &bytes);
+        // Exclusive handle: every other open fails with a sharing violation.
+        let _hold = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&locked)
+            .expect("hold");
+
+        let scan = run(dir.path(), MIN_ALLOWED_SIZE_BYTES);
+        assert_eq!(scan.unreadable, 1, "{scan:?}");
+        assert_eq!(scan.sets.len(), 1, "the readable pair is still found");
+    }
+
+    #[test]
+    fn a_cancelled_scan_does_not_count_unreadable_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bytes = payload(32 * 1024, 22, None);
+        write(&dir.path().join("a.bin"), &bytes);
+        write(&dir.path().join("b.bin"), &bytes);
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let scan = run_with(dir.path(), MIN_ALLOWED_SIZE_BYTES, &cancel, None);
+        assert!(scan.cancelled);
+        assert_eq!(scan.unreadable, 0);
     }
 
     #[test]

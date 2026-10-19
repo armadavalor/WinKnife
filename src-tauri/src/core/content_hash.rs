@@ -31,10 +31,29 @@ const CHUNK_BYTES: usize = 128 * 1024;
 /// contents — both callers here treat an error as "cannot confirm", never as
 /// "confirmed".
 pub fn full_hash(path: &Path) -> std::io::Result<String> {
+    full_hash_cancellable(path, &|| false)
+}
+
+/// [`full_hash`] that asks `is_cancelled` before every chunk.
+///
+/// # Errors
+/// Returns an [`std::io::ErrorKind::Interrupted`] error as soon as
+/// `is_cancelled` answers true, so a multi-gigabyte file does not keep a
+/// cancelled scan alive until it ends. Otherwise as [`full_hash`].
+pub fn full_hash_cancellable(
+    path: &Path,
+    is_cancelled: &dyn Fn() -> bool,
+) -> std::io::Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = blake3::Hasher::new();
     let mut buffer = vec![0u8; CHUNK_BYTES];
     loop {
+        if is_cancelled() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "hash cancelled",
+            ));
+        }
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
@@ -100,5 +119,36 @@ mod tests {
     fn a_missing_file_is_an_error_and_never_a_hash() {
         let dir = tempfile::tempdir().expect("tempdir");
         assert!(full_hash(&dir.path().join("nope.bin")).is_err());
+    }
+
+    #[test]
+    fn a_hash_cancelled_from_the_start_is_interrupted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = write(dir.path(), "a.bin", b"contents");
+        let err = full_hash_cancellable(&file, &|| true).expect_err("cancelled");
+        assert_eq!(err.kind(), std::io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn a_hash_cancelled_between_chunks_is_interrupted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = write(dir.path(), "big.bin", &vec![1u8; CHUNK_BYTES * 3]);
+        let calls = std::cell::Cell::new(0);
+        let err = full_hash_cancellable(&file, &|| {
+            calls.set(calls.get() + 1);
+            calls.get() > 1
+        })
+        .expect_err("cancelled");
+        assert_eq!(err.kind(), std::io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn the_cancellable_path_hashes_the_same_as_the_plain_one() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = write(dir.path(), "a.bin", &vec![7u8; CHUNK_BYTES + 5]);
+        assert_eq!(
+            full_hash_cancellable(&file, &|| false).expect("hash"),
+            full_hash(&file).expect("hash")
+        );
     }
 }

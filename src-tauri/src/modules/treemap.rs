@@ -814,6 +814,10 @@ pub struct CachedScan {
 /// Returns an error if the cache tables cannot be written.
 pub fn save_cache(conn: &Connection, scan: &TreeScan) -> Result<()> {
     let root = key_of(&scan.root);
+    // One transaction: a failure part-way rolls back and the previous cache
+    // stays, instead of the root being left with no cache or half of one.
+    let tx = conn.unchecked_transaction()?;
+    let conn = &*tx;
     conn.execute("DELETE FROM treemap_dir WHERE drive = ?1", [&root])?;
     conn.execute("DELETE FROM treemap_scan WHERE drive = ?1", [&root])?;
 
@@ -854,6 +858,8 @@ pub fn save_cache(conn: &Connection, scan: &TreeScan) -> Result<()> {
             dir.compressed_below as i64,
         ])?;
     }
+    drop(insert);
+    tx.commit()?;
     Ok(())
 }
 
@@ -1400,6 +1406,29 @@ mod tests {
                 .total_bytes,
             1_500
         );
+    }
+
+    /// Audit A10: a save that fails part-way leaves the previous cache intact
+    /// instead of an emptied one.
+    #[test]
+    fn a_failed_save_keeps_the_previous_cache() {
+        let dir = fixture();
+        let conn = crate::core::db::open_in_memory().expect("db");
+        let good = scan_at(dir.path());
+        save_cache(&conn, &good).expect("first");
+
+        let mut broken = good.clone();
+        let first = broken.dirs[0].clone();
+        // The same primary key twice: the second insert fails, after the old
+        // rows were deleted and one new one written.
+        broken.dirs = vec![first.clone(), first];
+        assert!(save_cache(&conn, &broken).is_err());
+
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM treemap_dir", [], |row| row.get(0))
+            .expect("count");
+        assert_eq!(rows as usize, good.dirs.len(), "old rows must survive");
+        assert!(cached_scan(&conn, dir.path()).expect("read").is_some());
     }
 
     #[test]
