@@ -502,6 +502,12 @@ const en = {
   "settings.themeHint.mist": "Light, soft grey",
   "settings.themeNote":
     "The theme is saved on its own. The button below is for the other settings.",
+  "settings.animationsLabel": "Animations",
+  "settings.animationsHint": "Moving progress bars and other motion. Saved on its own.",
+  "settings.animationsReduced":
+    "Off while Windows asks apps to reduce motion (Settings › Accessibility › Visual effects).",
+  "settings.animationsOn": "On",
+  "settings.animationsOff": "Off",
   // --- copy audit (WP-C) ---
   "dashboard.status.default": "Ready when you are.",
   "dashboard.status.file-unlocker": "Drop a file here to see what is holding it.",
@@ -697,6 +703,12 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "settings.themeHint.mist": "Açık, yumuşak gri",
   "settings.themeNote":
     "Tema kendi başına kaydedilir. Aşağıdaki düğme diğer ayarlar içindir.",
+  "settings.animationsLabel": "Animasyonlar",
+  "settings.animationsHint": "Hareketli ilerleme çubukları ve diğer hareketler. Kendi başına kaydedilir.",
+  "settings.animationsReduced":
+    "Windows uygulamalardan hareketi azaltmalarını istediği sürece kapalı (Ayarlar › Erişilebilirlik › Görsel efektler).",
+  "settings.animationsOn": "Açık",
+  "settings.animationsOff": "Kapalı",
   // --- copy audit (WP-C) ---
   "dashboard.status.default": "Hazır olduğunuzda başlayabilirsiniz.",
   "dashboard.action.cleaner": "Gereksizleri tara",

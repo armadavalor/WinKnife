@@ -2173,3 +2173,18 @@ reached the host results folder.
 - Motion is off under `prefers-reduced-motion` and when `<html>` carries
   `data-animations="off"`, the hook Polish item 8's switch will set. Without
   motion the indeterminate bar fills at half opacity instead of a stuck third.
+
+## 2026-10-19 — Polish item 8: animations off switch
+
+**Built.** An Animations toggle under Settings › Appearance, on by default and
+stored locally like the theme (`winknife.animations`). `src/lib/motion.ts`
+holds the rule (on only when the toggle is on and the system does not ask for
+reduced motion; tested), `stores/motion.svelte.ts` watches
+`prefers-reduced-motion` live and sets `data-animations="off"` on <html>. One
+CSS block stills every keyframe animation and transition under that attribute;
+progress bars keep their own still look from item 5. The row says when Windows'
+reduced-motion setting is what keeps animations off.
+
+**Deferred.** "Off in a performance mode": no such mode exists yet
+(DECISIONS-NEEDED). Items 6–7 (logo, background light) must key off the same
+attribute.

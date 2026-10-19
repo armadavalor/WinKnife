@@ -13,6 +13,7 @@
   import { formatBytes } from "$lib/format";
   import { t, type TranslationKey } from "$lib/i18n";
   import { settingsStore } from "$lib/stores/settings.svelte";
+  import { motion } from "$lib/stores/motion.svelte";
   import { THEMES, theme } from "$lib/stores/theme.svelte";
 
   const store = settingsStore;
@@ -98,6 +99,29 @@
       {/each}
     </div>
     <p class="mt-3 text-xs text-ink-faint">{t("settings.themeNote")}</p>
+
+    <div class="mt-5 flex items-center justify-between gap-4 border-t border-surface-2 pt-4">
+      <div class="min-w-0">
+        <p class="text-sm text-ink">{t("settings.animationsLabel")}</p>
+        <p class="text-xs text-ink-faint">
+          {motion.reducedMotion
+            ? t("settings.animationsReduced")
+            : t("settings.animationsHint")}
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={motion.pref === "on"}
+        aria-label={t("settings.animationsLabel")}
+        class="shrink-0 rounded-lg px-3 py-1 text-xs font-medium transition-colors {motion.pref === 'on'
+          ? 'bg-accent-soft text-ink hover:bg-accent hover:text-on-accent'
+          : 'border border-surface-3 text-ink-muted hover:bg-surface-2'}"
+        onclick={() => motion.set(motion.pref === "on" ? "off" : "on")}
+      >
+        {motion.pref === "on" ? t("settings.animationsOn") : t("settings.animationsOff")}
+      </button>
+    </div>
   </section>
 
   {#if store.error}

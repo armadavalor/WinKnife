@@ -215,3 +215,18 @@ body {
   width: 100%;
   opacity: 0.5;
 }
+
+/*
+ * Animations switch (Polish item 8). The motion store sets data-animations="off"
+ * when the toggle is off or the system asks for reduced motion; this stills
+ * every transition and keyframe animation app-wide. Progress bars have their
+ * own still look above.
+ */
+:root[data-animations="off"] *,
+:root[data-animations="off"] *::before,
+:root[data-animations="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
