@@ -2188,3 +2188,21 @@ reduced-motion setting is what keeps animations off.
 **Deferred.** "Off in a performance mode": no such mode exists yet
 (DECISIONS-NEEDED). Items 6–7 (logo, background light) must key off the same
 attribute.
+
+## 2026-10-20 — Polish 6–7: knife logo animation and background light
+
+**Built.** `KnifeLogo.svelte`, an SVG redraw of `assets/logo.png` whose blade
+rotates around the hinge: one fold-and-open on sidebar-logo hover, a loop while
+modules load, and a small looping knife in front of every loading line
+(`LoadingNote.svelte`, six places). Background light: three variants (Aurora,
+Waves, Spotlight) picked under Settings › Appearance and stored locally
+(`winknife.glow`), plus a cursor light that eases toward the mouse through
+registered `--glow-x/--glow-y`. `src/lib/glow.ts` holds variant parsing and the
+pointer-to-percent maths (tested); the store throttles pointer updates to one
+per frame and ignores them when animations are off. Glow opacity raised per
+theme (0.5 / 0.55 / 0.7). Layers only animate transform and opacity.
+
+**Decisions.** With animations off the knife stays open and still and the
+cursor light parks in the middle; the global `data-animations="off"` rule
+already stops the keyframes. The PNG stays the canonical logo source; the SVG
+is a drawing of it (KANONIK).

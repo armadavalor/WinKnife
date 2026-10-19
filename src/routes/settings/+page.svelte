@@ -7,12 +7,15 @@
   Rust clamps retention and the duplicate size floor, and the page says so.
 -->
 <script lang="ts">
+  import LoadingNote from "$lib/components/LoadingNote.svelte";
   import { onMount } from "svelte";
 
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes } from "$lib/format";
   import { t, type TranslationKey } from "$lib/i18n";
   import { settingsStore } from "$lib/stores/settings.svelte";
+  import { GLOW_VARIANTS } from "$lib/glow";
+  import { glow } from "$lib/stores/glow.svelte";
   import { motion } from "$lib/stores/motion.svelte";
   import { THEMES, theme } from "$lib/stores/theme.svelte";
 
@@ -122,6 +125,28 @@
         {motion.pref === "on" ? t("settings.animationsOn") : t("settings.animationsOff")}
       </button>
     </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-surface-2 pt-4">
+      <div class="min-w-0">
+        <p class="text-sm text-ink">{t("settings.glowLabel")}</p>
+        <p class="text-xs text-ink-faint">{t("settings.glowHint")}</p>
+      </div>
+      <div class="flex shrink-0 gap-1" role="radiogroup" aria-label={t("settings.glowLabel")}>
+        {#each GLOW_VARIANTS as id (id)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={glow.variant === id}
+            class="rounded-lg px-3 py-1 text-xs font-medium transition-colors {glow.variant === id
+              ? 'bg-accent-soft text-ink'
+              : 'border border-surface-3 text-ink-muted hover:bg-surface-2'}"
+            onclick={() => glow.set(id)}
+          >
+            {t(`settings.glow.${id}` as TranslationKey)}
+          </button>
+        {/each}
+      </div>
+    </div>
   </section>
 
   {#if store.error}
@@ -133,7 +158,7 @@
   {/if}
 
   {#if store.status === "loading" || store.settings === null}
-    <p class="text-sm text-ink-faint">{t("settings.loading")}</p>
+    <LoadingNote text={t("settings.loading")} />
   {:else}
     {@const settings = store.settings}
 

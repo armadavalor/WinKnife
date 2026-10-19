@@ -5,6 +5,7 @@
   is global — whatever removed something, this is where it comes back from.
 -->
 <script lang="ts">
+  import LoadingNote from "$lib/components/LoadingNote.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
@@ -146,7 +147,7 @@
 
     <div class="flex-1 overflow-y-auto px-5 py-4">
       {#if store.status === "loading"}
-        <p class="text-sm text-ink-faint">{t("quarantine.loading")}</p>
+        <LoadingNote text={t("quarantine.loading")} />
       {:else if store.status === "error"}
         <p class="text-sm text-risk-danger">{store.error}</p>
       {:else if store.batches.length === 0}
