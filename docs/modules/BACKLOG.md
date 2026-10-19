@@ -46,7 +46,7 @@ Not modules: fixes and polish to existing screens, in the user's order. Items 1,
 2. **Huge dropdown arrows in the findings list.** Cause: a stray `` byte as the Icon class (from f793205) dropped its size. *Fixed* (FindingList and Duplicates).
 3. **Direct delete without quarantine.** Conflicts with the hard rule "never permanently delete user files" — user chose quarantine-only for now (K-016); revisit after the faster clean. Item 4's fix removes most of the speed reason.
 4. **Clean of 20 GB junk took 12+ minutes.** Not the purge: the clean moved 84,919 files into quarantine at ~8.5 ms each, ~8 ms of it the same read-open probe. *Fixed* (~0.1 ms per probe). Purge itself is untouched; it runs one autocommit DELETE per row — batch in a transaction if it shows up slow.
-5. **Delete/clean progress shows no file names and the bar looks frozen.** Show the current path and count; give running bars a small motion (indeterminate shimmer / stripe) so progress reads as alive.
+5. **Delete/clean progress shows no file names and the bar looks frozen.** Show the current path and count; give running bars a small motion (indeterminate shimmer / stripe) so progress reads as alive. *Fixed* (file names and counts came with #39; the motion: sliding segment for unknown totals, drifting stripe on running bars, off under `prefers-reduced-motion` and `data-animations="off"`).
 6. **Logo animation.** The knife opening/closing on loading screens and on logo hover.
 7. **Background light.** Stronger, wave-like moving light; at least 3 variants to pick from; reacts to the mouse.
 8. **Animations off switch.** On by default, one toggle to turn off; off automatically under `prefers-reduced-motion` and in a performance mode. Items 5–7 must honour it.
