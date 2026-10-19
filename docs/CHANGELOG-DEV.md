@@ -2162,3 +2162,14 @@ reached the host results folder.
 - **A10.** The treemap cache save was not atomic (separate DELETE and INSERT
   statements). It is now one transaction; a failed save keeps the old cache.
 - Deferred: the cleaner walk on `spawn_blocking` (second half of A4).
+
+## 2026-10-19 — Polish item 5: progress bars that move
+
+- Running bars no longer look frozen. Unknown totals get a sliding segment
+  (was `animate-pulse`); known totals on running work get a drifting stripe.
+  Current path and count were already on the clean and restore panels (#39).
+- The rule sits in `src/lib/progress/mode.ts` (tested): finished bars and
+  gauges (`active={false}`, used by the treemap disk capacity) stay still.
+- Motion is off under `prefers-reduced-motion` and when `<html>` carries
+  `data-animations="off"`, the hook Polish item 8's switch will set. Without
+  motion the indeterminate bar fills at half opacity instead of a stuck third.

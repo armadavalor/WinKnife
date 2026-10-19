@@ -152,3 +152,66 @@ body {
 @utility btn-ghost {
   @apply btn-base text-ink-muted hover:enabled:bg-surface-2 hover:enabled:text-ink;
 }
+
+/*
+ * Progress motion (Polish item 5). A running bar moves so slow work does not
+ * read as frozen. Off under prefers-reduced-motion and when the animations
+ * switch (Polish item 8) sets data-animations="off" on <html>.
+ */
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@keyframes progress-stripe {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 2rem 0;
+  }
+}
+
+.progress-slide {
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+.progress-stripe {
+  background-image: linear-gradient(
+    -45deg,
+    oklch(100% 0 0 / 0.22) 25%,
+    transparent 25%,
+    transparent 50%,
+    oklch(100% 0 0 / 0.22) 50%,
+    oklch(100% 0 0 / 0.22) 75%,
+    transparent 75%
+  );
+  background-size: 2rem 100%;
+  animation: progress-stripe 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-slide,
+  .progress-stripe {
+    animation: none;
+  }
+  /* Without motion a sliding third would look like a stuck value. */
+  .progress-slide {
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+
+:root[data-animations="off"] .progress-slide,
+:root[data-animations="off"] .progress-stripe {
+  animation: none;
+}
+
+:root[data-animations="off"] .progress-slide {
+  width: 100%;
+  opacity: 0.5;
+}

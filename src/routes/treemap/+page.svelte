@@ -391,7 +391,7 @@
 
       {#if store.drive}
         <div class="flex min-w-56 flex-1 flex-col gap-1">
-          <ProgressBar pct={usedPct} label={t("treemap.capacityLabel")} />
+          <ProgressBar pct={usedPct} label={t("treemap.capacityLabel")} active={false} />
           <p class="text-xs text-ink-faint">
             {t("treemap.capacity", {
               used: formatBytes(store.drive.totalBytes - store.drive.freeBytes),
