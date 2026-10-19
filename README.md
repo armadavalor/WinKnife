@@ -13,9 +13,7 @@ a shutdown timer into one window.
 
 ![Scan, review, clean up into quarantine, then restore everything](assets/demo.gif)
 
-**Status:** nine tools implemented; preparing the first release, v0.2.0.
-Release acceptance, including a fresh Windows VM install/restore/uninstall check,
-is still pending. There is no promised release date.
+**Status:** ten tools implemented; current release v0.3.0.
 
 | Tool | What works |
 | --- | --- |
@@ -28,6 +26,7 @@ is still pending. There is no promised release date.
 | File Unlocker | Shows which program holds a file open; can ask it to close. |
 | Keep Awake | Keeps the PC (optionally the screen) awake for up to 24 hours. Nothing is persisted. |
 | Restore Point | Shows System Protection status and creates a restore point (UAC prompt). |
+| Legacy Panels | Opens 22 classic Windows tools from one page; unavailable ones are disabled. |
 
 ## Safety and privacy
 
@@ -40,9 +39,7 @@ is still pending. There is no promised release date.
 
 ## Code signing policy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
-
-Only the installer built from this repository by the GitHub Actions workflow `.github/workflows/release.yml` on GitHub-hosted runners is submitted for signing, and every signing request is approved manually. Releases up to and including v0.2.0 are unsigned. Details: [signing notes](docs/SIGNING.md).
+Releases are currently **unsigned**, so Windows SmartScreen may warn on first run and a few antivirus engines may flag the installer heuristically. Check the download against `SHA256SUMS.txt` on the release page. If signing is added later, only the installer built from this repository by `.github/workflows/release.yml` on GitHub-hosted runners will be submitted, and every signing request will be approved manually. Details: [signing notes](docs/SIGNING.md).
 
 | Role | Members |
 | --- | --- |

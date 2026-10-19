@@ -2093,3 +2093,9 @@ and the dashboard stay responsive while those run.
   alert banner until the next action or until the drawer closes.
 - Regression coverage is the e2e cell "the drawer shows the Busy refusal";
   runes stores are not reachable from `node --test`.
+
+## 2026-10-19 — v0.3.0 release prep
+
+- Version 0.3.0 in package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json; CHANGELOG `[Unreleased]` cut to `[0.3.0]`.
+- README: signing section now says releases are unsigned (K-014); Legacy Panels added to the tool table; stale "preparing v0.2.0" status removed.
+- Bulk clean/restore perf (PR #56, closed, probes only): ~1.3 ms/item take and ~1.1 ms/item restore locally (release, on-disk DB); the CI runner is ~8x slower. About half is the per-item ledger commit. Batching commits would widen the crash window (a restore claim marks up to N rows restored before their files move), so it is deferred; `synchronous=NORMAL` was not considered without a decision.

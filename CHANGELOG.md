@@ -6,6 +6,8 @@ live in [docs/CHANGELOG-DEV.md](docs/CHANGELOG-DEV.md).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-19
+
 ### Added
 - **Legacy Panels** — open 22 classic Windows tools from one page; unavailable
   tools appear with a disabled button.
@@ -69,5 +71,6 @@ First public release. (0.1.0 was never tagged; its contents ship here.)
 - Content security policy for the app window; unused opener plugin removed.
 - Log folder keeps only the newest 14 daily files.
 
-[Unreleased]: https://github.com/armadavalor/WinKnife/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/armadavalor/WinKnife/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/armadavalor/WinKnife/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/armadavalor/WinKnife/releases/tag/v0.2.0
