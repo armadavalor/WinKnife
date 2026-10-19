@@ -17,6 +17,7 @@ import {
   type Finding,
   type Recommendation,
 } from "$lib/types";
+import { ExecTracker } from "./execProgress.svelte";
 
 /** Which step of the 3-step pattern the route is on. */
 export type Step = "idle" | "scanning" | "review" | "executing" | "done";
@@ -38,6 +39,8 @@ class EmptyFoldersStore {
   pct = $state<number | null>(null);
   stopping = $state(false);
   report = $state<ExecReport | null>(null);
+  /** Progress and Stop for the running execute. */
+  readonly exec = new ExecTracker();
   error = $state<string | null>(null);
 
   private runningScanId: string | null = null;
@@ -129,7 +132,9 @@ class EmptyFoldersStore {
     this.step = "executing";
     this.error = null;
     try {
-      this.report = await invokeExecute(scan.scanId, [...this.selected], false);
+      this.report = await this.exec.run(scan.scanId, () =>
+        invokeExecute(scan.scanId, [...this.selected], false),
+      );
       this.step = "done";
     } catch (error: unknown) {
       this.error = message(error);

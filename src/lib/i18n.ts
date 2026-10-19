@@ -73,6 +73,11 @@ const en = {
     "The scan was stopped early, so these lists are incomplete. Scan again for the full picture.",
   "cleaner.showMore": "Show {count} more ({hidden} not shown yet)",
   "cleaner.executing": "Moving files to quarantine…",
+  "exec.progress": "{done} of {total}",
+  "exec.stoppingNote":
+    "Stopping after the current item. What has already moved stays in quarantine.",
+  "exec.stopped":
+    "Stopped early: {moved} moved to quarantine, {left} left where they were.",
   "cleaner.summary":
     "About {safe} can be reclaimed safely, and {review} needs your review.",
   "cleaner.skippedRules": "Some checks could not run on this PC.",
@@ -271,6 +276,9 @@ const en = {
   "quarantine.purgeFailed":
     "{count} items could not be removed. They will be tried again next time.",
   "quarantine.restored": "Restored {count} items.",
+  "quarantine.restoring": "Restoring…",
+  "quarantine.restoreStopped":
+    "Stopped: {count} restored, the rest is still in quarantine.",
   "quarantine.restoreRefused":
     "Could not restore: the file is encrypted. It stays here until you remove it.",
   "quarantine.removeItem": "Remove",
@@ -709,6 +717,15 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "cleaner.analyzed": "{total} öğenin {done} tanesi kontrol edildi",
   "cleaner.stop": "Durdur",
   "cleaner.stopping": "Durduruluyor…",
+  "cleaner.executing": "Dosyalar karantinaya taşınıyor…",
+  "exec.progress": "{done} / {total}",
+  "exec.stoppingNote":
+    "Geçerli öğeden sonra duracak. Taşınmış olanlar karantinada kalır.",
+  "exec.stopped":
+    "Erken durduruldu: {moved} öğe karantinaya taşındı, {left} öğe yerinde bırakıldı.",
+  "quarantine.restoring": "Geri yükleniyor…",
+  "quarantine.restoreStopped":
+    "Durduruldu: {count} öğe geri yüklendi, kalanı hâlâ karantinada.",
   "cleaner.cancelled":
     "Tarama erken durduruldu, bu yüzden listeler eksik. Tam sonuç için yeniden tarayın.",
   "cleaner.showMore": "{count} tane daha göster ({hidden} henüz gösterilmiyor)",

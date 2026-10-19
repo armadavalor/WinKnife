@@ -7,6 +7,7 @@
 <script lang="ts">
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import ProgressBar from "$lib/components/ProgressBar.svelte";
   import { formatBytes, formatDateTime, formatRelativeDays, truncatePath } from "$lib/format";
   import { t } from "$lib/i18n";
   import { isRestoreRefused, refusedHeld, warningsOf } from "$lib/stores/execNotes";
@@ -170,13 +171,25 @@
                   </p>
                 </div>
                 <div class="flex shrink-0 flex-col gap-1">
-                  <button
-                    type="button"
-                    class="btn-primary px-2.5! py-1! text-xs!"
-                    onclick={() => store.restore(batch.batchId)}
-                  >
-                    {t("quarantine.restore")}
-                  </button>
+                  {#if store.restoring?.batchId === batch.batchId}
+                    <button
+                      type="button"
+                      class="btn-ghost px-2.5! py-1! text-xs!"
+                      disabled={store.restoring.stopping}
+                      onclick={() => store.stopRestore()}
+                    >
+                      {store.restoring.stopping ? t("cleaner.stopping") : t("cleaner.stop")}
+                    </button>
+                  {:else}
+                    <button
+                      type="button"
+                      class="btn-primary px-2.5! py-1! text-xs!"
+                      disabled={store.restoring !== null}
+                      onclick={() => store.restore(batch.batchId)}
+                    >
+                      {t("quarantine.restore")}
+                    </button>
+                  {/if}
                   <button
                     type="button"
                     class="rounded-lg px-2.5 py-1 text-xs text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
@@ -188,6 +201,23 @@
                   </button>
                 </div>
               </div>
+              {#if store.restoring?.batchId === batch.batchId}
+                {@const run = store.restoring}
+                <div class="flex flex-col gap-1.5 px-4 pb-3">
+                  <ProgressBar
+                    label={t("quarantine.restoring")}
+                    pct={run.total ? Math.floor((run.done / run.total) * 100) : null}
+                  />
+                  <p class="font-mono text-xs text-ink-faint">
+                    {run.currentPath ? truncatePath(run.currentPath, 48) : "…"}
+                  </p>
+                  {#if run.total !== null}
+                    <p class="text-xs text-ink-faint">
+                      {t("exec.progress", { done: run.done, total: run.total })}
+                    </p>
+                  {/if}
+                </div>
+              {/if}
 
               {#if store.items[batch.batchId]}
                 <ul class="border-t border-surface-2 px-4 py-2">
@@ -233,9 +263,13 @@
       {#if store.lastRestore}
         <div class="mt-4 rounded-xl border border-surface-2 bg-surface-0 p-4">
           <p class="text-sm">
-            {t("quarantine.restored", {
-              count: store.lastRestore.restored.length,
-            })}
+            {store.lastRestore.cancelled
+              ? t("quarantine.restoreStopped", {
+                  count: store.lastRestore.restored.length,
+                })
+              : t("quarantine.restored", {
+                  count: store.lastRestore.restored.length,
+                })}
           </p>
           {#each store.lastRestore.restored.filter((r) => r.renamed) as renamed (renamed.itemId)}
             <p class="mt-1 text-xs text-ink-muted">

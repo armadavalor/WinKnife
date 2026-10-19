@@ -216,6 +216,14 @@ export interface ExecProgress {
   currentPath: string | null;
 }
 
+/** Payload of `quarantine:restore-progress`. */
+export interface RestoreProgress {
+  batchId: string;
+  itemsDone: number;
+  itemsTotal: number;
+  currentPath: string | null;
+}
+
 /** Payload of `quarantine:changed`. */
 export interface QuarantineChanged {
   batchId: string | null;
@@ -692,6 +700,8 @@ export interface RestoreFailure {
 export interface RestoreReport {
   restored: RestoreOutcome[];
   failed: RestoreFailure[];
+  /** The user pressed Stop; the rest of the batch is still in quarantine. */
+  cancelled: boolean;
 }
 
 /** What a purge removed. */

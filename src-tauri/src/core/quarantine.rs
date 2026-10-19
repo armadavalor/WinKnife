@@ -36,6 +36,7 @@ use crate::core::error::{CoreError, Result};
 use crate::core::ledger;
 use crate::core::path_compare;
 use crate::core::platform::{self, pinned, FileId};
+use crate::core::scanner::CancellationToken;
 use crate::core::types::MoveWarning;
 
 /// Directory name under the app data dir.
@@ -194,6 +195,21 @@ pub struct QuarantineStats {
     /// The size cap in force, which applies to the other items' bytes only.
     #[serde(default)]
     pub cap_bytes: u64,
+}
+
+/// Progress callback for [`Quarantine::restore_batch_controlled`]:
+/// `(done, total, original path of the current item)`.
+pub type RestoreProgressSink<'a> = &'a mut dyn FnMut(u64, u64, &Path);
+
+/// What [`Quarantine::restore_batch_controlled`] did.
+#[derive(Debug, Default)]
+pub struct BatchRestore {
+    /// Items that went back.
+    pub restored: Vec<RestoreOutcome>,
+    /// Items that did not, with the reason.
+    pub failed: Vec<(Uuid, String)>,
+    /// The user pressed Stop; whatever is in neither list is still held.
+    pub cancelled: bool,
 }
 
 /// What a restore did.
@@ -632,20 +648,53 @@ impl Quarantine {
         db: &dyn DbAccess,
         batch: Uuid,
     ) -> Result<(Vec<RestoreOutcome>, Vec<(Uuid, String)>)> {
-        let items = with_db(db, |conn| self.items_in_batch(conn, batch))?;
-        let mut restored = Vec::new();
-        let mut failed = Vec::new();
+        let report = self.restore_batch_controlled(db, batch, None, None)?;
+        Ok((report.restored, report.failed))
+    }
 
-        for item in items.iter().filter(|i| i.is_held()) {
+    /// [`Self::restore_batch`] with a Stop button and progress (issue #39).
+    ///
+    /// `cancel` is checked before each item, never in the middle of one: an
+    /// item is either back where it was or still held, and everything after
+    /// the stop stays in quarantine for a later restore. `progress` gets
+    /// `(done, total, original path)` before each item and once at the end.
+    ///
+    /// # Errors
+    /// Returns an error only if the ledger cannot be read at all.
+    pub fn restore_batch_controlled(
+        &self,
+        db: &dyn DbAccess,
+        batch: Uuid,
+        cancel: Option<&CancellationToken>,
+        mut progress: Option<RestoreProgressSink<'_>>,
+    ) -> Result<BatchRestore> {
+        let items = with_db(db, |conn| self.items_in_batch(conn, batch))?;
+        let held: Vec<_> = items.iter().filter(|i| i.is_held()).collect();
+        let total = held.len() as u64;
+        let mut report = BatchRestore::default();
+
+        for (index, item) in held.iter().enumerate() {
+            if let Some(sink) = progress.as_deref_mut() {
+                sink(index as u64, total, &item.original_path);
+            }
+            if cancel.is_some_and(CancellationToken::is_cancelled) {
+                report.cancelled = true;
+                tracing::info!(%batch, done = index, total, "restore stopped by the user");
+                break;
+            }
             match self.restore_item(db, item.id) {
-                Ok(outcome) => restored.push(outcome),
+                Ok(outcome) => report.restored.push(outcome),
                 Err(err) => {
                     tracing::warn!(item = %item.id, error = %err, "restore failed");
-                    failed.push((item.id, err.to_string()));
+                    report.failed.push((item.id, err.to_string()));
                 }
             }
         }
-        Ok((restored, failed))
+        if let (Some(sink), Some(last)) = (progress, held.last()) {
+            let done = (report.restored.len() + report.failed.len()) as u64;
+            sink(done, total, &last.original_path);
+        }
+        Ok(report)
     }
 
     /// Remove one item whose restore was refused for EFS, because the user
@@ -3480,6 +3529,52 @@ mod tests {
             );
         }
         assert_eq!(h.quarantine.stats(&h.conn).expect("stats").item_count, 0);
+    }
+
+    #[test]
+    fn a_stopped_batch_restore_leaves_the_rest_held() {
+        let h = harness(RetentionPolicy::default());
+        let batch = h.quarantine.start_batch();
+        let sources: Vec<_> = (0..4)
+            .map(|i| write(&h.work, &format!("c{i}.log"), b"body"))
+            .collect();
+        for source in &sources {
+            h.quarantine.take(&h.conn, batch, source).expect("take");
+        }
+
+        let token = CancellationToken::new();
+        let mut ticks = Vec::new();
+        // The user presses Stop once two items are back.
+        let mut sink = |done: u64, total: u64, _: &Path| {
+            ticks.push((done, total));
+            if done == 2 {
+                token.cancel();
+            }
+        };
+        let report = h
+            .quarantine
+            .restore_batch_controlled(&h.conn, batch, Some(&token), Some(&mut sink))
+            .expect("restore batch");
+
+        assert!(report.cancelled);
+        assert_eq!(report.restored.len(), 2);
+        assert!(report.failed.is_empty());
+        assert_eq!(h.quarantine.stats(&h.conn).expect("stats").item_count, 2);
+        assert_eq!(sources.iter().filter(|s| s.exists()).count(), 2);
+        assert_eq!(
+            ticks.last(),
+            Some(&(2, 4)),
+            "the last tick says how far it got"
+        );
+
+        // The rest is still there for a later restore.
+        let rest = h
+            .quarantine
+            .restore_batch_controlled(&h.conn, batch, None, None)
+            .expect("restore the rest");
+        assert!(!rest.cancelled);
+        assert_eq!(rest.restored.len(), 2);
+        assert!(sources.iter().all(|s| s.exists()));
     }
 
     #[test]
