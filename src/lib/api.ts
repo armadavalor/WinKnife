@@ -33,6 +33,7 @@ import type {
   QuarantineItem,
   QuarantineStats,
   RestoreOutcome,
+  RestoreProgress,
   RestorePointStatus,
   RestoreReport,
   ScanDone,
@@ -55,6 +56,7 @@ export const EVENTS = {
   scanDone: "scan:done",
   execProgress: "exec:progress",
   quarantineChanged: "quarantine:changed",
+  restoreProgress: "quarantine:restore-progress",
   shutdownTick: "shutdown:tick",
   launchNavigate: "launch:navigate",
   keepAwakeChanged: "keep-awake:changed",
@@ -267,7 +269,10 @@ export function quarantineStats(): Promise<QuarantineStats> {
   return invoke<QuarantineStats>("quarantine_stats");
 }
 
-/** Restore a whole batch. */
+/**
+ * Restore a whole batch. Progress comes on `quarantine:restore-progress`;
+ * `cancelScan(batchId)` stops it between items and the rest stays held.
+ */
 export function quarantineRestore(batchId: string): Promise<RestoreReport> {
   return invoke<RestoreReport>("quarantine_restore", { batchId });
 }
@@ -480,6 +485,13 @@ export function onExecProgress(
   handler: (payload: ExecProgress) => void,
 ): Promise<UnlistenFn> {
   return subscribe(EVENTS.execProgress, handler);
+}
+
+/** Subscribe to batch-restore progress. */
+export function onRestoreProgress(
+  handler: (payload: RestoreProgress) => void,
+): Promise<UnlistenFn> {
+  return subscribe(EVENTS.restoreProgress, handler);
 }
 
 /** Subscribe to quarantine changes. */

@@ -52,6 +52,7 @@ use crate::core::brain::Brain;
 use crate::core::error::Result;
 use crate::core::platform::RecycleBin;
 use crate::core::quarantine::Quarantine;
+use crate::core::scanner::CancellationToken;
 use crate::core::types::{
     Action, ExecItemResult, ExecOutcome, ExecReport, Finding, FindingKind, Justification,
     MoveWarning, Recommendation, StartupSource,
@@ -171,7 +172,7 @@ pub struct ExecEnvironment<'a> {
 /// Per-request confirmations, separate from the services in
 /// [`ExecEnvironment`] because they belong to one click, not to the app.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ExecOptions {
+pub struct ExecOptions<'a> {
     /// Whether the user confirmed emptying the recycle bin *specifically*.
     ///
     /// Everything else in a batch goes to quarantine and can be undone; this
@@ -181,7 +182,14 @@ pub struct ExecOptions {
     /// (security review H6). Without this flag a recycle-bin item is skipped
     /// and says why.
     pub confirm_empty_recycle_bin: bool,
+    /// The user's Stop button (issue #39). Checked before each item, never in
+    /// the middle of one: an item is either applied whole or not touched, and
+    /// everything after the stop is skipped with [`CANCELLED_REASON`].
+    pub cancel: Option<&'a CancellationToken>,
 }
+
+/// Why an item after a Stop was not applied.
+pub const CANCELLED_REASON: &str = "cancelled by the user";
 
 /// What has already happened in this batch.
 #[derive(Debug, Default)]
@@ -215,7 +223,7 @@ pub type ProgressSink<'a> = &'a mut dyn FnMut(u64, u64, &Finding);
 pub fn execute(
     units: &[ExecUnit<'_>],
     env: &ExecEnvironment<'_>,
-    options: &ExecOptions,
+    options: &ExecOptions<'_>,
     mut progress: Option<ProgressSink<'_>>,
 ) -> Result<ExecReport> {
     if units.is_empty() {
@@ -236,7 +244,17 @@ pub fn execute(
             sink(index as u64, total, unit.finding);
         }
 
-        let (outcome, reclaimed) = apply_one(unit, env, options, batch, &mut state);
+        let cancelled = options.cancel.is_some_and(CancellationToken::is_cancelled);
+        let (outcome, reclaimed) = if cancelled {
+            (
+                ExecOutcome::Skipped {
+                    reason: CANCELLED_REASON.to_owned(),
+                },
+                0,
+            )
+        } else {
+            apply_one(unit, env, options, batch, &mut state)
+        };
         match &outcome {
             ExecOutcome::Succeeded => tracing::info!(
                 batch = %batch,
@@ -292,7 +310,7 @@ pub fn execute(
 fn apply_one(
     unit: &ExecUnit<'_>,
     env: &ExecEnvironment<'_>,
-    options: &ExecOptions,
+    options: &ExecOptions<'_>,
     batch: Uuid,
     state: &mut BatchState,
 ) -> (ExecOutcome, u64) {
@@ -745,7 +763,7 @@ fn startup_refusal(
 fn empty_recycle_bin(
     unit: &ExecUnit<'_>,
     env: &ExecEnvironment<'_>,
-    options: &ExecOptions,
+    options: &ExecOptions<'_>,
     state: &mut BatchState,
 ) -> (ExecOutcome, u64) {
     let skipped = |reason: &str| {
@@ -1677,9 +1695,10 @@ mod tests {
         finding
     }
 
-    fn confirmed() -> ExecOptions {
+    fn confirmed() -> ExecOptions<'static> {
         ExecOptions {
             confirm_empty_recycle_bin: true,
+            ..Default::default()
         }
     }
 
@@ -1843,6 +1862,109 @@ mod tests {
         .expect("execute");
 
         assert_eq!(ticks, vec![(0, 3), (1, 3), (2, 3), (3, 3)]);
+    }
+
+    /* ---------------------------------------------------------------------
+     * Stop button (issue #39)
+     * ------------------------------------------------------------------ */
+
+    fn cancelled_reasons(report: &ExecReport) -> usize {
+        report
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(&item.outcome, ExecOutcome::Skipped { reason } if reason == CANCELLED_REASON)
+            })
+            .count()
+    }
+
+    #[test]
+    fn a_batch_stopped_before_it_starts_moves_nothing() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+        let paths: Vec<_> = (0..3)
+            .map(|i| write(&h.work, &format!("s{i}.tmp"), b"x"))
+            .collect();
+        let findings: Vec<_> = paths.iter().map(|p| finding_at(p, 1)).collect();
+        let recs: Vec<_> = findings.iter().map(quarantine_rec).collect();
+        let units: Vec<_> = findings
+            .iter()
+            .zip(&recs)
+            .map(|(finding, recommendation)| ExecUnit {
+                recommendation,
+                finding,
+            })
+            .collect();
+        let token = CancellationToken::new();
+        token.cancel();
+
+        let mut ticks = Vec::new();
+        let mut sink = |done: u64, total: u64, _: &Finding| ticks.push((done, total));
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions {
+                cancel: Some(&token),
+                ..Default::default()
+            },
+            Some(&mut sink),
+        )
+        .expect("execute");
+
+        assert_eq!(report.succeeded(), 0);
+        assert_eq!(cancelled_reasons(&report), 3);
+        assert!(report.batch_id.is_none(), "nothing moved, so no batch");
+        assert!(paths.iter().all(|p| p.exists()));
+        assert_eq!(h.quarantine.stats(&h.conn).expect("stats").item_count, 0);
+        assert_eq!(ticks.last(), Some(&(3, 3)), "the final tick still goes out");
+    }
+
+    #[test]
+    fn a_stop_mid_batch_keeps_what_moved_and_skips_the_rest() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+        let paths: Vec<_> = (0..3)
+            .map(|i| write(&h.work, &format!("m{i}.tmp"), b"x"))
+            .collect();
+        let findings: Vec<_> = paths.iter().map(|p| finding_at(p, 1)).collect();
+        let recs: Vec<_> = findings.iter().map(quarantine_rec).collect();
+        let units: Vec<_> = findings
+            .iter()
+            .zip(&recs)
+            .map(|(finding, recommendation)| ExecUnit {
+                recommendation,
+                finding,
+            })
+            .collect();
+        let token = CancellationToken::new();
+        // The user presses Stop while item 1 is about to start.
+        let mut sink = |done: u64, _: u64, _: &Finding| {
+            if done == 1 {
+                token.cancel();
+            }
+        };
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions {
+                cancel: Some(&token),
+                ..Default::default()
+            },
+            Some(&mut sink),
+        )
+        .expect("execute");
+
+        assert_eq!(report.succeeded(), 1);
+        assert_eq!(cancelled_reasons(&report), 2);
+        assert!(
+            report.batch_id.is_some(),
+            "item 0 is in quarantine and can be undone"
+        );
+        assert!(!paths[0].exists());
+        assert!(paths[1].exists() && paths[2].exists());
+        assert_eq!(h.quarantine.stats(&h.conn).expect("stats").item_count, 1);
     }
 
     /* ---------------------------------------------------------------------

@@ -9,6 +9,7 @@
   import { onMount } from "svelte";
 
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import ExecutingPanel from "$lib/components/ExecutingPanel.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import RiskBadge from "$lib/components/RiskBadge.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
@@ -17,7 +18,7 @@
   import { formatCount, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { emptyFoldersStore } from "$lib/stores/emptyFolders.svelte";
-  import { itemsToReport, warningsOf } from "$lib/stores/execNotes";
+  import { itemsToReport, stopSummary, warningsOf } from "$lib/stores/execNotes";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
@@ -108,13 +109,9 @@
       </button>
     </section>
   {:else if store.step === "executing"}
-    <section
-      class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-6"
-    >
-      <p class="text-sm">{t("cleaner.executing")}</p>
-      <ProgressBar label={t("cleaner.executing")} />
-    </section>
+    <ExecutingPanel tracker={store.exec} />
   {:else if store.step === "done" && store.report}
+    {@const stopped = stopSummary(store.report.items)}
     <section
       class="flex flex-col items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-6"
     >
@@ -124,6 +121,11 @@
       <p class="text-sm text-ink-muted">
         {t("emptyFolders.doneBody", { count: succeeded })}
       </p>
+      {#if stopped}
+        <p class="text-sm text-risk-review">
+          {t("exec.stopped", { moved: stopped.moved, left: stopped.left })}
+        </p>
+      {/if}
       {#each itemsToReport(store.report.items) as item (item.findingId)}
         {#if item.outcome.status !== "succeeded"}
           <p class="text-xs text-ink-faint">

@@ -569,6 +569,7 @@ fn emptying_the_recycle_bin_bypasses_quarantine() {
         },
         &ExecOptions {
             confirm_empty_recycle_bin: true,
+            ..Default::default()
         },
         None,
     )

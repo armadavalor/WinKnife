@@ -19,17 +19,43 @@ export function warningsOf(result: {
 }
 
 /**
+ * The reason the executor gives an item a Stop left untouched; must match
+ * `core::executor::CANCELLED_REASON` (issue #39).
+ */
+export const CANCELLED_REASON = "cancelled by the user";
+
+function wasStopped(item: ExecItemResult): boolean {
+  return item.outcome.status === "skipped" && item.outcome.reason === CANCELLED_REASON;
+}
+
+/**
  * The items worth a line under a finished run: anything that did not succeed,
  * and any success that did not go entirely as planned (adversarial review
- * follow-up A).
+ * follow-up A). Items a Stop left untouched are summed up by
+ * {@link stopSummary} instead: a stop early in a big batch would otherwise
+ * list thousands of identical lines.
  */
 export function itemsToReport(
   items: readonly ExecItemResult[],
 ): ExecItemResult[] {
   return items.filter(
     (item) =>
-      item.outcome.status !== "succeeded" || warningsOf(item).length > 0,
+      !wasStopped(item) &&
+      (item.outcome.status !== "succeeded" || warningsOf(item).length > 0),
   );
+}
+
+/**
+ * How a stopped run ended: how many items moved and how many the stop left
+ * where they were. Null when nobody stopped the run.
+ */
+export function stopSummary(
+  items: readonly ExecItemResult[],
+): { moved: number; left: number } | null {
+  const left = items.filter(wasStopped).length;
+  if (left === 0) return null;
+  const moved = items.filter((item) => item.outcome.status === "succeeded").length;
+  return { moved, left };
 }
 
 /** One line for a single result, or null when there is nothing to say. */

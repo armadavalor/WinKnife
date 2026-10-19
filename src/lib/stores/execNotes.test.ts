@@ -11,11 +11,13 @@ import { test } from "node:test";
 
 import type { ExecItemResult, MoveWarning } from "../types.ts";
 import {
+  CANCELLED_REASON,
   isRestoreRefused,
   itemsToReport,
   refusedHeld,
   removalFailure,
   itemNote,
+  stopSummary,
   warningsNote,
   warningsOf,
 } from "./execNotes.ts";
@@ -54,6 +56,23 @@ test("skips and failures are still reported", () => {
   const skipped = item("s", { status: "skipped", reason: "protected" });
   const failed = item("f", { status: "failed", error: "busy" });
   assert.deepEqual(itemsToReport([skipped, failed]), [skipped, failed]);
+});
+
+test("items a stop left untouched are summed up, not listed one by one", () => {
+  const moved = item("m", { status: "succeeded" });
+  const stopped = item("c", { status: "skipped", reason: CANCELLED_REASON });
+  const protectedItem = item("p", { status: "skipped", reason: "protected" });
+  const items = [moved, stopped, protectedItem];
+  assert.deepEqual(itemsToReport(items), [protectedItem]);
+  assert.deepEqual(stopSummary(items), { moved: 1, left: 1 });
+});
+
+test("a run nobody stopped has no stop summary", () => {
+  const items = [
+    item("m", { status: "succeeded" }),
+    item("p", { status: "skipped", reason: "protected" }),
+  ];
+  assert.equal(stopSummary(items), null);
 });
 
 test("results from before warnings existed read as having none", () => {
