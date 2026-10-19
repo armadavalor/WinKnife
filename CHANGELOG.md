@@ -6,6 +6,31 @@ live in [docs/CHANGELOG-DEV.md](docs/CHANGELOG-DEV.md).
 
 ## [Unreleased]
 
+### Added
+- **Legacy Panels** — open 22 classic Windows tools from one page; unavailable
+  tools appear with a disabled button.
+- **Appearance** — choose Graphite, Forest or Mist in Settings; the choice is
+  saved for the next launch.
+
+### Changed
+- **Interface** — clearer tool descriptions and status actions, consistent
+  controls and dialogs, and secondary details that expand on demand.
+- **Icons** — consistent Lucide icons across the sidebar, cards and controls.
+- **Disk Cleaner** — large scans show analysis progress and a Stop button;
+  findings load in groups of 200 with a Show more control.
+
+### Fixed
+- **Disk Cleaner** — large Temp scans complete faster and can be stopped during
+  analysis; lock checks now avoid most Defender-triggering read access when
+  cleaning many files.
+- **Disk Cleaner** — the quarantine confirmation title now shows the selected
+  item count instead of a placeholder.
+- **Duplicates and Empty Folders** — Stop cancels the running scan, including
+  when pressed before the first progress update.
+- **Startup** — disabling an entry no longer stalls on Working or freezes the
+  app window.
+- **Finding lists** — restored normal-sized chevrons in Cleaner and Duplicates.
+
 ## [0.2.0] — 2026-10-13
 
 First public release. (0.1.0 was never tagged; its contents ship here.)
