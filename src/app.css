@@ -157,35 +157,38 @@ body {
   opacity: 0.55;
 }
 
-/* Aurora: two soft blobs drifting past each other. */
+/* Aurora: two soft blobs, one from the top-left and one from the
+   bottom-right, drifting across the whole window past each other. */
 :root[data-glow="aurora"] .glow-a,
 :root[data-glow="aurora"] .glow-b,
 :root:not([data-glow]) .glow-a,
 :root:not([data-glow]) .glow-b {
   width: 70vmax;
-  height: 45vmax;
+  height: 50vmax;
   border-radius: 50%;
   filter: blur(60px);
   background: radial-gradient(closest-side, var(--color-accent-soft), transparent);
 }
 :root[data-glow="aurora"] .glow-a,
 :root:not([data-glow]) .glow-a {
-  top: -25vmax;
-  left: -10vmax;
-  animation: glow-drift-a 18s ease-in-out infinite alternate;
+  top: -20vmax;
+  left: -15vmax;
+  animation: glow-drift-a 20s ease-in-out infinite alternate;
 }
 :root[data-glow="aurora"] .glow-b,
 :root:not([data-glow]) .glow-b {
-  top: -20vmax;
-  right: -15vmax;
+  bottom: -25vmax;
+  right: -20vmax;
   background: radial-gradient(closest-side, var(--color-accent), transparent);
-  opacity: 0.35;
-  animation: glow-drift-b 22s ease-in-out infinite alternate;
+  opacity: 0.4;
+  animation: glow-drift-b 24s ease-in-out infinite alternate;
 }
 
-/* Waves: slanted bands of light rolling across, fading out downward. */
-:root[data-glow="waves"] .glow-a {
-  inset: -30% -50% 30% -50%;
+/* Waves: slanted bands of light rolling across the full height; a second,
+   fainter set rolls the other way so the bottom moves too. */
+:root[data-glow="waves"] .glow-a,
+:root[data-glow="waves"] .glow-b {
+  inset: -20% -50%;
   background: repeating-linear-gradient(
     105deg,
     transparent 0 6vmax,
@@ -193,23 +196,39 @@ body {
     transparent 12vmax 18vmax
   );
   filter: blur(28px);
-  mask-image: linear-gradient(to bottom, black 0%, transparent 85%);
+}
+:root[data-glow="waves"] .glow-a {
+  mask-image: linear-gradient(to bottom, black 0%, rgb(0 0 0 / 0.45) 60%, rgb(0 0 0 / 0.2) 100%);
   animation: glow-roll 14s linear infinite;
 }
 :root[data-glow="waves"] .glow-b {
-  display: none;
+  transform: scaleX(-1);
+  mask-image: linear-gradient(to top, black 0%, rgb(0 0 0 / 0.35) 50%, transparent 85%);
+  opacity: 0.7;
+  animation: glow-roll-back 19s linear infinite;
 }
 
-/* Spotlight: a brighter top light that breathes, plus a bigger cursor spot. */
-:root[data-glow="spotlight"] .glow-a {
-  inset: -20% 15% 40% 15%;
+/* Spotlight: a brighter top light and a dimmer floor pool breathing out of
+   step, plus a bigger cursor spot. */
+:root[data-glow="spotlight"] .glow-a,
+:root[data-glow="spotlight"] .glow-b {
   border-radius: 50%;
   filter: blur(50px);
   background: radial-gradient(closest-side, var(--color-accent-soft), transparent);
   animation: glow-breathe 7s ease-in-out infinite;
 }
+:root[data-glow="spotlight"] .glow-a {
+  inset: -20% 15% 40% 15%;
+}
 :root[data-glow="spotlight"] .glow-b {
-  display: none;
+  inset: 55% 5% -30% 25%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in oklch, var(--color-accent-soft) 65%, transparent),
+    transparent
+  );
+  animation-duration: 9s;
+  animation-delay: -4s;
 }
 :root[data-glow="spotlight"] .glow-cursor {
   background: radial-gradient(
@@ -232,7 +251,7 @@ body {
     transform: translate(0, 0) scale(1);
   }
   to {
-    transform: translate(35vw, 12vh) scale(1.2);
+    transform: translate(40vw, 55vh) scale(1.2);
   }
 }
 @keyframes glow-drift-b {
@@ -240,7 +259,7 @@ body {
     transform: translate(0, 0) scale(1.1);
   }
   to {
-    transform: translate(-40vw, 18vh) scale(0.9);
+    transform: translate(-45vw, -50vh) scale(0.9);
   }
 }
 @keyframes glow-roll {
@@ -249,6 +268,14 @@ body {
   }
   to {
     transform: translateX(18.64vmax); /* one band period along x at 105deg */
+  }
+}
+@keyframes glow-roll-back {
+  from {
+    transform: scaleX(-1) translateX(0);
+  }
+  to {
+    transform: scaleX(-1) translateX(18.64vmax);
   }
 }
 @keyframes glow-breathe {
