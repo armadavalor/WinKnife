@@ -2060,3 +2060,15 @@ and the dashboard stay responsive while those run.
   another thread finishes while a clean is stuck on a slow file.
 - Deferred: `startup_enable` still holds the lock for its single shortcut
   move, which is short. Cancel, progress and busy-guard work stays with #39/#40.
+
+## 2026-10-19 — Quarantine drawer shows refused actions
+
+- The drawer printed `store.error` only when the list fetch failed. A restore
+  refused with `CoreError::Busy` set the message but kept the status `ready`,
+  and the reload triggered by the other operation's `quarantine:changed`
+  cleared it. Found by the e2e QA busy-guard cell (xfail).
+- Action failures (restore, purge, item removal, batch items) now go to a
+  separate `actionError`, which reloads leave alone; the drawer shows it as an
+  alert banner until the next action or until the drawer closes.
+- Regression coverage is the e2e cell "the drawer shows the Busy refusal";
+  runes stores are not reachable from `node --test`.

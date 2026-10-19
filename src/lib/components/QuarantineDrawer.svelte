@@ -115,6 +115,15 @@
       </p>
     {/if}
 
+    {#if store.actionError}
+      <p
+        role="alert"
+        class="select-text break-words border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-risk-danger"
+      >
+        {store.actionError}
+      </p>
+    {/if}
+
     {#if store.lastPurge && store.lastPurge.affectedBatches.length > 0}
       <p
         class="border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-ink-muted"
