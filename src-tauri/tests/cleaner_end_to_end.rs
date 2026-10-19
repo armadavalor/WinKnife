@@ -242,7 +242,7 @@ fn scan_clean_and_restore_round_trips_byte_identically() {
         &units,
         &ExecEnvironment {
             quarantine: &world.quarantine,
-            conn: &world.conn,
+            db: &world.conn,
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
@@ -359,7 +359,7 @@ fn a_protected_path_lands_red_and_survives_an_approved_clean() {
         &units,
         &ExecEnvironment {
             quarantine: &world.quarantine,
-            conn: &world.conn,
+            db: &world.conn,
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
@@ -417,7 +417,7 @@ fn a_locked_file_is_skipped_with_a_per_item_report() {
         &units,
         &ExecEnvironment {
             quarantine: &world.quarantine,
-            conn: &world.conn,
+            db: &world.conn,
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
@@ -511,7 +511,7 @@ fn emptying_the_recycle_bin_needs_its_own_confirmation() {
         &units,
         &ExecEnvironment {
             quarantine: &world.quarantine,
-            conn: &world.conn,
+            db: &world.conn,
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
@@ -562,7 +562,7 @@ fn emptying_the_recycle_bin_bypasses_quarantine() {
         &units,
         &ExecEnvironment {
             quarantine: &world.quarantine,
-            conn: &world.conn,
+            db: &world.conn,
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
@@ -616,7 +616,7 @@ fn restoring_over_a_recreated_file_never_overwrites_it() {
         &units,
         &ExecEnvironment {
             quarantine: &world.quarantine,
-            conn: &world.conn,
+            db: &world.conn,
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,

@@ -2034,3 +2034,29 @@ unguarded.
 
 **Deferred.** Progress and cancel for execute/restore/purge (rest of #39, #41).
 
+## 2026-10-18 — Database lock scope (audit issue #37)
+
+**Built.** The one SQLite connection is no longer held for the length of a
+clean, restore, purge, startup scan or treemap drill-down, so lists, settings
+and the dashboard stay responsive while those run.
+
+- `core::db::DbAccess` (object-safe; implemented by `Connection` and by
+  `Database`, which locks per call) plus the `with_db` helper. The quarantine,
+  the ledger, the executor (`ExecEnvironment.db`), `StartupService::scan` and
+  `treemap::CacheOracle` take `&dyn DbAccess` and lock only around each
+  statement or ledger transaction. File moves run unlocked.
+- Ledger guarantees are unchanged: each claim/retire transaction still runs
+  under the lock, and the claim → move → undo order is the same. A restore
+  claim is now conditional (`AND restored_at IS NULL`), so two restores of one
+  item racing in the gap get exactly one move.
+- The busy guard from #39 (`Quarantine::begin`) is now what keeps clean,
+  restore, purge and startup re-enable (`Operation::Restore`) apart; it used to
+  be the database lock that serialised them. A second one is refused at once
+  with `CoreError::Busy`. Reads never take it. (The branch's own waiting gate
+  was dropped in the rebase onto #46 so there is one lock, not two.)
+- Fixes a latent self-deadlock: `execute` held the database lock while the
+  startup adapter's `disable` locked it again.
+- Tests: `a_long_clean_does_not_hold_the_database` checks that a read from
+  another thread finishes while a clean is stuck on a slow file.
+- Deferred: `startup_enable` still holds the lock for its single shortcut
+  move, which is short. Cancel, progress and busy-guard work stays with #39/#40.
