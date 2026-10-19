@@ -11,7 +11,7 @@ on:
       version:
         description: Release version without the leading v
         required: true
-        default: "0.2.0"
+        default: "0.3.0"
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ jobs:
   record:
     runs-on: windows-latest
     env:
-      VERSION: ${{ inputs.version || '0.2.0' }}
+      VERSION: ${{ inputs.version || '0.3.0' }}
       GH_TOKEN: ${{ github.token }}
       DEMO_HOME: C:\Users\Demo
     steps:
