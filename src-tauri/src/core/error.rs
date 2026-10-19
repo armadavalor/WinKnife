@@ -159,6 +159,11 @@ pub enum CoreError {
          one will not open the database, so nothing in it is changed or removed"
     )]
     SchemaTooNew { found: u32, known: u32 },
+
+    /// A clean-up, restore or purge is already running (issue #39). A double
+    /// click is refused instead of queued behind the database lock.
+    #[error("{} is already running; wait for it to finish", .0.label())]
+    Busy(crate::core::busy::Operation),
 }
 
 impl CoreError {
@@ -194,6 +199,7 @@ impl CoreError {
             Self::LegacyPanel(_) => "legacy_panel",
             Self::UnknownLegacyPanel(_) => "unknown_legacy_panel",
             Self::SchemaTooNew { .. } => "schema_too_new",
+            Self::Busy(_) => "busy",
         }
     }
 }
@@ -264,6 +270,10 @@ mod tests {
         assert_eq!(
             CoreError::QuarantineItemNotMarked("x".into()).code(),
             "quarantine_item_not_marked"
+        );
+        assert_eq!(
+            CoreError::Busy(crate::core::busy::Operation::Purge).code(),
+            "busy"
         );
     }
 

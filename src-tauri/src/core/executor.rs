@@ -202,6 +202,11 @@ pub type ProgressSink<'a> = &'a mut dyn FnMut(u64, u64, &Finding);
 ///
 /// Returns a report with one entry per unit; the batch never aborts early.
 ///
+/// One run at a time is the caller's job: the `execute` command takes
+/// [`crate::core::quarantine::Quarantine::begin`] before the database lock
+/// (issue #39). This function takes no lock of its own and none of its three
+/// gates (K-006) depend on it.
+///
 /// # Errors
 /// Returns an error only if the ledger itself is unusable. Anything
 /// item-specific lands in the report.

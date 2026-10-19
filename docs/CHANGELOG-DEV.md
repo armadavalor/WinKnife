@@ -2004,3 +2004,33 @@ Defender at 85–90% CPU, and the findings list showed giant chevrons.
 - **Deferred.** The user's polish notes (progress detail, motion, logo and
   background animation, animations-off) are queued in `modules/BACKLOG.md`;
   direct delete is in DECISIONS-NEEDED.
+
+## 2026-10-18 — Commands survive panics; one quarantine operation at a time (#40, #39)
+
+**Built.**
+- **Panics answer the WebView (#40).** Every `#[tauri::command]` body now runs
+  inside `commands::guarded` (sync) or `commands::guarded_async` (each poll under
+  `catch_unwind`). A panic becomes `ApiError { code: "internal" }` with a
+  readable message naming the command and the panic text in `detail`, and is
+  logged. Before, an async command's task died and its promise never settled,
+  so the page spun forever.
+- **Busy guard (#39).** New `core/busy.rs`: `OperationLock` +
+  `Operation::{Clean, Restore, Purge}`, an RAII guard that releases on drop and
+  on unwind. `Quarantine` owns one shared (`Arc`) lock; `execute`,
+  `quarantine_restore[_item]` and `quarantine_purge[_item]` take it *before*
+  the database lock. A second call gets `CoreError::Busy` (code `busy`,
+  "A restore is already running; wait for it to finish") instead of queuing
+  behind the DB mutex and running right after.
+- Tests: `tests/panic_and_busy.rs` (mock-IPC panics in sync and async commands,
+  a source scan that every command body is guarded under its own name, every
+  quarantine writer refused while the lock is held and accepted after),
+  `busy.rs` unit tests, `busy` added to the stable error codes.
+
+**Decisions.** One lock for all three operations, so a clean-up, restore and
+purge are mutually exclusive. The executor takes no lock itself (the command
+does), so its three gates (K-006) and the quarantine semantics are unchanged.
+The startup retention purge in `lib.rs` runs before any command and stays
+unguarded.
+
+**Deferred.** Progress and cancel for execute/restore/purge (rest of #39, #41).
+
