@@ -137,9 +137,13 @@ impl CancelRegistry {
         token
     }
 
-    /// Forget a scan that has finished.
-    pub fn finish(&self, scan_id: Uuid) {
-        self.lock().remove(&scan_id);
+    /// Forget a scan that has finished. `true` when a Stop was accepted for it,
+    /// which can happen after the scan's last cancel check: the caller must
+    /// then report the run as stopped, since `cancel` already told the UI so.
+    pub fn finish(&self, scan_id: Uuid) -> bool {
+        self.lock()
+            .remove(&scan_id)
+            .is_some_and(|token| token.is_cancelled())
     }
 
     /// Ask a running scan to stop. `false` when it is already over.
@@ -330,6 +334,25 @@ mod tests {
         registry.finish(scan_id);
         assert_eq!(registry.running(), 0);
         assert!(!registry.cancel(scan_id));
+    }
+
+    #[test]
+    fn finish_reports_a_cancel_that_the_scan_never_saw() {
+        let registry = CancelRegistry::new();
+        let untouched = Uuid::new_v4();
+        registry.start(untouched);
+        assert!(!registry.finish(untouched));
+
+        // Stop accepted (cancel_scan returned true) after the scan's last
+        // check: the command must still learn about it at finish time.
+        let late = Uuid::new_v4();
+        registry.start(late);
+        assert!(registry.cancel(late));
+        assert!(
+            registry.finish(late),
+            "a Stop the UI was told succeeded must not be lost"
+        );
+        assert!(!registry.finish(late), "finishing twice is a no-op");
     }
 
     #[test]

@@ -2215,3 +2215,34 @@ other through the middle. Waves adds a fainter band layer that rises from the
 bottom and rolls the other way. Spotlight adds a dimmer floor pool that
 breathes out of step with the top light. Still transform and opacity only;
 `data-animations="off"` stops everything as before.
+
+## 2026-10-20 — QA/QC pass (Polish 9)
+
+**Built.** `docs/QA-CHECKLIST.md`: 35 cases over clean / quarantine / restore /
+purge and every scanning module's Stop and rescan, each with the expected
+behaviour, the test that checks it and a status (OK, BUG → fixed,
+BUG → decision, UNTESTED, n/a).
+
+**Fixed (failing test first).**
+- Duplicates e2e flake `duplicates: Stop cancels the scan`. The UI defers a
+  Stop pressed before any progress event until an event names the scan, but the
+  backend's first duplicates event only came with the first qualifying file. On
+  a sparse or slow start the cancel went out late or never. The scan now emits
+  one event naming each root before walking it.
+- A Stop accepted after the pipeline's last cancel check was lost:
+  `cancel_scan` said true, yet the full result came back unstopped.
+  `CancelRegistry::finish` now reports a tripped token, and the command turns
+  the result into `DuplicateScan::stopped()`.
+- The stored duplicates `ScanResult.cancelled` was always `false`.
+- Treemap: a Stop before the first event was a no-op (now deferred like
+  duplicates, with the button disabled while stopping); the old scan id stayed
+  across rescans; late events revived a finished id.
+- New UI regression `scripts/scan-stop-regression.mjs`, run by `test:ui`.
+
+**Decisions.** A crash between the restore claim and the move orphans the item
+(hidden, never purged). It is a destructive path, so it is escalated in
+DECISIONS-NEEDED with a proposed startup repair, not changed here.
+
+**Deferred.** The UNTESTED rows in the checklist: lock at restore time, long
+paths across volumes, e2e Stop for execute and restore, purge partial failure,
+and UI frame time on large trees.

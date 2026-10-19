@@ -32,5 +32,5 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - CI yalnız main'e push/PR'da tetiklenir; başka base'li PR için `gh workflow run ci.yml --ref <dal>`.
 - `src-tauri/target-review/` (eski derleme önbelleği) ve `chatgpt Pocketknife addon.txt` kullanıcının; dokunma.
 - Repo PUBLIC: Armada'nın otomatik "Son oturum" bloğu (`oto:başla` işaretli) kullanıcı isteklerini DEVIR'e yazar; commit'e girmeden sil.
-- e2e `duplicates: Stop returns to idle` #50'de bir kez 61 s zaman aşımıyla düştü, yeniden çalışınca geçti: flaky, QA turunda bak.
+- e2e `duplicates: Stop cancels the scan` flake'inin kökü bulundu ve düzeltildi (2026-10-20, QA/QC): kökte uygun aday yokken backend progress olayı yollamıyor, UI ertelenen Stop'u gönderemiyordu (docs/QA-CHECKLIST.md B3, B8).
 - winget kurulumu CI'da SmartScreen'de takılır (imzasız installer); CI yalnız `winget validate` yapar.

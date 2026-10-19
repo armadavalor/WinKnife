@@ -50,6 +50,8 @@ class TreemapStore {
   zooming = $state(false);
   /** Id of the running walk, so it can be stopped. */
   scanId = $state<string | null>(null);
+  /** Stop was pressed; sent as soon as an event names the walk. */
+  stopping = $state(false);
   /** Files seen so far, for the progress line. */
   scanned = $state(0);
   /** Where the walk is right now. */
@@ -124,6 +126,8 @@ class TreemapStore {
       return;
     }
     this.scanning = true;
+    this.scanId = null;
+    this.stopping = false;
     this.scanned = 0;
     this.currentPath = null;
     this.error = null;
@@ -140,12 +144,21 @@ class TreemapStore {
     } finally {
       this.scanning = false;
       this.scanId = null;
+      this.stopping = false;
       this.currentPath = null;
     }
   }
 
-  /** Ask the running walk to stop. Partial results are still shown. */
+  /**
+   * Ask the running walk to stop. Partial results are still shown. The id
+   * comes from progress events, so a Stop pressed before the first one is
+   * sent as soon as that event names the walk.
+   */
   async stop(): Promise<void> {
+    if (!this.scanning) {
+      return;
+    }
+    this.stopping = true;
     if (this.scanId !== null) {
       await cancelScan(this.scanId);
     }
@@ -177,10 +190,15 @@ class TreemapStore {
    */
   async listen(): Promise<() => void> {
     return onScanProgress((payload) => {
-      if (payload.module !== "treemap") {
+      // A late event from a finished walk must not bring its id back.
+      if (payload.module !== "treemap" || !this.scanning) {
         return;
       }
+      const isFirstEvent = this.scanId === null;
       this.scanId = payload.scanId;
+      if (isFirstEvent && this.stopping) {
+        void cancelScan(payload.scanId);
+      }
       this.scanned = payload.itemsScanned;
       this.currentPath = payload.currentPath;
     });
