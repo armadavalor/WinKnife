@@ -144,7 +144,10 @@ fn every_command_body_is_guarded() {
     let mut unguarded = Vec::new();
     let mut seen = 0;
     while let Some(line) = lines.next() {
-        if line.trim() != "#[tauri::command]" {
+        if !matches!(
+            line.trim(),
+            "#[tauri::command]" | "#[tauri::command(async)]"
+        ) {
             continue;
         }
         seen += 1;
