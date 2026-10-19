@@ -387,9 +387,9 @@ pub fn scan_summary(
 /// # Errors
 /// Returns an error if the scan is unknown or the ledger is unusable. Item
 /// failures land in the report.
-#[tauri::command]
 // Tauri injects each piece of managed state as its own argument.
 #[allow(clippy::too_many_arguments)]
+#[tauri::command]
 pub async fn execute<R: Runtime>(
     app: AppHandle<R>,
     scan_id: Uuid,
