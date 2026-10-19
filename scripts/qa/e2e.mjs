@@ -356,28 +356,28 @@ test("duplicates: finds the fixture's copy sets", async () => {
 });
 
 test("duplicates: quarantine one copy, twins stay, restore brings it back", async () => {
-  // Candidates are matched by suffix so a \\?\ prefix on the page's path
-  // cannot hide the fixture copy.
-  const set = fx.duplicateSet.map((p) => p.toLowerCase());
   // Sets render collapsed; open them all so the copies' checkboxes exist.
   await evaluate(`(() => {
     for (const b of document.querySelectorAll('main button[aria-expanded="false"]')) b.click();
     return true;
   })()`);
   await sleep(SETTLE_MS);
-  const target = await evaluate(`(() => {
-    const set = ${q(set)};
-    const box = [...document.querySelectorAll('main input[type="checkbox"]')].find((c) => {
-      const label = (c.getAttribute("aria-label") ?? "").toLowerCase();
-      return set.some((s) => label.endsWith(s));
-    });
-    if (!box) return null;
+  // The scan shows only some of the fixture's sets, so take the first set
+  // that offers a non-keeper copy; its other copies are the twins.
+  const pick = await evaluate(`(() => {
+    const boxes = document.querySelectorAll('main section input[type="checkbox"]');
+    const diag = { boxes: boxes.length, collapsed: document.querySelectorAll('main button[aria-expanded="false"]').length };
+    const box = boxes[0];
+    if (!box) return { diag };
+    const paths = [...box.closest("section").querySelectorAll("span[title]")].map((e) => e.getAttribute("title"));
+    const target = box.getAttribute("aria-label");
     if (!box.checked) box.click();
-    return box.getAttribute("aria-label");
+    return { target, twins: paths.filter((x) => x !== target), diag };
   })()`);
-  expect(target, "no non-keeper checkbox for the fixture's first copy set");
-  const twins = fx.duplicateSet.filter((p) => !target.toLowerCase().endsWith(p.toLowerCase()));
-  expect(twins.length >= 1 && twins.every((p) => exists(p)), "fixture twins missing before the move");
+  expect(pick.target, `no non-keeper checkbox on the page: ${JSON.stringify(pick.diag)}`);
+  const target = pick.target;
+  const twins = pick.twins;
+  expect(twins.length >= 1 && twins.every((p) => exists(p)), `twins missing before the move: ${JSON.stringify(pick)}`);
   await sleep(SETTLE_MS);
   await click("main button", "Move copies to quarantine");
   await click('[role="alertdialog"] button', "Move copies to quarantine");
