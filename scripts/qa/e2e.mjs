@@ -369,7 +369,7 @@ test("duplicates: quarantine one copy, twins stay, restore brings it back", asyn
     const diag = { boxes: boxes.length, collapsed: document.querySelectorAll('main button[aria-expanded="false"]').length };
     const box = boxes[0];
     if (!box) return { diag };
-    const paths = [...box.closest("section").querySelectorAll("span[title]")].map((e) => e.getAttribute("title"));
+    const paths = [...box.closest("section").querySelectorAll("span[title]")].map((e) => e.getAttribute("title")).filter((x) => /^[A-Za-z]:\\\\/.test(x));
     const target = box.getAttribute("aria-label");
     if (!box.checked) box.click();
     return { target, twins: paths.filter((x) => x !== target), diag };
