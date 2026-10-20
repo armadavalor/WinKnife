@@ -2246,3 +2246,19 @@ DECISIONS-NEEDED with a proposed startup repair, not changed here.
 **Deferred.** The UNTESTED rows in the checklist: lock at restore time, long
 paths across volumes, e2e Stop for execute and restore, purge partial failure,
 and UI frame time on large trees.
+
+## 2026-10-20 — QA/QC: untested quarantine cases, A9 repair
+
+**Built.** Tests for QA A5 (restore onto a file where the parent was), A8
+(locked item in a batch restore), A13 (paths over MAX_PATH across volumes,
+purge and the lock probe) and A17 (partial purge). A9 fix: at startup
+`Quarantine::recover_interrupted_restores` clears `restored_at` on claimed rows
+whose quarantine copy still exists inside the root, before retention, so an
+item from a killed restore is held again.
+
+**Decisions.** User approved the A9 repair (K-017). Rows whose path is outside
+the quarantine root are not trusted. Leftovers of a finished cross-volume
+restore also come back as held; nothing is deleted.
+
+**Deferred.** A18 (needs a real second volume), A19 (UI frame time), A14/A15
+UI Stop end to end.

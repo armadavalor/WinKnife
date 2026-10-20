@@ -279,6 +279,14 @@ pub fn manage_state<R: tauri::Runtime>(
     );
     let quarantine = Quarantine::new(app_data_dir, policy);
 
+    // A restore killed between its claim and its move is held again (QA A9),
+    // before retention so the purge sees it.
+    match quarantine.recover_interrupted_restores(&connection) {
+        Ok(0) => {}
+        Ok(recovered) => tracing::warn!(recovered, "interrupted restores recovered"),
+        Err(err) => tracing::error!(error = %err, "interrupted restore recovery failed"),
+    }
+
     // Retention runs at start, before anything can add to the pile.
     match quarantine.purge(&connection, chrono::Utc::now()) {
         Ok(report) if !report.is_empty() => tracing::info!(

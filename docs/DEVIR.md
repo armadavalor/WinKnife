@@ -1,4 +1,4 @@
-<!-- devir: 2026-10-19 | yazan: claude | commit: b051fa9 -->
+<!-- devir: 2026-10-20 | yazan: claude | commit: 3ddbadc -->
 # Devir notu
 <!-- /devir üzerine yazar; elle düzeltirsen "yazan: kullanıcı" yap. ≤40 satır. Geçmiş git log'da, kararlar KARARLAR.md'de. -->
 
@@ -21,7 +21,7 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - Rust crate'leri 2.12'ye çekmek windows 0.62 + wry 0.57 getiriyor; npm + crate birlikte yükseltilmeli.
 
 ## Sıradaki adım
-0. **QA/QC turu (kullanıcı, 2026-10-18):** her şey, özellikle silme/temizlik/karantina ve arama/tarama akışları; BACKLOG Polish queue madde 9.
+0. **QA/QC turu (kullanıcı, 2026-10-18):** `docs/QA-CHECKLIST.md`. 2026-10-20: A5/A8/A13/A17 testlendi, A9 düzeltildi (K-017). Açık: A18 (gerçek ikinci birim gerek), A19 (UI kare süresi), A14/A15 UI Stop uçtan uca.
 1. Kullanıcı notları (2026-10-18) `docs/modules/BACKLOG.md` "Polish queue": ilerleme detayı + bar animasyonu, logo animasyonu, 3 varyantlı mouse'a tepkili arka plan ışığı, animasyon kapatma. Direkt silme yok, yalnız karantina (K-016); hızlı temizlik denenince yeniden bakılır. Temizlik süresi kullanıcının PC'sinde ölçülmedi.
 2. Demo GIF, sonra Codex for OSS başvurusu.
 3. winget 0.2.0 birleşince 0.3.0 manifestini microsoft/winget-pkgs'e gönder (`packaging/winget/README.md`).
