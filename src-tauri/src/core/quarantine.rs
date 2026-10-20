@@ -719,6 +719,54 @@ impl Quarantine {
         self.destroy(db, &[item], "removed by the user after a refused restore")
     }
 
+    /// Put back to held every row marked restored whose quarantine copy is
+    /// still there. Called once at app start, before the startup purge, when
+    /// no restore can be running.
+    ///
+    /// `restore_item` claims the row before it moves the bytes (security
+    /// review M2). A process killed in that gap left a row the drawer hides
+    /// and the purge skips, so the bytes stayed in the quarantine folder for
+    /// good (QA A9, 2026-10-20). Two cases come back as held on purpose:
+    /// a crash in the middle of a cross-volume copy (a partial copy may sit at
+    /// the original path; a later restore picks a ` (restored)` name), and a
+    /// finished cross-volume restore that could not remove part of the source
+    /// (the leftovers become visible instead of leaking). Nothing is deleted
+    /// here; a path outside the quarantine root is never trusted.
+    ///
+    /// # Errors
+    /// Returns an error only if the ledger cannot be read or written.
+    pub fn recover_interrupted_restores(&self, db: &dyn DbAccess) -> Result<usize> {
+        with_db(db, |conn| {
+            let claimed: Vec<(String, PathBuf)> = conn
+                .prepare(
+                    "SELECT id, quarantine_path FROM quarantine WHERE restored_at IS NOT NULL",
+                )?
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        PathBuf::from(row.get::<_, String>(1)?),
+                    ))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            let mut recovered = 0;
+            for (id, path) in claimed {
+                if !is_within_root(&self.root, &path) || fs::symlink_metadata(&path).is_err() {
+                    continue;
+                }
+                recovered += conn.execute(
+                    "UPDATE quarantine SET restored_at = NULL WHERE id = ?1",
+                    [&id],
+                )?;
+                tracing::warn!(
+                    item = %id,
+                    path = %path.display(),
+                    "an interrupted restore left its item in quarantine; it is held again"
+                );
+            }
+            Ok(recovered)
+        })
+    }
+
     /// Remove everything whose retention window has expired, then enforce the
     /// size cap. Called at app start and from the drawer's "purge now".
     ///
@@ -6405,5 +6453,322 @@ mod tests {
         h._dir
             .close()
             .expect("the encrypted test files are removed");
+    }
+
+    #[test]
+    fn a_restore_onto_a_file_where_the_parent_was_keeps_the_item_held() {
+        let h = harness(RetentionPolicy::default());
+        let source = write(&h.work, "parent/item.txt", b"held bytes");
+        let item = h
+            .quarantine
+            .take(&h.conn, h.quarantine.start_batch(), &source)
+            .expect("take");
+        #[allow(clippy::disallowed_methods)] // replacing this test's empty tempdir parent
+        fs::remove_dir(source.parent().expect("parent")).expect("empty parent");
+        let obstruction = write(&h.work, "parent", b"new file at parent");
+
+        let err = h
+            .quarantine
+            .restore_item(&h.conn, item.id)
+            .expect_err("a file cannot serve as the parent directory");
+        assert!(matches!(err, CoreError::Quarantine(_)), "{err}");
+        let row = h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("find")
+            .expect("ledger row stays");
+        assert!(row.is_held());
+        assert!(row.restored_at.is_none());
+        assert_eq!(
+            fs::read(&item.quarantine_path).expect("held bytes"),
+            b"held bytes"
+        );
+        assert_eq!(
+            fs::read(&obstruction).expect("parent file"),
+            b"new file at parent"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_locked_item_fails_with_a_reason_while_its_batch_restores() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let h = harness(RetentionPolicy::default());
+        let batch = h.quarantine.start_batch();
+        let before = write(&h.work, "before.txt", b"before");
+        let locked = write(&h.work, "locked.txt", b"locked");
+        let after = write(&h.work, "after.txt", b"after");
+        let first = h
+            .quarantine
+            .take(&h.conn, batch, &before)
+            .expect("take first");
+        let held = h
+            .quarantine
+            .take(&h.conn, batch, &locked)
+            .expect("take locked");
+        let last = h
+            .quarantine
+            .take(&h.conn, batch, &after)
+            .expect("take last");
+        let handle = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&held.quarantine_path)
+            .expect("hold exclusively");
+
+        let (restored, failed) = h.quarantine.restore_batch(&h.conn, batch).expect("batch");
+        assert_eq!(restored.len(), 2);
+        assert!(restored.iter().any(|outcome| outcome.item_id == first.id));
+        assert!(restored.iter().any(|outcome| outcome.item_id == last.id));
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].0, held.id);
+        assert!(!failed[0].1.trim().is_empty(), "a failure needs a reason");
+        assert_eq!(fs::read(&before).expect("first restored"), b"before");
+        assert_eq!(fs::read(&after).expect("last restored"), b"after");
+        assert!(!locked.exists());
+        let row = h
+            .quarantine
+            .find_item(&h.conn, held.id)
+            .expect("find")
+            .expect("row");
+        assert!(row.is_held());
+        assert!(row.restored_at.is_none());
+        drop(handle);
+        assert_eq!(fs::read(&held.quarantine_path).expect("held"), b"locked");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_cross_volume_copy_preserves_a_path_longer_than_max_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let deep = ["a", "b", "c"]
+            .iter()
+            .fold(dir.path().to_path_buf(), |path, part| {
+                path.join(part.repeat(100))
+            });
+        let source = write(&deep, "original.txt", b"long path payload");
+        let target = deep.join("copied.txt");
+        assert!(source.as_os_str().len() > 260);
+        if let Err(failure) = move_path_with(&source, &target, seams::forced_cross_volume) {
+            panic!(
+                "cross-volume copy should move the long path: {}",
+                failure.into_error(&source, &target)
+            );
+        }
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read(&target).expect("exact target"),
+            b"long path payload"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_purge_removes_a_quarantined_path_longer_than_max_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let deep = ["a", "b", "c"]
+            .iter()
+            .fold(dir.path().to_path_buf(), |path, part| {
+                path.join(part.repeat(100))
+            });
+        let quarantine = Quarantine::with_root(deep.join("quarantine"), RetentionPolicy::default());
+        let conn = db::open_in_memory().expect("db");
+        let source = write(dir.path(), "original.txt", b"purge me");
+        let item = quarantine
+            .take(&conn, quarantine.start_batch(), &source)
+            .expect("take into long path");
+        assert!(item.quarantine_path.as_os_str().len() > 260);
+        assert_eq!(fs::read(&item.quarantine_path).expect("held"), b"purge me");
+        conn.execute(
+            "UPDATE quarantine SET purge_after = ?2 WHERE id = ?1",
+            rusqlite::params![
+                item.id.to_string(),
+                timestamp(Utc::now() - Duration::days(1))
+            ],
+        )
+        .expect("expire item");
+
+        let report = quarantine.purge_expired(&conn, Utc::now()).expect("purge");
+        assert_eq!(report.purged_items, 1);
+        assert!(report.failed_items.is_empty());
+        assert!(!item.quarantine_path.exists());
+        assert!(quarantine
+            .find_item(&conn, item.id)
+            .expect("find")
+            .is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_clean_lock_probe_reads_a_path_longer_than_max_path() {
+        use crate::core::platform::{LockProbe, LockState, SystemLockProbe};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let deep = ["a", "b", "c"]
+            .iter()
+            .fold(dir.path().to_path_buf(), |path, part| {
+                path.join(part.repeat(100))
+            });
+        let path = write(&deep, "probe.txt", b"long path payload");
+        assert!(path.as_os_str().len() > 260);
+        assert_eq!(SystemLockProbe.probe(&path), LockState::Free);
+        assert_eq!(fs::read(&path).expect("exact name"), b"long path payload");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_partial_purge_reports_the_locked_item_and_keeps_its_row() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let h = harness(RetentionPolicy::default());
+        let batch = h.quarantine.start_batch();
+        let locked = write(&h.work, "locked.txt", b"keep me");
+        let removable = write(&h.work, "removable.txt", b"remove me");
+        let held = h
+            .quarantine
+            .take(&h.conn, batch, &locked)
+            .expect("take locked");
+        let removed = h
+            .quarantine
+            .take(&h.conn, batch, &removable)
+            .expect("take removable");
+        for item in [&held, &removed] {
+            h.conn
+                .execute(
+                    "UPDATE quarantine SET purge_after = ?2 WHERE id = ?1",
+                    rusqlite::params![
+                        item.id.to_string(),
+                        timestamp(Utc::now() - Duration::days(1))
+                    ],
+                )
+                .expect("expire item");
+        }
+        let handle = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&held.quarantine_path)
+            .expect("hold exclusively");
+
+        let report = h
+            .quarantine
+            .purge_expired(&h.conn, Utc::now())
+            .expect("purge");
+        assert_eq!(report.purged_items, 1);
+        assert_eq!(report.failed_items, vec![held.id.to_string()]);
+        assert!(h
+            .quarantine
+            .find_item(&h.conn, removed.id)
+            .expect("find")
+            .is_none());
+        assert!(!removed.quarantine_path.exists());
+        let row = h
+            .quarantine
+            .find_item(&h.conn, held.id)
+            .expect("find")
+            .expect("row");
+        assert!(row.is_held());
+        drop(handle);
+        assert_eq!(fs::read(&held.quarantine_path).expect("held"), b"keep me");
+    }
+
+    fn claim_without_moving(conn: &Connection, id: Uuid) {
+        conn.execute(
+            "UPDATE quarantine SET restored_at = ?2 WHERE id = ?1",
+            rusqlite::params![id.to_string(), timestamp(Utc::now())],
+        )
+        .expect("claim");
+    }
+
+    #[test]
+    fn a_restore_killed_after_its_claim_is_held_again_at_startup() {
+        let h = harness(RetentionPolicy::default());
+        let source = write(&h.work, "item.txt", b"stranded");
+        let item = h
+            .quarantine
+            .take(&h.conn, h.quarantine.start_batch(), &source)
+            .expect("take");
+        claim_without_moving(&h.conn, item.id);
+        let claimed = h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("find")
+            .expect("row");
+        assert!(!claimed.is_held());
+
+        let recovered = h
+            .quarantine
+            .recover_interrupted_restores(&h.conn)
+            .expect("recover");
+
+        assert_eq!(recovered, 1);
+        let row = h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("find")
+            .expect("row");
+        assert!(row.is_held());
+        assert_eq!(fs::read(&item.quarantine_path).expect("bytes"), b"stranded");
+        h.quarantine
+            .restore_item(&h.conn, item.id)
+            .expect("restorable again");
+        assert_eq!(fs::read(&source).expect("home"), b"stranded");
+    }
+
+    #[test]
+    fn a_finished_restore_is_left_alone_at_startup() {
+        let h = harness(RetentionPolicy::default());
+        let source = write(&h.work, "item.txt", b"home");
+        let item = h
+            .quarantine
+            .take(&h.conn, h.quarantine.start_batch(), &source)
+            .expect("take");
+        h.quarantine
+            .restore_item(&h.conn, item.id)
+            .expect("restore");
+
+        let recovered = h
+            .quarantine
+            .recover_interrupted_restores(&h.conn)
+            .expect("recover");
+
+        assert_eq!(recovered, 0);
+        let row = h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("find")
+            .expect("row");
+        assert!(!row.is_held());
+    }
+
+    #[test]
+    fn a_claimed_row_pointing_outside_the_quarantine_root_is_not_trusted() {
+        let h = harness(RetentionPolicy::default());
+        let source = write(&h.work, "item.txt", b"x");
+        let item = h
+            .quarantine
+            .take(&h.conn, h.quarantine.start_batch(), &source)
+            .expect("take");
+        let outside = write(&h.work, "outside.txt", b"user file");
+        h.conn
+            .execute(
+                "UPDATE quarantine SET quarantine_path = ?2 WHERE id = ?1",
+                rusqlite::params![item.id.to_string(), outside.display().to_string()],
+            )
+            .expect("point outside");
+        claim_without_moving(&h.conn, item.id);
+
+        let recovered = h
+            .quarantine
+            .recover_interrupted_restores(&h.conn)
+            .expect("recover");
+
+        assert_eq!(recovered, 0);
+        let row = h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("find")
+            .expect("row");
+        assert!(!row.is_held());
     }
 }
