@@ -693,6 +693,13 @@ ${text}`);
 
 test("quarantine: Stop during a batch restore keeps the rest held and returns to idle (QA A15)", async () => {
   try {
+    // Earlier tests restore what they clean, so make our own batch when none is held.
+    if ((await ledgerItems()).length < 2) {
+      await scanCleaner();
+      await click("main button", "Clean up");
+      await click('[role="alertdialog"] button', "Clean up");
+      await waitFor("main button", "Open quarantine", null, SCAN_TIMEOUT_MS);
+    }
     const total = (await ledgerItems()).length;
     expect(total > 1, `need several held items to stop between, have ${total}`);
     await openDrawer();
