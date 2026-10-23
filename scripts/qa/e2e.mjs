@@ -545,6 +545,117 @@ test("quarantine: the drawer shows the Busy refusal to the user", async () => {
   expect(busyRun.sawText, "no 'already running' text was ever visible in the drawer");
 });
 
+// Presses Stop once the run in `within` shows "N of M" with 0 < N < M. `start`
+// is run first, in the page, so the observer cannot miss a short-lived Stop.
+// `confirm` (optional) is clicked in the page as soon as it appears. Returns
+// "stopped", or why it could not stop.
+async function stopMidRun({ within, start, confirm }) {
+  await ensureHelpers();
+  return evaluate(`new Promise((resolve) => {
+    const scope = () => document.querySelector(${q(within)});
+    const observer = new MutationObserver(check);
+    const timeout = setTimeout(() => finish("Stop never appeared mid-run"), ${STEP_TIMEOUT_MS});
+    function finish(value) {
+      observer.disconnect();
+      clearTimeout(timeout);
+      resolve(value);
+    }
+    function check() {
+      const root = scope();
+      if (!root) return;
+      ${confirm ? `const ok = window.__qa.find(${q(confirm.sel)}, ${q(confirm.text)}); if (ok) ok.click();` : ""}
+      const m = /(\\d+) of (\\d+)/.exec(root.innerText);
+      const stop = window.__qa.find("button", "Stop", ${q(within)});
+      if (m && stop && Number(m[1]) > 0 && Number(m[1]) < Number(m[2])) {
+        stop.click();
+        finish("stopped");
+      } else if (m && Number(m[1]) >= Number(m[2])) {
+        finish("run finished before Stop could be pressed");
+      }
+    }
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    ${start};
+    check();
+  })`);
+}
+
+const CLEAN_BUTTON = `window.__qa.find("main button", "Clean up").click()`;
+const mainText = () => evaluate(`document.querySelector("main").innerText`);
+
+test("cleaner: a locked file is listed with its reason; the rest still moved (QA A19)", async () => {
+  expect(existsLong(fx.locked), `fixture missing ${fx.locked}`);
+  await cleanTemp();
+  const text = await mainText();
+  expect(text.toLowerCase().includes(fx.locked.toLowerCase()), `the done view does not list the locked file:\n${text}`);
+  expect(/in use/i.test(text), `no 'in use' reason on the done view:\n${text}`);
+  expect(existsLong(fx.locked), "the locked file was moved");
+  expect(!exists(fx.tempOld), "the old temp sentinel was not moved");
+  const held = await ledgerItems();
+  expect(held.length > 0, "nothing was held after the clean");
+  expect(
+    !held.some((i) => i.originalPath.toLowerCase() === fx.locked.toLowerCase()),
+    "the locked file is in the ledger",
+  );
+});
+
+test("quarantine: Stop during a batch restore keeps the rest held and returns to idle (QA A15)", async () => {
+  const total = (await ledgerItems()).length;
+  expect(total > 1, `need several held items to stop between, have ${total}`);
+  await openDrawer();
+  const outcome = await stopMidRun({
+    within: DRAWER,
+    start: `window.__qa.find("button", "Restore", ${q(DRAWER)}).click()`,
+  });
+  expect(outcome === "stopped", outcome);
+  await waitFor("*", "Stopped: ", DRAWER, SCAN_TIMEOUT_MS);
+  await sleep(SETTLE_MS);
+  const left = (await ledgerItems()).length;
+  expect(left > 0 && left < total, `expected some items still held after Stop, ${left} of ${total}`);
+  expect(!(await has("button", "Stopping", DRAWER)), "Stop is stuck pending");
+  expect(!(await has("*", "Restoring", DRAWER)), "the restore spinner is stuck");
+  expect(await has("button", "Restore", DRAWER), "Restore is not offered again");
+  // Idle again: the rest restores in one go and the ledger ends empty.
+  await click("button", "Restore", DRAWER);
+  await waitFor("*", "Restored ", DRAWER, SCAN_TIMEOUT_MS);
+  await sleep(SETTLE_MS);
+  expect((await ledgerItems()).length === 0, "items left after restoring the rest");
+  expect(exists(fx.tempOld), "old temp sentinel not restored");
+  await closeDrawer();
+});
+
+test("cleaner: Stop during a clean keeps what moved and leaves the rest (QA A14)", async () => {
+  await goTo("cleaner");
+  if (await has("main button", "Scan again")) await click("main button", "Scan again");
+  await click("button", "Scan for junk");
+  await waitFor("main button", "Clean up", null, SCAN_TIMEOUT_MS);
+  const outcome = await stopMidRun({
+    within: "main",
+    start: CLEAN_BUTTON,
+    confirm: { sel: '[role="alertdialog"] button', text: "Clean up" },
+  });
+  expect(outcome === "stopped", outcome);
+  await waitFor("main button", "Open quarantine", null, SCAN_TIMEOUT_MS);
+  const text = await mainText();
+  const m = /Stopped early: (\d+) moved to quarantine, (\d+) left/.exec(text);
+  expect(m, `the done view does not say the run stopped early:\n${text}`);
+  const [moved, leftBehind] = [Number(m[1]), Number(m[2])];
+  expect(moved > 0 && leftBehind > 0, `expected a partial run, got ${moved} moved / ${leftBehind} left`);
+  const held = (await ledgerItems()).length;
+  expect(held === moved, `ledger holds ${held} items but the view says ${moved} moved`);
+  expect(!(await has("button", "Stopping")), "Stop is stuck pending");
+  // Idle again: a fresh scan works and sees the items the stop left behind.
+  await click("main button", "Scan again");
+  await waitFor("button", "Scan for junk");
+  // Put everything back so later tests start from an empty ledger.
+  await openDrawer();
+  await click("button", "Restore", DRAWER);
+  await waitFor("*", "Restored ", DRAWER, SCAN_TIMEOUT_MS);
+  await sleep(SETTLE_MS);
+  expect((await ledgerItems()).length === 0, "items left after restoring the partial clean");
+  expect(exists(fx.tempOld), "old temp sentinel not restored");
+  await closeDrawer();
+});
+
 test("quarantine: drawer shows the empty state once everything is restored", async () => {
   const left = await ledgerItems();
   expect(left.length === 0, `ledger still holds ${left.length} items`);

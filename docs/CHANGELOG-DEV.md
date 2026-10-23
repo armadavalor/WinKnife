@@ -2262,3 +2262,16 @@ restore also come back as held; nothing is deleted.
 
 **Deferred.** A18 (needs a real second volume), A19 (UI frame time), A14/A15
 UI Stop end to end.
+
+## 2026-10-23 — QA: UI end-to-end for Stop and partial failure (A14, A15, A19)
+
+**Built.** Three cases in `scripts/qa/e2e.mjs`, run by the CI e2e job:
+Stop pressed mid-clean (moved items held, rest left, run shown as stopped, UI
+idle), Stop pressed mid-batch-restore (restored stay restored, rest held, UI
+idle, restore can be run again), and a clean with one locked file (the file is
+listed with its "in use" reason, the rest moved, the ledger omits it). Stop is
+pressed from an in-page MutationObserver once the run shows "N of M" with
+0 < N < M; the 5000-file fixture gives the window. No production hook added.
+
+**Deferred.** Not run locally (a local run really cleans and needs a QA-identifier
+build); the CI e2e job is the verifier. A18 still needs a real second volume.
