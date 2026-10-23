@@ -262,6 +262,16 @@ async function cleanTemp() {
   await waitFor("button", "Open quarantine", null, SCAN_TIMEOUT_MS);
 }
 
+// Puts every held batch back through the backend, so one test's failure cannot
+// leave items in quarantine for the next.
+const restoreAllHeld = () =>
+  evaluate(`(async () => {
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    for (const b of await invoke("quarantine_list")) {
+      await invoke("quarantine_restore", { batchId: b.batchId });
+    }
+  })()`);
+
 /* ---------------------------------------------------------------------------
  * Tests. Order matters: quarantine restore uses the cleaner's batch.
  * knownIssue: a filed bug; a failure is reported but does not fail the run.
@@ -564,7 +574,8 @@ async function stopMidRun({ within, start, confirm }) {
       const root = scope();
       if (!root) return;
       ${confirm ? `const ok = window.__qa.find(${q(confirm.sel)}, ${q(confirm.text)}); if (ok) ok.click();` : ""}
-      const m = /(\\d+) of (\\d+)/.exec(root.innerText);
+      // Only the progress line itself: other text in the scope can contain "N of M" too.
+      const m = [...root.querySelectorAll("p")].map((p) => /^(\\d+) of (\\d+)$/.exec(p.innerText.trim())).find(Boolean);
       const stop = window.__qa.find("button", "Stop", ${q(within)});
       if (m && stop && Number(m[1]) > 0 && Number(m[1]) < Number(m[2])) {
         stop.click();
@@ -595,84 +606,100 @@ function formatBytes(bytes) {
 const CLEAN_BUTTON =`window.__qa.find("main button", "Clean up").click()`;
 const mainText = () => evaluate(`document.querySelector("main").innerText`);
 
-test("cleaner: a locked file is listed with its reason; the rest still moved (QA A19)", async () => {
+test("cleaner: a locked file is left alone and listed as such; the rest still moved (QA A19)", async () => {
   expect(existsLong(fx.locked), `fixture missing ${fx.locked}`);
-  await cleanTemp();
-  const text = await mainText();
-  expect(text.toLowerCase().includes(fx.locked.toLowerCase()), `the done view does not list the locked file:\n${text}`);
-  expect(/in use/i.test(text), `no 'in use' reason on the done view:\n${text}`);
-  expect(existsLong(fx.locked), "the locked file was moved");
-  expect(!exists(fx.tempOld), "the old temp sentinel was not moved");
-  const held = await ledgerItems();
-  expect(held.length > 0, "nothing was held after the clean");
-  expect(
-    !held.some((i) => i.originalPath.toLowerCase() === fx.locked.toLowerCase()),
-    "the locked file is in the ledger",
-  );
-  // The done view prints the freed size, not a count: it must equal what the ledger holds.
-  const freed = held.reduce((sum, i) => sum + i.sizeBytes, 0);
-  expect(text.includes(`Freed ${formatBytes(freed)}`), `done view freed size != ledger total ${formatBytes(freed)}:\n${text}`);
-});
-
-test("quarantine: Stop during a batch restore keeps the rest held and returns to idle (QA A15)", async () => {
-  const total = (await ledgerItems()).length;
-  expect(total > 1, `need several held items to stop between, have ${total}`);
-  await openDrawer();
-  const outcome = await stopMidRun({
-    within: DRAWER,
-    start: `window.__qa.find("button", "Restore", ${q(DRAWER)}).click()`,
-  });
-  expect(outcome === "stopped", outcome);
-  await waitFor("*", "Stopped: ", DRAWER, SCAN_TIMEOUT_MS);
-  await sleep(SETTLE_MS);
-  const left = (await ledgerItems()).length;
-  expect(left > 0 && left < total, `expected some items still held after Stop, ${left} of ${total}`);
-  expect(!(await has("button", "Stopping", DRAWER)), "Stop is stuck pending");
-  expect(!(await has("*", "Restoring", DRAWER)), "the restore spinner is stuck");
-  expect(await has("button", "Restore", DRAWER), "Restore is not offered again");
-  // Idle again: the rest restores in one go and the ledger ends empty.
-  await click("button", "Restore", DRAWER);
-  await waitFor("*", "Restored ", DRAWER, SCAN_TIMEOUT_MS);
-  await sleep(SETTLE_MS);
-  expect((await ledgerItems()).length === 0, "items left after restoring the rest");
-  expect(exists(fx.tempOld), "old temp sentinel not restored");
-  await closeDrawer();
-});
-
-test("cleaner: Stop during a clean keeps what moved and leaves the rest (QA A14)", async () => {
   await goTo("cleaner");
   if (await has("main button", "Scan again")) await click("main button", "Scan again");
   await click("button", "Scan for junk");
   await waitFor("main button", "Clean up", null, SCAN_TIMEOUT_MS);
-  const outcome = await stopMidRun({
-    within: "main",
-    start: CLEAN_BUTTON,
-    confirm: { sel: '[role="alertdialog"] button', text: "Clean up" },
-  });
-  expect(outcome === "stopped", outcome);
-  await waitFor("main button", "Open quarantine", null, SCAN_TIMEOUT_MS);
-  const text = await mainText();
-  const m = /Stopped early: (\d+) moved to quarantine, (\d+) left/.exec(text);
-  expect(m, `the done view does not say the run stopped early:\n${text}`);
-  const [moved, leftBehind] = [Number(m[1]), Number(m[2])];
-  expect(moved > 0 && leftBehind > 0, `expected a partial run, got ${moved} moved / ${leftBehind} left`);
-  const held = (await ledgerItems()).length;
-  expect(held === moved, `ledger holds ${held} items but the view says ${moved} moved`);
-  expect(!(await has("button", "Stopping")), "Stop is stuck pending");
-  // Idle again: a fresh scan works and sees the items the stop left behind.
-  await click("main button", "Scan again");
-  await click("button", "Scan for junk");
-  await waitFor("main button", "Clean up", null, SCAN_TIMEOUT_MS);
-  const rescan = /(\d+) items selected/.exec(await mainText());
-  expect(rescan && Number(rescan[1]) > 0, `the rescan found nothing, though Stop left ${leftBehind} items behind`);
-  // Put everything back so later tests start from an empty ledger.
-  await openDrawer();
-  await click("button", "Restore", DRAWER);
-  await waitFor("*", "Restored ", DRAWER, SCAN_TIMEOUT_MS);
-  await sleep(SETTLE_MS);
+  // The scan gates a locked file into the red bucket: listed, never ticked.
+  expect(/Left alone\s*·\s*[1-9]/.test(await mainText()), "the review step lists nothing under 'Left alone'");
+  await click("main button", "Clean up");
+  await click('[role="alertdialog"] button', "Clean up");
+  await waitFor("button", "Open quarantine", null, SCAN_TIMEOUT_MS);
+  try {
+    const text = await mainText();
+    expect(existsLong(fx.locked), "the locked file was moved");
+    expect(!exists(fx.tempOld), "the old temp sentinel was not moved");
+    const held = await ledgerItems();
+    expect(held.length > 0, "nothing was held after the clean");
+    expect(
+      !held.some((i) => i.originalPath.toLowerCase() === fx.locked.toLowerCase()),
+      "the locked file is in the ledger",
+    );
+    // The done view prints the freed size, not a count: it must equal what the ledger holds.
+    const freed = held.reduce((sum, i) => sum + i.sizeBytes, 0);
+    expect(text.includes(`Freed ${formatBytes(freed)}`), `done view freed size != ledger total ${formatBytes(freed)}:
+${text}`);
+  } catch (error) {
+    await restoreAllHeld();
+    throw error;
+  }
+});
+
+test("quarantine: Stop during a batch restore keeps the rest held and returns to idle (QA A15)", async () => {
+  try {
+    const total = (await ledgerItems()).length;
+    expect(total > 1, `need several held items to stop between, have ${total}`);
+    await openDrawer();
+    const outcome = await stopMidRun({
+      within: DRAWER,
+      start: `window.__qa.find("button", "Restore", ${q(DRAWER)}).click()`,
+    });
+    expect(outcome === "stopped", outcome);
+    await waitFor("*", "Stopped: ", DRAWER, SCAN_TIMEOUT_MS);
+    await sleep(SETTLE_MS);
+    const left = (await ledgerItems()).length;
+    expect(left > 0 && left < total, `expected some items still held after Stop, ${left} of ${total}`);
+    expect(!(await has("button", "Stopping", DRAWER)), "Stop is stuck pending");
+    expect(!(await has("*", "Restoring", DRAWER)), "the restore spinner is stuck");
+    expect(await has("button", "Restore", DRAWER), "Restore is not offered again");
+    // Idle again: the rest restores in one go and the ledger ends empty.
+    await click("button", "Restore", DRAWER);
+    await waitFor("*", "Restored ", DRAWER, SCAN_TIMEOUT_MS);
+    await sleep(SETTLE_MS);
+    expect((await ledgerItems()).length === 0, "items left after restoring the rest");
+    expect(exists(fx.tempOld), "old temp sentinel not restored");
+  } finally {
+    await restoreAllHeld();
+    await closeDrawer();
+  }
+});
+
+test("cleaner: Stop during a clean keeps what moved and leaves the rest (QA A14)", async () => {
+  try {
+    await goTo("cleaner");
+    if (await has("main button", "Scan again")) await click("main button", "Scan again");
+    await click("button", "Scan for junk");
+    await waitFor("main button", "Clean up", null, SCAN_TIMEOUT_MS);
+    const outcome = await stopMidRun({
+      within: "main",
+      start: CLEAN_BUTTON,
+      confirm: { sel: '[role="alertdialog"] button', text: "Clean up" },
+    });
+    expect(outcome === "stopped", outcome);
+    await waitFor("main button", "Open quarantine", null, SCAN_TIMEOUT_MS);
+    const text = await mainText();
+    const m = /Stopped early: (\d+) moved to quarantine, (\d+) left/.exec(text);
+    expect(m, `the done view does not say the run stopped early:
+${text}`);
+    const [moved, leftBehind] = [Number(m[1]), Number(m[2])];
+    expect(moved > 0 && leftBehind > 0, `expected a partial run, got ${moved} moved / ${leftBehind} left`);
+    const held = (await ledgerItems()).length;
+    expect(held === moved, `ledger holds ${held} items but the view says ${moved} moved`);
+    expect(!(await has("button", "Stopping")), "Stop is stuck pending");
+    // Idle again: a fresh scan works and sees the items the stop left behind.
+    await click("main button", "Scan again");
+    await click("button", "Scan for junk");
+    await waitFor("main button", "Clean up", null, SCAN_TIMEOUT_MS);
+    const rescan = /(\d+) items selected/.exec(await mainText());
+    expect(rescan && Number(rescan[1]) > 0, `the rescan found nothing, though Stop left ${leftBehind} items behind`);
+  } finally {
+    // Put everything back so later tests start from an empty ledger.
+    await restoreAllHeld();
+  }
   expect((await ledgerItems()).length === 0, "items left after restoring the partial clean");
   expect(exists(fx.tempOld), "old temp sentinel not restored");
-  await closeDrawer();
 });
 
 test("quarantine: drawer shows the empty state once everything is restored", async () => {

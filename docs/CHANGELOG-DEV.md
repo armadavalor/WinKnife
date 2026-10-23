@@ -2268,10 +2268,12 @@ UI Stop end to end.
 **Built.** Three cases in `scripts/qa/e2e.mjs`, run by the CI e2e job:
 Stop pressed mid-clean (moved items held, rest left, run shown as stopped, UI
 idle), Stop pressed mid-batch-restore (restored stay restored, rest held, UI
-idle, restore can be run again), and a clean with one locked file (the file is
-listed with its "in use" reason, the rest moved, the ledger omits it). Stop is
-pressed from an in-page MutationObserver once the run shows "N of M" with
-0 < N < M; the 5000-file fixture gives the window. No production hook added.
+idle, restore can be run again), and a clean with one locked file (the scan
+lists it under "Left alone", it is never ticked, the rest moved, the ledger
+omits it, the freed size matches the ledger). A file locked *after* the scan
+(the executor's "in use" row) stays covered by the Rust executor tests. Stop is
+pressed from an in-page MutationObserver once the run's progress line shows
+"N of M" with 0 < N < M; each case restores all held batches in a `finally`; the 5000-file fixture gives the window. No production hook added.
 
 **Deferred.** Not run locally (a local run really cleans and needs a QA-identifier
 build); the CI e2e job is the verifier. A18 still needs a real second volume.

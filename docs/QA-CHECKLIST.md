@@ -37,7 +37,7 @@ Where the checks run:
 | A16 | Partial failure is reported honestly. | The report counts what moved and what stayed, with reasons. | Rust `one_failure_does_not_stop_the_batch`, `a_partial_take_reports_what_stayed_behind`, `a_partial_restore_reports_what_stayed_behind`, `a_partial_delete_reports_what_it_removed_and_what_it_left` | OK |
 | A17 | Partial failure during a purge. | The purge reports the items it could not remove and keeps their rows. | Rust `a_partial_purge_reports_the_locked_item_and_keeps_its_row` | OK |
 | A18 | Real move across two volumes. | Copy, verify, delete the source; nothing lost on failure. | Rust `a_cross_volume_move_reports_an_occupied_destination_as_occupied` (simulated). No real second volume on CI. | UNTESTED |
-| A19 | Execute UI after a partial failure. | The UI shows the failed rows and keeps the rest of the state intact. | e2e `cleaner: a locked file is listed with its reason; the rest still moved (QA A19)` | UI e2e runs in the CI e2e job |
+| A19 | Execute UI after a partial failure. | A locked file is gated to "Left alone" and never ticked; the rest moves, the ledger omits it, freed size matches. | e2e `cleaner: a locked file is left alone and listed as such; the rest still moved (QA A19)`; a file locked after the scan: Rust `a_locked_file_is_skipped_and_reported` | UI e2e runs in the CI e2e job |
 | A20 | Emptying the recycle bin (the one permanent delete). | The row starts unticked; the backend refuses without the separate confirmation flag. | Existing Phase 4 tests; unchanged in this pass. | OK |
 
 ## B. Search and scan
