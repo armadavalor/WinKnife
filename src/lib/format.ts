@@ -84,5 +84,10 @@ export function truncatePath(path: string, max = 64): string {
     return path;
   }
   const keep = Math.floor((max - 1) / 2);
-  return `${path.slice(0, keep)}…${path.slice(-keep)}`;
+  // A short file name stays whole: it is the part people look for.
+  const nameLen = path.length - path.lastIndexOf("\\") - 1;
+  const hasDir = path.includes("\\");
+  const tail = hasDir ? Math.min(Math.max(keep, nameLen), max - 2) : keep;
+  const head = hasDir ? max - 1 - tail : keep;
+  return `${path.slice(0, head)}…${path.slice(-tail)}`;
 }

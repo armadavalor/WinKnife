@@ -2262,3 +2262,28 @@ restore also come back as held; nothing is deleted.
 
 **Deferred.** A18 (needs a real second volume), A19 (UI frame time), A14/A15
 UI Stop end to end.
+
+## 2026-10-23 — QA: UI end-to-end for Stop and partial failure (A14, A15, A19)
+
+**Built.** Three cases in `scripts/qa/e2e.mjs`, run by the CI e2e job:
+Stop pressed mid-clean (moved items held, rest left, run shown as stopped, UI
+idle), Stop pressed mid-batch-restore (restored stay restored, rest held, UI
+idle, restore can be run again), and two for a locked file. One checks a file
+locked before the scan: it is listed under "Left alone" with its reason and has
+no tick. The other locks a ticked temp file from the harness after the scan
+(PowerShell, `FileShare.None`), cleans, and checks that the done view lists it
+as "in use by a running program", it stays in place, the ledger omits it, the
+rest moved and the freed size matches the ledger. Stop is
+pressed from an in-page MutationObserver once the run's progress line shows
+"N of M" with 0 < N < M; each case restores all held batches in a `finally`; the 5000-file fixture gives the window. No production hook added.
+
+**Fixed after the first CI runs.** The e2e's `ledgerItems()` counted rows
+already restored: `quarantine_batch_items` returns every row of a part-restored
+batch, so A15 saw "6506 of 6506" after a Stop that had in fact restored some
+(test measurement only; the backend commits per item and was not changed). It
+now keeps only rows without `restoredAt`. `truncatePath` keeps a short file name
+whole instead of cutting its first letters (display only; a path with no `\`
+is cut as before).
+
+**Deferred.** Not run locally (a local run really cleans and needs a QA-identifier
+build); the CI e2e job is the verifier. A18 still needs a real second volume.
