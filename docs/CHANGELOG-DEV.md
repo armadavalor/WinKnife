@@ -2268,10 +2268,12 @@ UI Stop end to end.
 **Built.** Three cases in `scripts/qa/e2e.mjs`, run by the CI e2e job:
 Stop pressed mid-clean (moved items held, rest left, run shown as stopped, UI
 idle), Stop pressed mid-batch-restore (restored stay restored, rest held, UI
-idle, restore can be run again), and a clean with one locked file (the scan
-lists it under "Left alone", it is never ticked, the rest moved, the ledger
-omits it, the freed size matches the ledger). A file locked *after* the scan
-(the executor's "in use" row) stays covered by the Rust executor tests. Stop is
+idle, restore can be run again), and two for a locked file. One checks a file
+locked before the scan: it is listed under "Left alone" with its reason and has
+no tick. The other locks a ticked temp file from the harness after the scan
+(PowerShell, `FileShare.None`), cleans, and checks that the done view lists it
+as "in use by a running program", it stays in place, the ledger omits it, the
+rest moved and the freed size matches the ledger. Stop is
 pressed from an in-page MutationObserver once the run's progress line shows
 "N of M" with 0 < N < M; each case restores all held batches in a `finally`; the 5000-file fixture gives the window. No production hook added.
 

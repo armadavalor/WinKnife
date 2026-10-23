@@ -23,6 +23,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { spawn } from "node:child_process";
 import { basename, dirname, join } from "node:path";
 
 const PORT = 9222;
@@ -606,34 +607,87 @@ function formatBytes(bytes) {
 const CLEAN_BUTTON =`window.__qa.find("main button", "Clean up").click()`;
 const mainText = () => evaluate(`document.querySelector("main").innerText`);
 
-test("cleaner: a locked file is left alone and listed as such; the rest still moved (QA A19)", async () => {
-  expect(existsLong(fx.locked), `fixture missing ${fx.locked}`);
+const scanCleaner = async () => {
   await goTo("cleaner");
   if (await has("main button", "Scan again")) await click("main button", "Scan again");
   await click("button", "Scan for junk");
   await waitFor("main button", "Clean up", null, SCAN_TIMEOUT_MS);
-  // The scan gates a locked file into the red bucket: listed, never ticked.
+};
+
+// Holds `path` open with FileShare.None from a separate process (Node's fs.open shares, so it cannot lock).
+const holdExclusive = (path) =>
+  new Promise((resolve, reject) => {
+    const script = `$f=[IO.File]::Open('${path.replaceAll("'", "''")}','Open','Read','None'); Write-Host ready; Start-Sleep -Seconds 3600`;
+    const child = spawn("powershell.exe", ["-NoProfile", "-Command", script], {
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`could not lock ${path}`));
+    }, STEP_TIMEOUT_MS);
+    child.stdout.on("data", (chunk) => {
+      if (String(chunk).includes("ready")) {
+        clearTimeout(timer);
+        resolve(child);
+      }
+    });
+    child.on("error", reject);
+  });
+const release = (child) =>
+  new Promise((resolve) => {
+    if (child.exitCode !== null) return resolve();
+    child.once("exit", resolve);
+    child.kill();
+  });
+
+test("cleaner: a file locked before the scan is listed under 'Left alone' with its reason and has no tick (QA A19)", async () => {
+  expect(existsLong(fx.locked), `fixture missing ${fx.locked}`);
+  await scanCleaner();
   expect(/Left alone\s*·\s*[1-9]/.test(await mainText()), "the review step lists nothing under 'Left alone'");
-  await click("main button", "Clean up");
-  await click('[role="alertdialog"] button', "Clean up");
-  await waitFor("button", "Open quarantine", null, SCAN_TIMEOUT_MS);
+  const row = await evaluate(`(() => {
+    const want = ${JSON.stringify(fx.locked.toLowerCase())};
+    for (const li of document.querySelectorAll("main li")) {
+      const [path, reason] = [...li.querySelectorAll("span[title]")].map((s) => s.title);
+      if (path && path.toLowerCase().endsWith(want)) {
+        return { reason: reason ?? "", ticks: li.querySelectorAll('input[type="checkbox"]').length };
+      }
+    }
+    return null;
+  })()`);
+  expect(row, `no row for ${fx.locked} in the review step`);
+  expect(row.reason.length > 0, "the locked file's row shows no reason");
+  expect(row.ticks === 0, "the locked file's row has a checkbox");
+  expect(existsLong(fx.locked), "the locked file disappeared");
+});
+
+test("cleaner: a file locked after the scan is reported with its reason, stays in place, and the rest moved (QA A19)", async () => {
+  await scanCleaner();
+  const locker = await holdExclusive(fx.tempOld);
   try {
+    await click("main button", "Clean up");
+    await click('[role="alertdialog"] button', "Clean up");
+    await waitFor("button", "Open quarantine", null, SCAN_TIMEOUT_MS);
     const text = await mainText();
-    expect(existsLong(fx.locked), "the locked file was moved");
-    expect(!exists(fx.tempOld), "the old temp sentinel was not moved");
+    expect(
+      text.includes(basename(fx.tempOld)) && text.includes("in use by a running program"),
+      `the done view does not list ${basename(fx.tempOld)} as in use:
+${text}`,
+    );
+    expect(exists(fx.tempOld), "the locked file was moved");
     const held = await ledgerItems();
     expect(held.length > 0, "nothing was held after the clean");
     expect(
-      !held.some((i) => i.originalPath.toLowerCase() === fx.locked.toLowerCase()),
+      !held.some((i) => i.originalPath.toLowerCase() === fx.tempOld.toLowerCase()),
       "the locked file is in the ledger",
     );
     // The done view prints the freed size, not a count: it must equal what the ledger holds.
     const freed = held.reduce((sum, i) => sum + i.sizeBytes, 0);
     expect(text.includes(`Freed ${formatBytes(freed)}`), `done view freed size != ledger total ${formatBytes(freed)}:
 ${text}`);
-  } catch (error) {
+  } finally {
+    await release(locker);
     await restoreAllHeld();
-    throw error;
   }
 });
 
