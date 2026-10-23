@@ -579,7 +579,20 @@ async function stopMidRun({ within, start, confirm }) {
   })`);
 }
 
-const CLEAN_BUTTON = `window.__qa.find("main button", "Clean up").click()`;
+// Mirrors src/lib/format.ts, which the page uses for the done view.
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+const CLEAN_BUTTON =`window.__qa.find("main button", "Clean up").click()`;
 const mainText = () => evaluate(`document.querySelector("main").innerText`);
 
 test("cleaner: a locked file is listed with its reason; the rest still moved (QA A19)", async () => {
@@ -596,6 +609,9 @@ test("cleaner: a locked file is listed with its reason; the rest still moved (QA
     !held.some((i) => i.originalPath.toLowerCase() === fx.locked.toLowerCase()),
     "the locked file is in the ledger",
   );
+  // The done view prints the freed size, not a count: it must equal what the ledger holds.
+  const freed = held.reduce((sum, i) => sum + i.sizeBytes, 0);
+  expect(text.includes(`Freed ${formatBytes(freed)}`), `done view freed size != ledger total ${formatBytes(freed)}:\n${text}`);
 });
 
 test("quarantine: Stop during a batch restore keeps the rest held and returns to idle (QA A15)", async () => {
@@ -645,7 +661,10 @@ test("cleaner: Stop during a clean keeps what moved and leaves the rest (QA A14)
   expect(!(await has("button", "Stopping")), "Stop is stuck pending");
   // Idle again: a fresh scan works and sees the items the stop left behind.
   await click("main button", "Scan again");
-  await waitFor("button", "Scan for junk");
+  await click("button", "Scan for junk");
+  await waitFor("main button", "Clean up", null, SCAN_TIMEOUT_MS);
+  const rescan = /(\d+) items selected/.exec(await mainText());
+  expect(rescan && Number(rescan[1]) > 0, `the rescan found nothing, though Stop left ${leftBehind} items behind`);
   // Put everything back so later tests start from an empty ledger.
   await openDrawer();
   await click("button", "Restore", DRAWER);
