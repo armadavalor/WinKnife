@@ -241,7 +241,9 @@ async function restoreFirstBatch() {
   return evaluate(`document.querySelector(${q(DRAWER)}).innerText`);
 }
 
-// Every item the quarantine ledger holds, read from the backend.
+// Every item the quarantine ledger still holds, read from the backend.
+// quarantine_batch_items also returns the rows of a part-restored batch that are already back
+// on disk (restoredAt set), so those are filtered out.
 const ledgerItems = () =>
   evaluate(`(async () => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
@@ -249,7 +251,7 @@ const ledgerItems = () =>
     for (const b of await invoke("quarantine_list")) {
       items.push(...(await invoke("quarantine_batch_items", { batchId: b.batchId })));
     }
-    return items;
+    return items.filter((i) => !i.restoredAt);
   })()`);
 
 // Scans the cleaner and cleans what it ticked; the batch stays in quarantine.

@@ -2277,5 +2277,13 @@ rest moved and the freed size matches the ledger. Stop is
 pressed from an in-page MutationObserver once the run's progress line shows
 "N of M" with 0 < N < M; each case restores all held batches in a `finally`; the 5000-file fixture gives the window. No production hook added.
 
+**Fixed after the first CI runs.** The e2e's `ledgerItems()` counted rows
+already restored: `quarantine_batch_items` returns every row of a part-restored
+batch, so A15 saw "6506 of 6506" after a Stop that had in fact restored some
+(test measurement only; the backend commits per item and was not changed). It
+now keeps only rows without `restoredAt`. `truncatePath` keeps a short file name
+whole instead of cutting its first letters (display only; a path with no `\`
+is cut as before).
+
 **Deferred.** Not run locally (a local run really cleans and needs a QA-identifier
 build); the CI e2e job is the verifier. A18 still needs a real second volume.
