@@ -2324,3 +2324,19 @@ list did not make. Closes DECISIONS-NEEDED 2026-10-03 notes (2) and (3).
 rating per entry and `null` for an unrated one; the Rust test for a
 protected program asserts the new wording and that none of the cleaner's
 words leak in.
+
+## 2026-10-24 — C9: provenance and verification
+
+**Built.** README "Verify this download" (official URLs, `Get-FileHash`,
+`gh attestation verify`), `docs/ANTIVIRUS-FALSE-POSITIVE.md`, an About block
+in Settings ("What WinKnife never does", official URL as text, no network
+call), and `actions/attest-build-provenance` in `release.yml` for the
+installer, ZIP and `SHA256SUMS.txt`.
+
+- `SHA256SUMS.txt` was already produced by `scripts/package-release.ps1`; no
+  change needed there.
+- Release workflow gained `id-token: write` and `attestations: write`. Triggers
+  untouched; no tag pushed.
+- README says winget is submitted but maybe not live and that Scoop does not
+  exist, rather than listing install commands that fail.
+- Deferred: the attestation step is untested until the next tag build.

@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -98,6 +100,15 @@ jobs:
       - name: Package portable app, installer and checksums
         shell: pwsh
         run: ./scripts/package-release.ps1 -Version $env:WINKNIFE_VERSION
+      # Build provenance for the release assets (public repo: free). Verify with
+      # `gh attestation verify <file> --repo armadavalor/WinKnife`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            release-artifacts/*.exe
+            release-artifacts/*.zip
+            release-artifacts/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: winknife-release-candidate
