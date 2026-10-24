@@ -177,6 +177,15 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             args: json!({ "tweakId": "__wiring_probe__" }),
         },
         Probe {
+            command: "context_menu_scan",
+            args: json!({}),
+        },
+        // No undo record exists for it, so `undo` refuses before the registry.
+        Probe {
+            command: "context_menu_undo",
+            args: json!({ "entryId": "__wiring_probe__" }),
+        },
+        Probe {
             command: "get_recommendations",
             args: json!({ "scanId": nil }),
         },
