@@ -2440,3 +2440,34 @@ installer, ZIP and `SHA256SUMS.txt`.
 - README says winget is submitted but maybe not live and that Scoop does not
   exist, rather than listing install commands that fail.
 - Deferred: the attestation step is untested until the next tag build.
+
+## 2026-10-24 — C7: drift check and Windows Update status
+
+**Built.** The Tweaks scan now compares each live value with the value C1
+applied. A value changed since (by Windows, policy or another tool) is shown
+as drifted with a reason and a manual "Re-apply" button, which runs the
+ordinary C1 apply path (fence + undo row). A new read-only "Is something
+blocking Windows Update?" section (`tweaks/update_block.rs`) reads the HKLM
+policy values, the `wuauserv` start type, a `WUServer` override and an active
+pause; it only calls `Registry::value`, never writes.
+
+- Fence (`fence_refusal` / `FENCED_FRAGMENTS`) unchanged.
+- Values that cannot be read are listed as errors, so "nothing found" is
+  never claimed for a key the check could not see.
+
+## 2026-10-24 — C10: settings profile export/import
+
+**Built.** Settings → "Settings profile": export writes a versioned JSON
+(`version`, tweak ids, cleaner packs, duplicate settings, quarantine
+retention) to a file the user picks; import reads it, shows a diff (per
+tweak from → to, per setting) and applies nothing until confirmed. Tweaks go
+through the ordinary scan + `execute` path, settings through the ordinary
+settings save.
+
+- "Selected tweaks" in the brief was interpreted as **applied tweaks**: the
+  export lists the tweaks currently applied; there is no separate selection.
+- Import boundary (`tweaks/profile.rs`): 64 KiB cap before parsing,
+  `deny_unknown_fields`, strict types, version 1 only, every tweak id must be
+  known and inside the fence; unknown pack ids and invalid retention are
+  refused by the settings merge. Test: a hand-crafted profile naming a fenced
+  or unknown tweak is refused with no registry writes and no undo rows.

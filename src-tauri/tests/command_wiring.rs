@@ -176,6 +176,21 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "tweaks_undo",
             args: json!({ "tweakId": "__wiring_probe__" }),
         },
+        // Read-only: HKLM policy values are only read.
+        Probe {
+            command: "tweaks_update_status",
+            args: json!({}),
+        },
+        // Writes a profile into the sandbox only.
+        Probe {
+            command: "profile_export",
+            args: json!({ "path": sandbox.join("profile.json") }),
+        },
+        // A missing file: refused after every state resolves, nothing stored.
+        Probe {
+            command: "profile_preview",
+            args: json!({ "path": sandbox.join("missing-profile.json") }),
+        },
         Probe {
             command: "get_recommendations",
             args: json!({ "scanId": nil }),
