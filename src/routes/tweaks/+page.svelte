@@ -188,7 +188,7 @@
       {:else if updateStatus === null}
         <p class="mt-2 text-xs text-ink-faint">{t("tweaks.loading")}</p>
       {:else}
-        {#if updateStatus.blocks.length === 0}
+        {#if updateStatus.blocks.length === 0 && updateStatus.errors.length === 0}
           <p class="mt-2 text-xs text-ink-muted">{t("tweaks.updateClear")}</p>
         {:else}
           <ul class="mt-2 flex flex-col gap-2">
