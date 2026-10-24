@@ -23,6 +23,7 @@ pub(crate) mod execution_state;
 pub(crate) mod explorer;
 pub(crate) mod file_id;
 pub(crate) mod guard;
+pub(crate) mod hosts;
 pub(crate) mod lock;
 pub(crate) mod message;
 pub(crate) mod panels;
@@ -44,6 +45,11 @@ pub use execution_state::{AwakeRequest, ExecutionState, RecordedCall, RecordingE
 pub use explorer::reveal_in_explorer;
 pub use file_id::{file_identity, try_file_identity, FileId};
 pub use guard::real_os_effects_armed;
+pub use hosts::{
+    content_hash, flush_dns, helper_write, run_helper_if_asked, write_atomic, ElevatedHostsWriter,
+    HostsFence, HostsWriter, EXIT_CHANGED, EXIT_INVALID, EXIT_VERIFY_FAILED, EXIT_WRITTEN,
+    FLUSH_DNS_COMMAND, WRITE_HOSTS_FLAG,
+};
 pub use lock::{AlwaysUnlocked, LockProbe, LockState, SystemLockProbe};
 pub use message::show_fatal_error;
 pub use panels::{FakePanelLauncher, PanelLaunch, PanelLauncher, SystemPanelLauncher};

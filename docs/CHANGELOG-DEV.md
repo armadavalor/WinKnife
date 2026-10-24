@@ -2324,3 +2324,29 @@ list did not make. Closes DECISIONS-NEEDED 2026-10-03 notes (2) and (3).
 rating per entry and `null` for an unrated one; the Rust test for a
 protected program asserts the new wording and that none of the cleaner's
 words leak in.
+
+## 2026-10-24 — Hosts file editor (C4, K-018)
+
+**Built.** A `hosts` sidebar module. It parses `%SystemRoot%\System32\drivers\etc\hosts`
+into entries, disabled entries, comments and invalid lines (flagged with
+the line and reason), and edits a draft: add, remove, turn on/off, or raw
+text. Every draft is validated and diffed against the file on disk; Save
+asks for confirmation, takes a timestamped backup in app data, then writes
+through the UAC helper (`--write-hosts`). Encoding (UTF-8/BOM/UTF-16) and
+line endings are kept. Any backup restores in one click (after a backup of
+the current file). `ipconfig /flushdns` runs only when its button is
+clicked, and the page shows the exact command.
+
+**Decisions.** The write exception covers only the hosts file and our own
+same-folder `hosts.winknife.tmp` (`HostsFence`, canonical path equality
+from `%SystemRoot%`, checked before every write; any other path is refused
+and tested). The write is a temp + `MoveFileEx` swap with read-back
+verification; the helper refuses empty or unvalidated bytes (hash check)
+and reports a file changed since the backup instead of overwriting it.
+Backups are never deleted automatically. A declined UAC prompt is a plain
+"nothing changed" outcome.
+
+**Tests.** Parser, diff, encoding/line-ending round trips, the fence
+(refuses other paths, including `C:\Windows\…` siblings), save/restore/no-change
+and changed-underneath paths against a fake writer in a tempdir; the real
+hosts file is never touched by tests.

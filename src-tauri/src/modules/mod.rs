@@ -42,6 +42,7 @@ register_modules! {
     empty_folders => empty_folders::EmptyFoldersModule,
     file_unlocker => file_unlocker::FileUnlockerModule,
     legacy_panels => legacy_panels::LegacyPanelsModule,
+    hosts => hosts::HostsModule,
 }
 
 /// Build the application's module registry.
@@ -122,6 +123,7 @@ mod tests {
             "empty-folders",
             "file-unlocker",
             "legacy-panels",
+            "hosts",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }

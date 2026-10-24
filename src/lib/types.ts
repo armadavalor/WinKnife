@@ -782,6 +782,84 @@ export type CreateOutcome =
   | { state: "failed"; code: number };
 
 /* -------------------------------------------------------------------------
+ * modules/hosts.rs
+ * ---------------------------------------------------------------------- */
+
+/** What one hosts line is. `comment.disabled`: a commented-out entry. */
+export type HostsLineKind =
+  | { kind: "blank" }
+  | { kind: "comment"; disabled: boolean }
+  | { kind: "entry"; ip: string; hostnames: string[]; comment: string | null }
+  | { kind: "invalid"; reason: string };
+
+/** One parsed line; `number` is 1-based. */
+export interface HostsLine {
+  number: number;
+  text: string;
+  kind: HostsLineKind;
+}
+
+/** `hosts_read`: the file as it is on disk. */
+export interface HostsDocument {
+  path: string;
+  /** False: there is no hosts file; saving creates one. */
+  exists: boolean;
+  /** `
+` line ends. */
+  text: string;
+  encoding: string;
+  lineEnding: string;
+  /** Set when the file can be viewed but not edited here. */
+  readOnly: string | null;
+  lines: HostsLine[];
+  /** The exact command behind the "Flush DNS cache" button. */
+  flushDnsCommand: string;
+}
+
+/** A reason the text cannot be saved. */
+export interface HostsProblem {
+  line: number | null;
+  reason: string;
+}
+
+/** One diff row; `gap` stands for unchanged lines left out. */
+export type HostsDiffLine =
+  | { op: "same"; text: string }
+  | { op: "added"; text: string }
+  | { op: "removed"; text: string }
+  | { op: "gap"; lines: number };
+
+/** `hosts_preview`: validation and diff. Writes nothing. */
+export interface HostsPreview {
+  lines: HostsLine[];
+  problems: HostsProblem[];
+  diff: HostsDiffLine[];
+  changed: boolean;
+}
+
+/** What one save or restore came to. Each maps to one sentence. */
+export type HostsSaveOutcome = (
+  | { state: "written" }
+  | { state: "noChange" }
+  | { state: "declined" }
+  | { state: "changed" }
+  | { state: "invalid" }
+  | { state: "verifyFailed" }
+  | { state: "timedOut" }
+  | { state: "failed"; code: number }
+) & {
+  /** The backup taken before the write, when one was. */
+  backup: string | null;
+};
+
+/** One backup in app data. */
+export interface HostsBackup {
+  name: string;
+  size: number;
+  takenAt: string;
+}
+
+/* -------------------------------------------------------------------------
  * modules/legacy_panels.rs
  * ---------------------------------------------------------------------- */
 
