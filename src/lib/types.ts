@@ -75,6 +75,7 @@ export type RiskBucket = "safe" | "needsReview" | "doNotDelete";
 export type ActionKind =
   | "quarantine"
   | "disableStartupEntry"
+  | "applyTweak"
   | "ignore"
   | "infoOnly";
 
@@ -109,7 +110,8 @@ export type Justification =
       source: StartupSource;
       key: string;
       command: string;
-    };
+    }
+  | { kind: "tweak"; tweakId: string; observed: number | null };
 
 /** A suggestion about one or more findings. Always carries a `reason`. */
 export interface Recommendation {
@@ -598,6 +600,46 @@ export interface StartupScanResult {
   scanId: string;
   scan: StartupScan;
   /** One per toggleable entry; a disable applies one of these. */
+  recommendations: Recommendation[];
+}
+
+/* -------------------------------------------------------------------------
+ * modules/tweaks.rs
+ * ---------------------------------------------------------------------- */
+
+/** What it takes for a tweak to show. */
+export type TweakRestart = "none" | "explorer" | "reboot";
+
+/** How far an applied tweak can be taken back. */
+export type TweakUndoability = "reversible" | "reversibleAfterRestart" | "notUndoable";
+
+/** One catalogue tweak with its live value. */
+export interface TweakState {
+  id: string;
+  /** Plain-language name. */
+  name: string;
+  reason: string;
+  /** Exact registry path, value name included. */
+  path: string;
+  /** The value now; `null` when it is not set. */
+  current: number | null;
+  /** The value applying writes. */
+  target: number;
+  /** WinKnife set it and it still holds what WinKnife wrote: undo is available. */
+  applied: boolean;
+  restart: TweakRestart;
+  undoability: TweakUndoability;
+  /** Where the value's meaning is documented. */
+  sourceUrl: string;
+  /** Why it could not be read or judged; such a row gets no action. */
+  error: string | null;
+}
+
+/** What `tweaks_scan` hands back. */
+export interface TweaksScanResult {
+  scanId: string;
+  tweaks: TweakState[];
+  /** One per tweak that can still be applied; applying runs one of these. */
   recommendations: Recommendation[];
 }
 

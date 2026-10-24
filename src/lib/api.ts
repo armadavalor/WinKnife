@@ -49,6 +49,7 @@ import type {
   TimerStatus,
   TreeLevel,
   TreemapScanResult,
+  TweaksScanResult,
   UnlockerReport,
 } from "$lib/types";
 
@@ -220,6 +221,26 @@ export function startupEnable(
   key: string,
 ): Promise<MoveWarning[]> {
   return invoke<MoveWarning[]>("startup_enable", { source, key });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — tweaks
+ * ---------------------------------------------------------------------- */
+
+/** Read every catalogue tweak's live value. Read-only. */
+export function tweaksScan(): Promise<TweaksScanResult> {
+  return invoke<TweaksScanResult>("tweaks_scan");
+}
+
+/**
+ * Put a tweak's recorded prior value back.
+ *
+ * The reversal. Applying goes through {@link execute}; undo writes back exactly
+ * what was there before (or removes the value if it was not set), and refuses
+ * when the value was changed since.
+ */
+export function tweaksUndo(tweakId: string): Promise<void> {
+  return invoke<void>("tweaks_undo", { tweakId });
 }
 
 /* -------------------------------------------------------------------------

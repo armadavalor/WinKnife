@@ -154,6 +154,43 @@ impl StartupControl for NoStartupControl {
     }
 }
 
+/// The per-user settings catalogue, as the executor sees it (K-018).
+///
+/// The executor never names a registry path itself: it hands over a catalogue
+/// id and the value the scan saw, and the control decides. Every write it makes
+/// records the prior value first, so the only way to change a setting here is
+/// a way that can be put back.
+pub trait TweakControl: Send + Sync {
+    /// Why applying `tweak_id` would be wrong right now, or `None` when it is
+    /// still what the user reviewed: a known, fenced-in tweak whose live value
+    /// is still `observed` and not already the target.
+    fn refusal(&self, tweak_id: &str, observed: Option<u32>) -> Option<String>;
+
+    /// Record the prior value in `conn`, write the target, read it back.
+    ///
+    /// # Errors
+    /// Returns an error when the tweak is refused, the write fails, or the
+    /// read-back disagrees (the prior value is then put back).
+    fn apply(&self, conn: &Connection, tweak_id: &str) -> Result<()>;
+}
+
+/// A control that refuses every tweak, for batches built without the tweak
+/// service.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoTweakControl;
+
+impl TweakControl for NoTweakControl {
+    fn refusal(&self, tweak_id: &str, _observed: Option<u32>) -> Option<String> {
+        Some(format!("skipped: no tweak service for `{tweak_id}`"))
+    }
+
+    fn apply(&self, _conn: &Connection, tweak_id: &str) -> Result<()> {
+        Err(crate::core::error::CoreError::Tweak(format!(
+            "no tweak service for `{tweak_id}`"
+        )))
+    }
+}
+
 /// Everything the executor is allowed to touch.
 pub struct ExecEnvironment<'a> {
     /// Where removed items go.
@@ -167,6 +204,8 @@ pub struct ExecEnvironment<'a> {
     pub recycle_bin: &'a dyn RecycleBin,
     /// Autostart entries, for [`Action::DisableStartupEntry`].
     pub startup: &'a dyn StartupControl,
+    /// Per-user settings, for [`Action::ApplyTweak`].
+    pub tweaks: &'a dyn TweakControl,
 }
 
 /// Per-request confirmations, separate from the services in
@@ -341,6 +380,12 @@ fn apply_one(
         return disable_startup_entry(unit, env, state);
     }
 
+    // A tweak is a registry value too, guarded by its catalogue fence and the
+    // re-read in gate 4 rather than by the path gates.
+    if unit.recommendation.action == Action::ApplyTweak {
+        return apply_tweak(unit, env);
+    }
+
     if unit.recommendation.action != Action::Quarantine {
         return skipped(format!(
             "action `{:?}` is not supported yet",
@@ -481,6 +526,7 @@ fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Opti
             key,
             command,
         } => startup_refusal(*source, key, command, env),
+        Justification::Tweak { tweak_id, observed } => env.tweaks.refusal(tweak_id, *observed),
     }
 }
 
@@ -698,6 +744,36 @@ fn disable_startup_entry(
             state.warnings = warnings;
             (ExecOutcome::Succeeded, 0)
         }
+        Err(err) => (
+            ExecOutcome::Failed {
+                error: err.to_string(),
+            },
+            0,
+        ),
+    }
+}
+
+fn apply_tweak(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> (ExecOutcome, u64) {
+    if let Some(reason) = justification_refusal(unit, env) {
+        tracing::warn!(
+            setting = %unit.finding.path.display(),
+            reason = reason.as_str(),
+            "refused a tweak whose justification no longer holds"
+        );
+        return (ExecOutcome::Skipped { reason }, 0);
+    }
+
+    let Justification::Tweak { tweak_id, .. } = &unit.recommendation.justification else {
+        return (
+            ExecOutcome::Skipped {
+                reason: "skipped: this is not a tweak".to_owned(),
+            },
+            0,
+        );
+    };
+
+    match with_db(env.db, |conn| env.tweaks.apply(conn, tweak_id)) {
+        Ok(()) => (ExecOutcome::Succeeded, 0),
         Err(err) => (
             ExecOutcome::Failed {
                 error: err.to_string(),
@@ -979,6 +1055,7 @@ mod tests {
             brain,
             recycle_bin: bin,
             startup: &NoStartupControl,
+            tweaks: &NoTweakControl,
         }
     }
 
@@ -1042,6 +1119,7 @@ mod tests {
                     brain: &brain,
                     recycle_bin: &bin,
                     startup: &NoStartupControl,
+                    tweaks: &NoTweakControl,
                 };
                 execute(&units, &env, &ExecOptions::default(), None)
             });

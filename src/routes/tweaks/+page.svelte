@@ -1,0 +1,177 @@
+<!--
+  Tweaks: a few per-user Windows settings, each with an exact undo (K-018).
+
+  Every row shows the registry path, the value now and the value after, and
+  where the setting is documented, before anything changes. Applying records
+  the prior value first; Undo puts that back.
+-->
+<script lang="ts">
+  import LoadingNote from "$lib/components/LoadingNote.svelte";
+  import { onMount } from "svelte";
+
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
+  import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { moduleStore } from "$lib/stores/modules.svelte";
+  import { tweaksStore } from "$lib/stores/tweaks.svelte";
+  import type { TweakRestart, TweakState } from "$lib/types";
+
+  const MODULE_ID = "tweaks";
+  const manifest = $derived(moduleStore.find(MODULE_ID));
+  const store = tweaksStore;
+
+  let pending = $state<TweakState | null>(null);
+
+  onMount(() => {
+    void store.load();
+  });
+
+  const restartLabel: Record<TweakRestart, string> = {
+    none: t("tweaks.restartNone"),
+    explorer: t("tweaks.restartExplorer"),
+    reboot: t("tweaks.restartReboot"),
+  };
+
+  function valueText(value: number | null): string {
+    return value === null ? t("tweaks.notSet") : String(value);
+  }
+
+  async function confirmApply(): Promise<void> {
+    const tweak = pending;
+    pending = null;
+    if (tweak) {
+      await store.applyTweak(tweak);
+    }
+  }
+</script>
+
+<div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
+  <PageHeader
+    title={manifest ? tModuleName(manifest.id, manifest.name) : MODULE_ID}
+    info={[manifest ? tModuleDescription(manifest.id, manifest.description) : "", t("tweaks.intro")]
+      .filter(Boolean)
+      .join(" ")}
+  />
+
+  {#if store.error}
+    <p class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger">
+      {store.error}
+    </p>
+  {/if}
+
+  {#if store.status === "loading" || store.status === "idle"}
+    <LoadingNote text={t("tweaks.loading")} />
+  {:else if store.status === "error"}
+    <div class="flex flex-col items-start gap-3 rounded-xl border border-surface-3 bg-surface-1 p-5">
+      <p class="text-sm">{t("tweaks.loadError")}</p>
+      <button
+        type="button"
+        class="btn-secondary px-3! py-1.5!"
+        disabled={store.busy !== null}
+        onclick={() => store.reload()}
+      >
+        {t("dashboard.retry")}
+      </button>
+    </div>
+  {:else if store.tweaks.length === 0}
+    <EmptyState message={t("tweaks.empty")} />
+  {:else}
+    <div>
+      <button
+        type="button"
+        class="btn-outline px-2.5! py-1! text-xs!"
+        disabled={store.busy !== null}
+        onclick={() => store.reload()}
+      >
+        {t("tweaks.refresh")}
+      </button>
+    </div>
+
+    <ul class="flex flex-col gap-2">
+      {#each store.tweaks as tweak (tweak.id)}
+        {@const recommendation = store.recommendationOf(tweak)}
+        <li class="flex flex-wrap items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-4">
+          <div class="min-w-0 flex-1">
+            <p class="flex flex-wrap items-center gap-2">
+              <span class="font-medium">{tweak.name}</span>
+              <span class="rounded-md bg-surface-2 px-1.5 py-0.5 text-[0.65rem] text-ink-faint">
+                {restartLabel[tweak.restart]}
+              </span>
+            </p>
+            <p class="mt-1 select-text break-all font-mono text-[0.7rem] text-ink-faint">
+              {tweak.path}
+            </p>
+            <p class="mt-1.5 text-xs text-ink-muted">
+              {t("tweaks.now")}: <span class="font-mono">{valueText(tweak.current)}</span>
+              · {t("tweaks.after")}: <span class="font-mono">{tweak.target}</span>
+            </p>
+            {#if tweak.error}
+              <p class="mt-1.5 text-xs leading-relaxed text-risk-warning">{tweak.error}</p>
+            {/if}
+            <details class="group mt-1.5">
+              <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
+                {t("tweaks.why")}
+              </summary>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">{tweak.reason}</p>
+              <!-- No opener plugin: the link is selectable text, never a navigation. -->
+              <p class="mt-1 text-xs text-ink-faint">
+                {t("tweaks.source")}
+                <span class="select-text break-all font-mono">{tweak.sourceUrl}</span>
+              </p>
+            </details>
+          </div>
+
+          <div class="flex shrink-0 flex-col items-end gap-1.5">
+            <span class="text-[0.7rem] text-ink-faint">
+              {tweak.undoability === "reversibleAfterRestart"
+                ? t("tweaks.reversibleAfterRestart")
+                : t("tweaks.reversible")}
+            </span>
+            {#if tweak.applied}
+              <button
+                type="button"
+                class="btn-secondary px-3! py-1! text-xs!"
+                disabled={store.busy !== null}
+                onclick={() => store.undo(tweak, t("tweaks.undone"))}
+              >
+                {store.busy === tweak.id ? t("tweaks.working") : t("tweaks.undo")}
+              </button>
+            {:else if recommendation}
+              <button
+                type="button"
+                class="btn-primary px-3! py-1! text-xs!"
+                disabled={store.busy !== null}
+                onclick={() => (pending = tweak)}
+              >
+                {store.busy === tweak.id ? t("tweaks.working") : t("tweaks.apply")}
+              </button>
+            {:else if !tweak.error}
+              <span class="text-[0.7rem] text-ink-muted">{t("tweaks.done")}</span>
+            {/if}
+          </div>
+        </li>
+      {/each}
+    </ul>
+
+    {#if store.lastReport}
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
+        {store.lastReport}
+      </p>
+    {/if}
+  {/if}
+</div>
+
+<ConfirmDialog
+  open={pending !== null}
+  title={t("tweaks.confirmTitle", { name: pending?.name ?? "" })}
+  message={t("tweaks.confirmBody", {
+    from: valueText(pending?.current ?? null),
+    to: String(pending?.target ?? ""),
+  })}
+  note={t("tweaks.confirmNote")}
+  detail={pending?.path}
+  confirmLabel={t("tweaks.confirmAction")}
+  onconfirm={confirmApply}
+  oncancel={() => (pending = null)}
+/>

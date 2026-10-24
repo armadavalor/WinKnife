@@ -347,6 +347,11 @@ pub fn manage_state<R: tauri::Runtime>(
             &startup_service,
         ))),
         startup_service,
+        // Like the startup manager, it holds the real registry, which refuses
+        // to write until `run()` has armed it.
+        tweaks: Arc::new(modules::tweaks::TweakService::new(Arc::new(
+            core::platform::SystemRegistry,
+        ))),
         rules_dir,
     });
     // `Arc<Database>`, as every
@@ -383,6 +388,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::reveal_in_explorer,
         commands::startup_scan,
         commands::startup_enable,
+        commands::tweaks_scan,
+        commands::tweaks_undo,
         commands::get_recommendations,
         commands::scan_summary,
         commands::execute,

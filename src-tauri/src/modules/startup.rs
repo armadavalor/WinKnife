@@ -1785,6 +1785,9 @@ mod tests {
             fn set_value(&self, _: Hive, _: &str, _: &RegValue) -> Result<()> {
                 Ok(())
             }
+            fn delete_value(&self, _: Hive, _: &str, _: &str) -> Result<()> {
+                Ok(())
+            }
         }
 
         let dir = tempfile::tempdir().expect("tempdir");
