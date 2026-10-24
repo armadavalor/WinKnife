@@ -2340,7 +2340,7 @@ clicked, and the page shows the exact command.
 **Decisions.** The write exception covers only the hosts file and our own
 same-folder `hosts.winknife.tmp` (`HostsFence`, canonical path equality
 from `%SystemRoot%`, checked before every write; any other path is refused
-and tested). The write is a temp + `MoveFileEx` swap with read-back
+and tested). The write is a temp + `ReplaceFileW` swap with read-back
 verification; the helper refuses empty or unvalidated bytes (hash check)
 and reports a file changed since the backup instead of overwriting it.
 Backups are never deleted automatically. A declined UAC prompt is a plain
@@ -2350,3 +2350,19 @@ Backups are never deleted automatically. A declined UAC prompt is a plain
 (refuses other paths, including `C:\Windows\…` siblings), save/restore/no-change
 and changed-underneath paths against a fake writer in a tempdir; the real
 hosts file is never touched by tests.
+
+## 2026-10-24 — C9: provenance and verification
+
+**Built.** README "Verify this download" (official URLs, `Get-FileHash`,
+`gh attestation verify`), `docs/ANTIVIRUS-FALSE-POSITIVE.md`, an About block
+in Settings ("What WinKnife never does", official URL as text, no network
+call), and `actions/attest-build-provenance` in `release.yml` for the
+installer, ZIP and `SHA256SUMS.txt`.
+
+- `SHA256SUMS.txt` was already produced by `scripts/package-release.ps1`; no
+  change needed there.
+- Release workflow gained `id-token: write` and `attestations: write`. Triggers
+  untouched; no tag pushed.
+- README says winget is submitted but maybe not live and that Scoop does not
+  exist, rather than listing install commands that fail.
+- Deferred: the attestation step is untested until the next tag build.
