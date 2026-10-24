@@ -378,6 +378,47 @@ export interface DuplicateScanResult {
   /** One per copy. Never `safe`. */
   recommendations: Recommendation[];
   wastedBytes: number;
+  /** Folders whose whole file set is equal, largest waste first. */
+  folderGroups: FolderGroup[];
+}
+
+/** Which folder of a group stays. Mirrors `folders::KeepRule`. */
+export type KeepRule =
+  | { kind: "oldest" }
+  | { kind: "newest" }
+  | { kind: "preferredFolder"; folder: string };
+
+/** One folder in a duplicate-folder group. */
+export interface FolderMember {
+  path: string;
+  created: string | null;
+  modified: string | null;
+  keeper: boolean;
+  /** Under a protected path: never selectable. */
+  protected: boolean;
+  reason: string;
+  findingIds: string[];
+  recommendationIds: string[];
+}
+
+/** Folders with equal file sets. */
+export interface FolderGroup {
+  /** Content-based; stable across scans, used by "Ignore this group". */
+  id: string;
+  sizeBytes: number;
+  fileCount: number;
+  wastedBytes: number;
+  keepRule: KeepRule;
+  /** Keeper first. */
+  members: FolderMember[];
+}
+
+/** What `set_folder_keep_rule` hands back. */
+export interface FolderGroupUpdate {
+  group: FolderGroup;
+  /** Recommendation ids the group had before; gone now. */
+  replaced: string[];
+  recommendations: Recommendation[];
 }
 
 /** Metadata every duplicate finding carries. */

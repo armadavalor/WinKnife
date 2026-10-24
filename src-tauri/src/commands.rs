@@ -24,6 +24,7 @@
 //! a click that needed it used to wait there too and the window went
 //! "Not Responding".
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -50,7 +51,7 @@ use crate::core::settings;
 use crate::core::state::{CancelRegistry, ScanResult, ScanStore};
 use crate::core::types::ExecReport;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
-use crate::modules::duplicates::{self, DuplicateProgress, DuplicateScan};
+use crate::modules::duplicates::{self, folders, DuplicateProgress, DuplicateScan};
 use crate::modules::empty_folders;
 use crate::modules::hosts::{HostsBackup, HostsDocument, HostsPreview, HostsService, SaveOutcome};
 use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
@@ -485,6 +486,9 @@ pub struct DuplicateScanResult {
     pub recommendations: Vec<crate::core::types::Recommendation>,
     /// Bytes the redundant copies occupy.
     pub wasted_bytes: u64,
+    /// Groups of identical folders, keeper first in each.
+    #[serde(default)]
+    pub folder_groups: Vec<folders::FolderGroup>,
 }
 
 /// Run a duplicate scan over the configured roots.
@@ -564,8 +568,27 @@ pub async fn start_duplicate_scan<R: Runtime>(
             scan
         };
 
+        let ignored = db.with(folders::ignored_groups)?;
+        let folder_scan = if scan.cancelled {
+            folders::FolderScan::default()
+        } else {
+            folders::scan_folders(
+                &duplicates::DuplicateContext {
+                    roots: &roots,
+                    protected: services.brain.protected_paths(),
+                    settings: &stored,
+                    cancel: &cancel,
+                },
+                &ignored,
+                Some(&emit),
+            )
+        };
+        let (folder_groups, folder_recs) =
+            folders::analyze(&folder_scan.findings, &services.brain, &HashMap::new());
+
         let recommendations = duplicates::analyze(&scan, &services.brain);
         tracing::info!(
+            folder_groups = folder_groups.len(),
             scan = %scan_id,
             sets = scan.sets.len(),
             hashed = scan.files_hashed,
@@ -578,10 +601,10 @@ pub async fn start_duplicate_scan<R: Runtime>(
         store.insert(ScanResult {
             scan_id,
             module: "duplicates".to_owned(),
-            findings: scan.findings.clone(),
-            recommendations: recommendations.clone(),
+            findings: [scan.findings.clone(), folder_scan.findings].concat(),
+            recommendations: [recommendations.clone(), folder_recs.clone()].concat(),
             skipped_rules: scan.skipped_roots.clone(),
-            cancelled: scan.cancelled,
+            cancelled: scan.cancelled || folder_scan.cancelled,
         });
 
         remember(
@@ -607,10 +630,91 @@ pub async fn start_duplicate_scan<R: Runtime>(
             wasted_bytes: scan.wasted_bytes(),
             scan_id,
             scan,
-            recommendations,
+            recommendations: [recommendations, folder_recs].concat(),
+            folder_groups,
         })
     })
     .await
+}
+
+/// A folder group re-analysed under a new keep rule.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderGroupUpdate {
+    /// The group, keeper first.
+    pub group: folders::FolderGroup,
+    /// Ids of the recommendations this group had before; they are gone now.
+    pub replaced: Vec<Uuid>,
+    /// The group's recommendations under the new rule.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+}
+
+/// Change which copy a folder group keeps. Re-analyses only that group.
+///
+/// # Errors
+/// Returns an error when the scan is no longer retained or the group is not in it.
+#[tauri::command]
+pub fn set_folder_keep_rule(
+    scan_id: Uuid,
+    group_id: String,
+    rule: folders::KeepRule,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+) -> Result<FolderGroupUpdate, ApiError> {
+    guarded("set_folder_keep_rule", || {
+        let mut result = store.get(scan_id)?;
+        let in_group = |finding: &crate::core::types::Finding| {
+            finding.meta.get("folderGroupId").and_then(|id| id.as_str()) == Some(&group_id)
+        };
+        let group_findings: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| in_group(f))
+            .cloned()
+            .collect();
+        let finding_ids: HashSet<Uuid> = group_findings.iter().map(|f| f.id).collect();
+
+        let rules = HashMap::from([(group_id.clone(), rule)]);
+        let (groups, recommendations) = folders::analyze(&group_findings, &services.brain, &rules);
+        let group = groups.into_iter().next().ok_or_else(|| {
+            CoreError::UnknownScan(format!("{scan_id} has no folder group {group_id}"))
+        })?;
+
+        let (replaced, kept): (Vec<_>, Vec<_>) = result
+            .recommendations
+            .into_iter()
+            .partition(|rec| rec.finding_ids.iter().any(|id| finding_ids.contains(id)));
+        result.recommendations = [kept, recommendations.clone()].concat();
+        store.replace(result)?;
+
+        Ok(FolderGroupUpdate {
+            group,
+            replaced: replaced.into_iter().map(|rec| rec.id).collect(),
+            recommendations,
+        })
+    })
+}
+
+/// Leave a folder group out of every later scan.
+///
+/// # Errors
+/// Returns an error if the setting could not be written.
+#[tauri::command]
+pub fn ignore_folder_group(id: String, db: State<'_, Arc<Database>>) -> Result<(), ApiError> {
+    guarded("ignore_folder_group", || {
+        Ok(db.with(|conn| folders::ignore_group(conn, &id))?)
+    })
+}
+
+/// Bring every ignored folder group back.
+///
+/// # Errors
+/// Returns an error if the setting could not be cleared.
+#[tauri::command]
+pub fn clear_ignored_folder_groups(db: State<'_, Arc<Database>>) -> Result<(), ApiError> {
+    guarded("clear_ignored_folder_groups", || {
+        Ok(db.with(folders::clear_ignored)?)
+    })
 }
 
 /// What an empty-folder scan hands the UI.

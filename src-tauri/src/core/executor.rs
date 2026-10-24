@@ -2260,6 +2260,72 @@ mod tests {
         assert_eq!(report.succeeded(), 0);
     }
 
+    /// **Two recommendations naming each other as keeper.** The folder view and
+    /// the file-set view can disagree on which copy to keep; approving both must
+    /// still leave one copy, because units run in order and the second one's
+    /// keeper is gone by then.
+    #[test]
+    fn copies_that_name_each_other_as_keeper_never_all_go() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+
+        let shared = vec![b'x'; 64 * 1024];
+        write(&h.work, "a.bin", &shared);
+        write(&h.work, "b.bin", &shared);
+
+        let (scan, recommendations) = duplicate_scan(&h.work, &brain);
+        let path_of = |id: Uuid| {
+            scan.findings
+                .iter()
+                .find(|finding| finding.id == id)
+                .map(|finding| finding.path.clone())
+                .expect("every rec points at a finding")
+        };
+        let mover = recommendations
+            .iter()
+            .find(|rec| rec.action == Action::Quarantine)
+            .expect("one copy is offered");
+        let mover_path = path_of(mover.finding_ids[0]);
+        let crossed: Vec<Recommendation> = recommendations
+            .iter()
+            .map(|rec| match &rec.justification {
+                Justification::DuplicateOf {
+                    content_hash,
+                    keeper: true,
+                    ..
+                } => Recommendation {
+                    action: Action::Quarantine,
+                    justification: Justification::DuplicateOf {
+                        content_hash: content_hash.clone(),
+                        keeper: false,
+                        keeper_path: Some(mover_path.clone()),
+                    },
+                    ..rec.clone()
+                },
+                _ => rec.clone(),
+            })
+            .collect();
+
+        let approved = approve_the_quarantines(&crossed);
+        assert_eq!(approved.len(), 2, "both copies are approved");
+        let units = plan(&approved, &crossed, &scan.findings);
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        assert_eq!(report.succeeded(), 1, "exactly one copy moves");
+        let survivors = crossed
+            .iter()
+            .filter(|rec| path_of(rec.finding_ids[0]).exists())
+            .count();
+        assert_eq!(survivors, 1, "one copy always stays");
+    }
+
     /// A probe whose answer can be changed between the scan and the execute, so
     /// "the user opened Chrome while the review screen was up" is expressible.
     #[derive(Debug, Default)]

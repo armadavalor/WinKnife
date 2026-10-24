@@ -57,6 +57,8 @@ use crate::core::types::{
     Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
 };
 
+pub mod folders;
+
 /// Files below this are not worth a person's attention (module spec 03).
 pub const DEFAULT_MIN_SIZE_BYTES: u64 = 1024 * 1024;
 

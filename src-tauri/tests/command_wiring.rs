@@ -116,6 +116,20 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "start_duplicate_scan",
             args: json!({ "roots": [&root] }),
         },
+        // Unknown scan id: refused after both states resolve.
+        Probe {
+            command: "set_folder_keep_rule",
+            args: json!({ "scanId": nil, "groupId": "g", "rule": { "kind": "oldest" } }),
+        },
+        // Writes to the tempdir database only.
+        Probe {
+            command: "ignore_folder_group",
+            args: json!({ "id": "__wiring_probe__" }),
+        },
+        Probe {
+            command: "clear_ignored_folder_groups",
+            args: json!({}),
+        },
         // An explicit root, or the command scans the developer's profile.
         Probe {
             command: "start_empty_folder_scan",
