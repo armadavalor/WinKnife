@@ -2287,3 +2287,20 @@ is cut as before).
 
 **Deferred.** Not run locally (a local run really cleans and needs a QA-identifier
 build); the CI e2e job is the verifier. A18 still needs a real second volume.
+
+## 2026-10-24 — Hide tools from the sidebar (issue #8)
+
+**Built.** A "Tools in the sidebar" section in Settings lists every module with
+a checkbox; unticking one takes it out of the sidebar.
+
+- **Pure helpers** (`src/lib/hiddenModules.ts` + test): parse the stored list
+  (anything but a JSON array of strings means none, duplicates dropped), toggle
+  an id immutably, filter modules keeping registry order.
+- **Store** (`stores/hiddenModules.svelte.ts`): localStorage key
+  `winknife.hiddenModules`, read on mount like the theme and glow; blocked
+  storage keeps the choice for the session only.
+- **Decision.** Hiding is visual only. The dashboard still lists every tool and
+  the route and `--module <id>` still open it, so nothing becomes unreachable
+  and no module settings or Rust state change.
+- **Edge.** With every tool hidden the sidebar says so and points to Settings
+  instead of "No tools are available yet."

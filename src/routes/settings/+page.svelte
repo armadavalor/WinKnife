@@ -12,7 +12,9 @@
 
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes } from "$lib/format";
-  import { t, type TranslationKey } from "$lib/i18n";
+  import { t, tModuleName, type TranslationKey } from "$lib/i18n";
+  import { hiddenModules } from "$lib/stores/hiddenModules.svelte";
+  import { moduleStore } from "$lib/stores/modules.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
   import { GLOW_VARIANTS } from "$lib/glow";
   import { glow } from "$lib/stores/glow.svelte";
@@ -147,6 +149,32 @@
         {/each}
       </div>
     </div>
+  </section>
+
+  <section class="flex flex-col gap-4 rounded-xl border border-surface-2 bg-surface-1 p-6">
+    <div>
+      <h2 class="text-sm font-medium">{t("settings.sidebarTitle")}</h2>
+      <p class="mt-1 text-xs leading-relaxed text-ink-muted">
+        {t("settings.sidebarSubtitle")}
+      </p>
+    </div>
+
+    <ul class="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+      {#each moduleStore.modules as module (module.id)}
+        <li class="flex items-center gap-3">
+          <input
+            id="sidebar-{module.id}"
+            type="checkbox"
+            class="size-4 shrink-0 accent-[var(--color-accent)]"
+            checked={!hiddenModules.isHidden(module.id)}
+            onchange={() => hiddenModules.toggle(module.id)}
+          />
+          <label for="sidebar-{module.id}" class="text-sm text-ink">
+            {tModuleName(module.id, module.name)}
+          </label>
+        </li>
+      {/each}
+    </ul>
   </section>
 
   {#if store.error}

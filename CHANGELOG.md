@@ -6,6 +6,10 @@ live in [docs/CHANGELOG-DEV.md](docs/CHANGELOG-DEV.md).
 
 ## [Unreleased]
 
+### Added
+- **Settings** — untick a tool to take it out of the sidebar; it stays on the
+  dashboard and still opens from there.
+
 ## [0.3.0] — 2026-10-19
 
 ### Added

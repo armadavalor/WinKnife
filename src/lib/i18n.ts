@@ -513,6 +513,10 @@ const en = {
   "settings.glow.aurora": "Aurora",
   "settings.glow.waves": "Waves",
   "settings.glow.spotlight": "Spotlight",
+  "nav.allToolsHidden": "Every tool is hidden. Show them again in Settings.",
+  "settings.sidebarTitle": "Tools in the sidebar",
+  "settings.sidebarSubtitle":
+    "Untick a tool you do not use to take it out of the sidebar. It stays on the dashboard and still opens from there. Saved on this machine.",
   // --- copy audit (WP-C) ---
   "dashboard.status.default": "Ready when you are.",
   "dashboard.status.file-unlocker": "Drop a file here to see what is holding it.",
@@ -719,6 +723,10 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "settings.glow.aurora": "Kutup ışığı",
   "settings.glow.waves": "Dalgalar",
   "settings.glow.spotlight": "Spot ışığı",
+  "nav.allToolsHidden": "Tüm araçlar gizli. Ayarlar'dan yeniden gösterebilirsin.",
+  "settings.sidebarTitle": "Kenar çubuğundaki araçlar",
+  "settings.sidebarSubtitle":
+    "Kullanmadığın bir aracın işaretini kaldırırsan kenar çubuğundan çıkar. Panoda kalır ve oradan yine açılır. Bu makineye kaydedilir.",
   // --- copy audit (WP-C) ---
   "dashboard.status.default": "Hazır olduğunuzda başlayabilirsiniz.",
   "dashboard.action.cleaner": "Gereksizleri tara",
