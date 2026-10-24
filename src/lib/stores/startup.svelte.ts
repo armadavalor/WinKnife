@@ -43,6 +43,11 @@ class StartupStore {
   /** Recommendation per entry id, built by Rust at scan time. */
   private byEntry = new Map<string, Recommendation>();
 
+  /** The rating and reason Rust gave `entry`, or `null` when it gave none. */
+  ratingOf(entry: StartupEntry): Recommendation | null {
+    return this.byEntry.get(entry.id) ?? null;
+  }
+
   /** How many entries currently run. */
   get enabledCount(): number {
     return this.entries.filter((entry) => entry.enabled).length;

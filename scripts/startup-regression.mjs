@@ -42,6 +42,8 @@ assert.equal(mutations.length, 0, 'No mutation can start while enumeration is pe
 scans[0].resolve(result('initial'));
 await Promise.all(initial);
 assert.equal(store.status, 'ready');
+assert.equal(store.ratingOf(entry)?.id, 'recommendation', 'The page shows the rating Rust gave the entry');
+assert.equal(store.ratingOf({ ...entry, id: 'other' }), null, 'An entry Rust did not rate has no rating');
 
 for (const action of ['enable', 'disable']) {
   const scanCount = scans.length, changeCount = mutations.length;
@@ -76,5 +78,5 @@ const retry = store.load();
 scans.at(-1).resolve(result('retry'));
 await retry;
 assert.equal(store.status, 'ready', 'A failed refresh must not leave the store locked');
-console.log('PASS: mount/refresh coalescing, enable/disable races, duplicate mutations, re-enable warnings, failure recovery');
+console.log('PASS: rating per entry, mount/refresh coalescing, enable/disable races, duplicate mutations, re-enable warnings, failure recovery');
 delete globalThis.__startupApi;

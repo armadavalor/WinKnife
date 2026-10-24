@@ -2304,3 +2304,23 @@ a checkbox; unticking one takes it out of the sidebar.
   and no module settings or Rust state change.
 - **Edge.** With every tool hidden the sidebar says so and points to Settings
   instead of "No tools are available yet."
+
+## 2026-10-24 — Startup page shows the rating and its reason (#4)
+
+**Built.** Every entry Rust offers to turn off now shows the rating it was
+given (green "Safe to turn off", yellow "Review before turning off") in
+place of the grey known-app label, and a "Why this rating?" fold with the
+recommendation's `reason`. Entries without a rating (already off, owned by
+Windows) keep the known-app label. `StartupStore.ratingOf(entry)` exposes the
+recommendation the store already paired with each entry.
+
+**Decisions.** The protected-program reason no longer quotes the cleaner's
+gate text ("not cleanable … use the app's own uninstaller"): it names the
+place from the protected list's own entry (`ProtectedPaths::reason_for`,
+cut before its advice), and keeps the gate's words only for a refusal the
+list did not make. Closes DECISIONS-NEEDED 2026-10-03 notes (2) and (3).
+
+**Tests.** `startup-regression.mjs` asserts the store hands back the
+rating per entry and `null` for an unrated one; the Rust test for a
+protected program asserts the new wording and that none of the cleaner's
+words leak in.
