@@ -33,6 +33,7 @@
     rocket: "rocket",
     panels: "app-window",
     restore: "history",
+    hosts: "globe",
   };
 </script>
 

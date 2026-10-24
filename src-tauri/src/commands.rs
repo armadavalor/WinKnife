@@ -53,6 +53,7 @@ use crate::core::types::ExecReport;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, folders, DuplicateProgress, DuplicateScan};
 use crate::modules::empty_folders;
+use crate::modules::hosts::{HostsBackup, HostsDocument, HostsPreview, HostsService, SaveOutcome};
 use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
 use crate::modules::legacy_panels::{LegacyPanelsService, PanelInfo};
 use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
@@ -1990,6 +1991,113 @@ pub fn restore_point_open_settings(
     guarded("restore_point_open_settings", || {
         Ok(service.open_protection_settings()?)
     })
+}
+
+/* -------------------------------------------------------------------------
+ * Hosts file
+ * ---------------------------------------------------------------------- */
+
+/// The hosts file, decoded and parsed. Read-only (K-019).
+///
+/// # Errors
+/// Returns an error when the file exists but cannot be read or decoded.
+#[tauri::command(async)]
+pub fn hosts_read(service: State<'_, Arc<HostsService>>) -> Result<HostsDocument, ApiError> {
+    guarded("hosts_read", || Ok(service.read()?))
+}
+
+/// Parse, validate and diff an edited text against the file. Writes nothing.
+///
+/// # Errors
+/// Returns an error when the current file cannot be read.
+#[tauri::command(async)]
+pub fn hosts_preview(
+    service: State<'_, Arc<HostsService>>,
+    text: String,
+) -> Result<HostsPreview, ApiError> {
+    guarded("hosts_preview", || Ok(service.preview(&text)?))
+}
+
+/// Back up the hosts file, then write `text` through the elevated helper. Shows
+/// a UAC prompt and waits for it, off the UI thread.
+///
+/// # Errors
+/// Returns an error for invalid content, a save already running, or a backup
+/// that could not be taken; every helper answer is an `Ok` outcome.
+#[tauri::command]
+pub async fn hosts_save(
+    service: State<'_, Arc<HostsService>>,
+    text: String,
+) -> Result<SaveOutcome, ApiError> {
+    guarded_async("hosts_save", async {
+        let service = Arc::clone(&service);
+        tauri::async_runtime::spawn_blocking(move || service.save(&text))
+            .await
+            .map_err(|err| CoreError::Hosts(format!("the request did not finish: {err}")))?
+            .map_err(ApiError::from)
+    })
+    .await
+}
+
+/// WinKnife's hosts backups, newest first.
+///
+/// # Errors
+/// Returns an error when the backup folder cannot be listed.
+#[tauri::command(async)]
+pub fn hosts_backups(service: State<'_, Arc<HostsService>>) -> Result<Vec<HostsBackup>, ApiError> {
+    guarded("hosts_backups", || Ok(service.backups()?))
+}
+
+/// Write one backup back over the hosts file, taking a backup of the current
+/// file first. Same UAC flow as [`hosts_save`].
+///
+/// # Errors
+/// Returns an error for an unknown backup name or a save already running.
+#[tauri::command]
+pub async fn hosts_restore(
+    service: State<'_, Arc<HostsService>>,
+    name: String,
+) -> Result<SaveOutcome, ApiError> {
+    guarded_async("hosts_restore", async {
+        let service = Arc::clone(&service);
+        tauri::async_runtime::spawn_blocking(move || service.restore(&name))
+            .await
+            .map_err(|err| CoreError::Hosts(format!("the request did not finish: {err}")))?
+            .map_err(ApiError::from)
+    })
+    .await
+}
+
+/// Show one backup in Explorer.
+///
+/// # Errors
+/// Returns an error for a name that is not one of WinKnife's backups.
+#[tauri::command]
+pub fn hosts_reveal_backup(
+    service: State<'_, Arc<HostsService>>,
+    name: String,
+) -> Result<(), ApiError> {
+    guarded("hosts_reveal_backup", || {
+        let path = service.backup_path(&name)?;
+        Ok(crate::core::platform::reveal_in_explorer(&path)?)
+    })
+}
+
+/// Run `ipconfig /flushdns`. Only ever on a button click.
+///
+/// # Errors
+/// Returns an error when `ipconfig` could not run or reported a failure.
+#[tauri::command]
+pub async fn hosts_flush_dns() -> Result<String, ApiError> {
+    guarded_async("hosts_flush_dns", async {
+        tauri::async_runtime::spawn_blocking(|| {
+            crate::core::platform::flush_dns(&crate::core::platform::SystemEnv)
+        })
+        .await
+        .map_err(|err| CoreError::Hosts(format!("the request did not finish: {err}")))?
+        .map_err(ApiError::from)
+    })
+    .await
 }
 
 /* -------------------------------------------------------------------------

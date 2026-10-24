@@ -168,6 +168,10 @@ pub enum CoreError {
     /// click is refused instead of queued behind the database lock.
     #[error("{} is already running; wait for it to finish", .0.label())]
     Busy(crate::core::busy::Operation),
+
+    /// The hosts file editor (module C4).
+    #[error("hosts file: {0}")]
+    Hosts(String),
 }
 
 impl CoreError {
@@ -205,6 +209,7 @@ impl CoreError {
             Self::UnknownLegacyPanel(_) => "unknown_legacy_panel",
             Self::SchemaTooNew { .. } => "schema_too_new",
             Self::Busy(_) => "busy",
+            Self::Hosts(_) => "hosts",
         }
     }
 }

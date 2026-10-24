@@ -119,7 +119,9 @@ impl RestorePointPlatform for SystemRestorePoints {
                 "this build must never start an elevated helper".to_owned(),
             ));
         }
-        sys::run_helper(description)
+        // The description was sanitised: no quotes, no backslashes, no control
+        // characters, so wrapping it in quotes is the whole escaping job.
+        run_elevated(&format!("{CREATE_RESTORE_POINT_FLAG} \"{description}\""))
     }
 
     fn open_protection_settings(&self) -> Result<()> {
@@ -130,6 +132,16 @@ impl RestorePointPlatform for SystemRestorePoints {
         }
         sys::open_protection_settings()
     }
+}
+
+/// Re-launch this exe through `runas` (the UAC prompt) with `parameters` and
+/// wait up to [`HELPER_TIMEOUT`] for it. Shared by every elevated helper; the
+/// caller checks [`real_os_effects_armed`](super::real_os_effects_armed) first.
+///
+/// # Errors
+/// Returns an error when WinKnife's own exe cannot be located.
+pub(crate) fn run_elevated(parameters: &str) -> Result<HelperRun> {
+    sys::run_elevated(parameters)
 }
 
 /// The elevated helper's whole job: ask Windows for a restore point and say
@@ -209,8 +221,8 @@ impl RestorePointPlatform for FakeRestorePointPlatform {
 #[cfg(windows)]
 mod sys {
     use super::{
-        classify_sequences, failed_exit_code, HelperRun, NewestSequence, CREATE_RESTORE_POINT_FLAG,
-        EXIT_PROTECTION_OFF, HELPER_TIMEOUT, WIN32_CANCELLED, WIN32_SERVICE_DISABLED,
+        classify_sequences, failed_exit_code, HelperRun, NewestSequence, EXIT_PROTECTION_OFF,
+        HELPER_TIMEOUT, WIN32_CANCELLED, WIN32_SERVICE_DISABLED,
     };
     use crate::core::error::{CoreError, Result};
     use windows::core::{w, BSTR, HSTRING, PCWSTR};
@@ -258,13 +270,10 @@ mod sys {
         }
     }
 
-    pub(super) fn run_helper(description: &str) -> Result<HelperRun> {
-        let exe = std::env::current_exe()
-            .map_err(|err| CoreError::RestorePoint(format!("cannot find WinKnife's exe: {err}")))?;
+    pub(super) fn run_elevated(parameters: &str) -> Result<HelperRun> {
+        let exe = std::env::current_exe()?;
         let file = HSTRING::from(exe.as_os_str());
-        // The description was sanitised: no quotes, no backslashes, no control
-        // characters, so wrapping it in quotes is the whole escaping job.
-        let parameters = HSTRING::from(format!("{CREATE_RESTORE_POINT_FLAG} \"{description}\""));
+        let parameters = HSTRING::from(parameters);
         let mut info = SHELLEXECUTEINFOW {
             cbSize: u32::try_from(std::mem::size_of::<SHELLEXECUTEINFOW>()).unwrap_or(u32::MAX),
             fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
@@ -518,7 +527,7 @@ mod sys {
     /// `ERROR_NOT_SUPPORTED`.
     const NOT_SUPPORTED: u32 = 50;
 
-    pub(super) fn run_helper(_description: &str) -> Result<HelperRun> {
+    pub(super) fn run_elevated(_parameters: &str) -> Result<HelperRun> {
         Ok(HelperRun::LaunchFailed(NOT_SUPPORTED))
     }
 

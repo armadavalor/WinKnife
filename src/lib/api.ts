@@ -25,6 +25,10 @@ import type {
   ExecReport,
   FolderGroupUpdate,
   KeepRule,
+  HostsBackup,
+  HostsDocument,
+  HostsPreview,
+  HostsSaveOutcome,
   ModuleManifest,
   MoveWarning,
   PanelInfo,
@@ -385,6 +389,48 @@ export function restorePointCreate(description: string): Promise<CreateOutcome> 
 /** Open Windows' own System Protection dialog. Only on a button click. */
 export function restorePointOpenSettings(): Promise<void> {
   return invoke<void>("restore_point_open_settings");
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — hosts file (K-019)
+ * ---------------------------------------------------------------------- */
+
+/** The hosts file, parsed. Read-only. */
+export function hostsRead(): Promise<HostsDocument> {
+  return invoke<HostsDocument>("hosts_read");
+}
+
+/** Validate `text` and diff it against the file on disk. Writes nothing. */
+export function hostsPreview(text: string): Promise<HostsPreview> {
+  return invoke<HostsPreview>("hosts_preview", { text });
+}
+
+/**
+ * Back up, then write `text` through the elevated helper. Windows shows a UAC
+ * prompt; the promise settles when the helper exits.
+ */
+export function hostsSave(text: string): Promise<HostsSaveOutcome> {
+  return invoke<HostsSaveOutcome>("hosts_save", { text });
+}
+
+/** Backups WinKnife took, newest first. */
+export function hostsBackups(): Promise<HostsBackup[]> {
+  return invoke<HostsBackup[]>("hosts_backups");
+}
+
+/** Write a backup back over the hosts file (backs up the current one first). */
+export function hostsRestore(name: string): Promise<HostsSaveOutcome> {
+  return invoke<HostsSaveOutcome>("hosts_restore", { name });
+}
+
+/** Show a backup in Explorer. */
+export function hostsRevealBackup(name: string): Promise<void> {
+  return invoke<void>("hosts_reveal_backup", { name });
+}
+
+/** Run `ipconfig /flushdns`. Only on a button click; returns its output. */
+export function hostsFlushDns(): Promise<string> {
+  return invoke<string>("hosts_flush_dns");
 }
 
 /* -------------------------------------------------------------------------

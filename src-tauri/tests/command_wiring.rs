@@ -269,6 +269,38 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "restore_point_open_settings",
             args: json!({}),
         },
+        // Read-only: the real hosts file is only read and parsed.
+        Probe {
+            command: "hosts_read",
+            args: json!({}),
+        },
+        Probe {
+            command: "hosts_preview",
+            args: json!({ "text": "127.0.0.1 wiring.probe\n" }),
+        },
+        // Invalid content is refused before any backup, staging or helper.
+        Probe {
+            command: "hosts_save",
+            args: json!({ "text": "not-an-ip wiring.probe\n" }),
+        },
+        Probe {
+            command: "hosts_backups",
+            args: json!({}),
+        },
+        // An unknown backup name is refused before anything is written.
+        Probe {
+            command: "hosts_restore",
+            args: json!({ "name": "__wiring_probe__" }),
+        },
+        Probe {
+            command: "hosts_reveal_backup",
+            args: json!({ "name": "__wiring_probe__" }),
+        },
+        // Refused: real OS effects are not armed in a test process.
+        Probe {
+            command: "hosts_flush_dns",
+            args: json!({}),
+        },
         // Read-only: checks which System32 files exist.
         Probe {
             command: "legacy_panels_list",
