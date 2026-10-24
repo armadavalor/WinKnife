@@ -57,8 +57,8 @@ pub use power::{DryRunPower, PowerAction, PowerController, PowerEvent};
 pub use process::{CachedProcessProbe, ProcessProbe, StubProcessProbe, SystemProcessProbe};
 pub use recycle_bin::{RecycleBin, RecycleBinStats, StubRecycleBin};
 pub use registry::{
-    Hive, MapRegistry, RegValue, Registry, SystemRegistry, REG_TYPE_BINARY, REG_TYPE_EXPAND_SZ,
-    REG_TYPE_SZ,
+    Hive, MapRegistry, RegValue, Registry, SystemRegistry, REG_TYPE_BINARY, REG_TYPE_DWORD,
+    REG_TYPE_EXPAND_SZ, REG_TYPE_SZ,
 };
 pub use restart_manager::{
     close_policy, real_restart_manager, AppKind, CloseOutcome, ClosePolicy, LockInfo,

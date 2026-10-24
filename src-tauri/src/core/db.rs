@@ -48,6 +48,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "quarantine_restore_refused",
         sql: include_str!("../../migrations/004_quarantine_restore_refused.sql"),
     },
+    Migration {
+        version: 5,
+        name: "tweak_undo",
+        sql: include_str!("../../migrations/005_tweak_undo.sql"),
+    },
 ];
 
 /// The schema version the current build expects.
@@ -288,6 +293,7 @@ mod tests {
                 "startup_disabled_link",
                 "treemap_dir",
                 "treemap_scan",
+                "tweak_undo",
             ]
         );
     }
@@ -376,7 +382,10 @@ mod tests {
         )
         .expect("old row");
 
-        assert_eq!(run_migrations(&mut conn).expect("upgrade"), 4);
+        assert_eq!(
+            run_migrations(&mut conn).expect("upgrade"),
+            target_version()
+        );
 
         let quarantine = crate::core::quarantine::Quarantine::with_root(
             std::env::temp_dir().join("winknife-unused"),

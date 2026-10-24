@@ -1,4 +1,4 @@
-//! Hosts editor (C4, K-018): view, edit and restore
+//! Hosts editor (C4, K-019): view, edit and restore
 //! `%SystemRoot%\System32\drivers\etc\hosts`.
 //!
 //! Everything here runs unelevated. It parses and validates the text, shows a

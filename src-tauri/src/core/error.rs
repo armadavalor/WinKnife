@@ -117,6 +117,10 @@ pub enum CoreError {
     #[error("registry error: {0}")]
     Registry(String),
 
+    /// A tweak was refused or could not be applied or undone (K-018).
+    #[error("tweak refused: {0}")]
+    Tweak(String),
+
     /// A registry write was requested from a build that must never change the
     /// machine (any test binary). See `core::platform::guard`.
     #[error("registry write blocked: this build must never modify the real registry")]
@@ -195,6 +199,7 @@ impl CoreError {
             Self::UnknownScan(_) => "unknown_scan",
             Self::Registry(_) => "registry",
             Self::RegistryBlocked => "registry_blocked",
+            Self::Tweak(_) => "tweak",
             Self::TaskScheduler(_) => "task_scheduler",
             Self::TaskSchedulerBlocked => "task_scheduler_blocked",
             Self::UnknownStartupEntry(_) => "unknown_startup_entry",

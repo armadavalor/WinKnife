@@ -2325,7 +2325,40 @@ rating per entry and `null` for an unrated one; the Rust test for a
 protected program asserts the new wording and that none of the cleaner's
 words leak in.
 
-## 2026-10-24 — Hosts file editor (C4, K-018)
+## 2026-10-24 — Reversible tweak engine (C1)
+
+**Built.** A `tweaks` module with a short in-code catalog of three per-user
+Explorer settings (show file extensions, show hidden files, open Explorer to
+This PC). Applying is a new executor action, `Action::ApplyTweak`. Before it
+writes, it records the real prior value, or "absent", in the new
+`tweak_undo` table (migration 005). After writing it reads the value back,
+and a mismatch rolls the write back. The Tweaks page shows each setting's
+registry path, the value now, the value after, whether a restart is needed
+and the documented source, all before anything changes. Apply goes through a
+confirm dialog; applied settings get an Undo button (`tweaks_undo`).
+
+**Decisions.** K-018: HKCU only. The catalog sits behind an in-code fence
+that refuses Windows Update, search index, Start menu and Defender keys, and
+no "not undoable" tweak ships. Undo puts the recorded value back only while
+the live value is still the one we wrote. If the prior value was "absent",
+undo deletes only the value we wrote. The executor re-checks the live value
+before writing, as it does for every other action.
+
+**Tests.** Rust unit tests cover these cases:
+- apply then undo restores the original bytes, and an absent value is absent again
+- the fence refuses without writing
+- a changed or already-set value is refused
+- a non-number value is left alone
+- undo is refused after an outside change
+- a failed write leaves no undo record
+- a write that does not read back keeps the old value
+- re-applying supersedes the older record
+
+**Deferred.** No store regression script yet, because the store mirrors the
+startup one. The module keeps the generic "settings" icon. C2, C7 and C10
+get hook notes only, in `docs/phases/PHASE-6-tweaks.md`.
+
+## 2026-10-24 — Hosts file editor (C4, K-019)
 
 **Built.** A `hosts` sidebar module. It parses `%SystemRoot%\System32\drivers\etc\hosts`
 into entries, disabled entries, comments and invalid lines (flagged with

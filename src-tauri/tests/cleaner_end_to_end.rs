@@ -23,7 +23,9 @@ use std::time::{Duration, SystemTime};
 use chrono::Utc;
 use winknife_lib::core::brain::{rules, Brain, ProtectedPaths};
 use winknife_lib::core::db;
-use winknife_lib::core::executor::{self, ExecEnvironment, ExecOptions, NoStartupControl};
+use winknife_lib::core::executor::{
+    self, ExecEnvironment, ExecOptions, NoStartupControl, NoTweakControl,
+};
 use winknife_lib::core::platform::{MapEnv, RecycleBin, StubRecycleBin, SystemLockProbe};
 use winknife_lib::core::quarantine::{Quarantine, RetentionPolicy};
 use winknife_lib::core::scanner::CancellationToken;
@@ -246,6 +248,7 @@ fn scan_clean_and_restore_round_trips_byte_identically() {
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
+            tweaks: &NoTweakControl,
         },
         &ExecOptions::default(),
         None,
@@ -363,6 +366,7 @@ fn a_protected_path_lands_red_and_survives_an_approved_clean() {
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
+            tweaks: &NoTweakControl,
         },
         &ExecOptions::default(),
         None,
@@ -421,6 +425,7 @@ fn a_locked_file_is_skipped_with_a_per_item_report() {
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
+            tweaks: &NoTweakControl,
         },
         &ExecOptions::default(),
         None,
@@ -515,6 +520,7 @@ fn emptying_the_recycle_bin_needs_its_own_confirmation() {
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
+            tweaks: &NoTweakControl,
         },
         // The user selected the item but never answered the recycle-bin
         // question, which the dialog asks separately.
@@ -566,6 +572,7 @@ fn emptying_the_recycle_bin_bypasses_quarantine() {
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
+            tweaks: &NoTweakControl,
         },
         &ExecOptions {
             confirm_empty_recycle_bin: true,
@@ -621,6 +628,7 @@ fn restoring_over_a_recreated_file_never_overwrites_it() {
             brain: &brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
+            tweaks: &NoTweakControl,
         },
         &ExecOptions::default(),
         None,

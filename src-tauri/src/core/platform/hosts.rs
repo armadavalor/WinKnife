@@ -1,4 +1,4 @@
-//! The one write WinKnife makes under `C:\Windows`: the hosts file (K-018).
+//! The one write WinKnife makes under `C:\Windows`: the hosts file (K-019).
 //!
 //! The app (unelevated) never writes the hosts file itself. It stages the new
 //! content in app data and re-launches its own exe elevated with

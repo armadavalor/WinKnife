@@ -64,6 +64,9 @@ pub const REG_TYPE_SZ: u32 = 1;
 pub const REG_TYPE_EXPAND_SZ: u32 = 2;
 /// `REG_BINARY`: raw bytes, which is what `StartupApproved` uses.
 pub const REG_TYPE_BINARY: u32 = 3;
+/// `REG_DWORD`: a little-endian 32-bit number, which is what Explorer's
+/// settings use.
+pub const REG_TYPE_DWORD: u32 = 4;
 
 /// One registry value, kept in the exact form the registry holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +103,24 @@ impl RegValue {
             kind: REG_TYPE_BINARY,
             bytes: bytes.into(),
         }
+    }
+
+    /// A `REG_DWORD` value.
+    pub fn dword(name: impl Into<String>, number: u32) -> Self {
+        Self {
+            name: name.into(),
+            kind: REG_TYPE_DWORD,
+            bytes: number.to_le_bytes().to_vec(),
+        }
+    }
+
+    /// The value as a number, when it is a well-formed `REG_DWORD`.
+    pub fn as_dword(&self) -> Option<u32> {
+        if self.kind != REG_TYPE_DWORD {
+            return None;
+        }
+        let bytes: [u8; 4] = self.bytes.as_slice().try_into().ok()?;
+        Some(u32::from_le_bytes(bytes))
     }
 
     /// The value as text, when it is one of the string types.
@@ -156,6 +177,16 @@ pub trait Registry: Send + Sync {
     /// Returns an error when the key cannot be created or the write is refused
     /// (writing under `HKLM` needs elevation).
     fn set_value(&self, hive: Hive, subkey: &str, value: &RegValue) -> Result<()>;
+
+    /// Remove one value. A value or key that is already absent is not an error:
+    /// the caller wanted it gone, and it is.
+    ///
+    /// Only the tweak engine's undo calls this, and only to put back a value
+    /// that did not exist before WinKnife wrote it (K-018).
+    ///
+    /// # Errors
+    /// Returns an error when the key exists but the value cannot be removed.
+    fn delete_value(&self, hive: Hive, subkey: &str, name: &str) -> Result<()>;
 }
 
 /* -------------------------------------------------------------------------
@@ -265,6 +296,21 @@ impl Registry for MapRegistry {
             .push((hive, normalise(subkey), value.clone()));
         Ok(())
     }
+
+    fn delete_value(&self, hive: Hive, subkey: &str, name: &str) -> Result<()> {
+        if let Some(message) = self
+            .refuse_writes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        {
+            return Err(CoreError::Registry(message));
+        }
+        if let Some(values) = self.lock_keys().get_mut(&(hive, normalise(subkey))) {
+            values.retain(|existing| !existing.name.eq_ignore_ascii_case(name));
+        }
+        Ok(())
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -287,9 +333,9 @@ mod sys {
     use windows::core::{PCWSTR, PWSTR};
     use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS};
     use windows::Win32::System::Registry::{
-        RegCloseKey, RegCreateKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW,
-        RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE,
-        REG_OPTION_NON_VOLATILE, REG_VALUE_TYPE,
+        RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegEnumValueW, RegOpenKeyExW,
+        RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ,
+        KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_VALUE_TYPE,
     };
 
     /// Longest value name Windows allows, plus the terminator.
@@ -543,6 +589,45 @@ mod sys {
         }
         Ok(())
     }
+
+    /// Remove one value; an absent key or value is success.
+    pub(super) fn delete_value(hive: Hive, subkey: &str, name: &str) -> Result<()> {
+        let path = wide(subkey);
+        let mut handle = HKEY::default();
+        // SAFETY: `path` is NUL-terminated and outlives the call; `handle` is a
+        // valid out-pointer.
+        let status = unsafe {
+            RegOpenKeyExW(
+                root(hive),
+                PCWSTR(path.as_ptr()),
+                None,
+                KEY_SET_VALUE,
+                &mut handle,
+            )
+        };
+        if status == ERROR_FILE_NOT_FOUND {
+            return Ok(());
+        }
+        if status != ERROR_SUCCESS {
+            return Err(CoreError::Registry(format!(
+                "cannot open `{}\\{subkey}` for writing: {}",
+                hive.short_name(),
+                status.0
+            )));
+        }
+        let key = Key(handle);
+        let name_wide = wide(name);
+        // SAFETY: `name_wide` is NUL-terminated and the key is open for writing.
+        let status = unsafe { RegDeleteValueW(key.0, PCWSTR(name_wide.as_ptr())) };
+        if status != ERROR_SUCCESS && status != ERROR_FILE_NOT_FOUND {
+            return Err(CoreError::Registry(format!(
+                "cannot remove `{}\\{subkey}\\{name}`: {}",
+                hive.short_name(),
+                status.0
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl Registry for SystemRegistry {
@@ -584,6 +669,25 @@ impl Registry for SystemRegistry {
         #[cfg(not(windows))]
         {
             let _ = (hive, subkey, value);
+            Err(CoreError::Registry(
+                "there is no registry on this platform".to_owned(),
+            ))
+        }
+    }
+
+    fn delete_value(&self, hive: Hive, subkey: &str, name: &str) -> Result<()> {
+        // Same structural guard as `set_value`: a test process never removes a
+        // real value.
+        if !crate::core::platform::real_os_effects_armed() {
+            return Err(CoreError::RegistryBlocked);
+        }
+        #[cfg(windows)]
+        {
+            sys::delete_value(hive, subkey, name)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (hive, subkey, name);
             Err(CoreError::Registry(
                 "there is no registry on this platform".to_owned(),
             ))
@@ -727,5 +831,56 @@ mod tests {
             )
             .expect_err("a test build must not be able to write to the registry");
         assert!(matches!(err, CoreError::RegistryBlocked));
+    }
+
+    #[test]
+    fn the_real_registry_refuses_to_delete_from_a_test_process() {
+        let err = SystemRegistry
+            .delete_value(Hive::CurrentUser, RUN, "WinKnifeTest")
+            .expect_err("a test build must not be able to remove a registry value");
+        assert!(matches!(err, CoreError::RegistryBlocked));
+    }
+
+    #[test]
+    fn a_dword_is_four_little_endian_bytes() {
+        let value = RegValue::dword("HideFileExt", 0x0102_0304);
+        assert_eq!(value.kind, REG_TYPE_DWORD);
+        assert_eq!(value.bytes, vec![4, 3, 2, 1]);
+        assert_eq!(value.as_dword(), Some(0x0102_0304));
+        assert_eq!(RegValue::binary("x", vec![1, 0, 0, 0]).as_dword(), None);
+    }
+
+    #[test]
+    fn a_delete_removes_only_the_named_value_case_insensitively() {
+        let registry = MapRegistry::new().with_key(
+            Hive::CurrentUser,
+            RUN,
+            vec![RegValue::dword("Keep", 1), RegValue::dword("Gone", 2)],
+        );
+        registry
+            .delete_value(Hive::CurrentUser, RUN, "gone")
+            .expect("delete");
+        assert_eq!(
+            registry.snapshot(Hive::CurrentUser, RUN),
+            vec![RegValue::dword("Keep", 1)]
+        );
+    }
+
+    #[test]
+    fn deleting_an_absent_value_or_key_is_not_an_error() {
+        MapRegistry::new()
+            .delete_value(Hive::CurrentUser, RUN, "Nothing")
+            .expect("an absent value is already gone");
+    }
+
+    #[test]
+    fn a_refusing_registry_refuses_deletes_too() {
+        let registry = MapRegistry::new()
+            .with_key(Hive::CurrentUser, RUN, vec![RegValue::dword("Stay", 1)])
+            .refusing_writes("access is denied");
+        registry
+            .delete_value(Hive::CurrentUser, RUN, "Stay")
+            .expect_err("a refused delete must surface");
+        assert_eq!(registry.snapshot(Hive::CurrentUser, RUN).len(), 1);
     }
 }

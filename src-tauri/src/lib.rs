@@ -332,7 +332,7 @@ pub fn manage_state<R: tauri::Runtime>(
         Arc::new(core::platform::SystemRegistry),
     )));
 
-    // Hosts editor (K-018): the fence is resolved from %SystemRoot% once, and
+    // Hosts editor (K-019): the fence is resolved from %SystemRoot% once, and
     // the elevated helper refuses until `run()` has armed real OS effects.
     app.manage(Arc::new(modules::hosts::HostsService::new(
         core::platform::HostsFence::system(&SystemEnv)?,
@@ -355,6 +355,11 @@ pub fn manage_state<R: tauri::Runtime>(
             &startup_service,
         ))),
         startup_service,
+        // Like the startup manager, it holds the real registry, which refuses
+        // to write until `run()` has armed it.
+        tweaks: Arc::new(modules::tweaks::TweakService::new(Arc::new(
+            core::platform::SystemRegistry,
+        ))),
         rules_dir,
     });
     // `Arc<Database>`, as every
@@ -388,6 +393,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::reveal_in_explorer,
         commands::startup_scan,
         commands::startup_enable,
+        commands::tweaks_scan,
+        commands::tweaks_undo,
         commands::get_recommendations,
         commands::scan_summary,
         commands::execute,
@@ -468,7 +475,7 @@ pub fn run() {
     // file, no database, no window and — above all — no single-instance
     // plugin, which would forward this argv to the running app and exit with
     // no restore point made. Its exit code is the whole answer.
-    // The elevated hosts writer (K-018) stops here for the same reasons.
+    // The elevated hosts writer (K-019) stops here for the same reasons.
     if let Some(code) = core::platform::run_helper_if_asked(std::env::args()) {
         std::process::exit(i32::try_from(code).unwrap_or(i32::MAX));
     }
