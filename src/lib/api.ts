@@ -9,7 +9,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import type {
   AppSettings,
@@ -20,6 +20,7 @@ import type {
   DashboardSummary,
   DriveInfo,
   DuplicateScanResult,
+  ProfilePreview,
   EmptyFolderScanResult,
   ExecProgress,
   ExecReport,
@@ -54,6 +55,7 @@ import type {
   TreeLevel,
   TreemapScanResult,
   TweaksScanResult,
+  UpdateStatus,
   UnlockerReport,
 } from "$lib/types";
 
@@ -245,6 +247,24 @@ export function tweaksScan(): Promise<TweaksScanResult> {
  */
 export function tweaksUndo(tweakId: string): Promise<void> {
   return invoke<void>("tweaks_undo", { tweakId });
+}
+
+/** What is holding Windows Update back, if anything. Read-only. */
+export function tweaksUpdateStatus(): Promise<UpdateStatus> {
+  return invoke<UpdateStatus>("tweaks_update_status");
+}
+
+/** Save the applied tweaks and the settings as a profile file. */
+export function profileExport(path: string): Promise<void> {
+  return invoke<void>("profile_export", { path });
+}
+
+/**
+ * Check a profile file and preview it. Writes nothing: apply its tweaks with
+ * {@link execute} and its settings with {@link setSettings}.
+ */
+export function profilePreview(path: string): Promise<ProfilePreview> {
+  return invoke<ProfilePreview>("profile_preview", { path });
 }
 
 /* -------------------------------------------------------------------------
@@ -517,6 +537,19 @@ export async function pickFiles(): Promise<string[]> {
 export async function pickFolder(): Promise<string[]> {
   const picked = await openDialog({ multiple: false, directory: true });
   return normalisePicked(picked);
+}
+
+const PROFILE_FILTERS = [{ name: "WinKnife profile", extensions: ["json"] }];
+
+/** Native picker for where to save a profile. Resolves to `null` when cancelled. */
+export function pickProfileSave(): Promise<string | null> {
+  return saveDialog({ defaultPath: "winknife-profile.json", filters: PROFILE_FILTERS });
+}
+
+/** Native picker for a profile to import. Resolves to `null` when cancelled. */
+export async function pickProfileOpen(): Promise<string | null> {
+  const picked = await openDialog({ multiple: false, directory: false, filters: PROFILE_FILTERS });
+  return normalisePicked(picked)[0] ?? null;
 }
 
 function normalisePicked(picked: string | string[] | null): string[] {
