@@ -2358,6 +2358,32 @@ before writing, as it does for every other action.
 startup one. The module keeps the generic "settings" icon. C2, C7 and C10
 get hook notes only, in `docs/phases/PHASE-6-tweaks.md`.
 
+## 2026-10-24 — Hosts file editor (C4, K-019)
+
+**Built.** A `hosts` sidebar module. It parses `%SystemRoot%\System32\drivers\etc\hosts`
+into entries, disabled entries, comments and invalid lines (flagged with
+the line and reason), and edits a draft: add, remove, turn on/off, or raw
+text. Every draft is validated and diffed against the file on disk; Save
+asks for confirmation, takes a timestamped backup in app data, then writes
+through the UAC helper (`--write-hosts`). Encoding (UTF-8/BOM/UTF-16) and
+line endings are kept. Any backup restores in one click (after a backup of
+the current file). `ipconfig /flushdns` runs only when its button is
+clicked, and the page shows the exact command.
+
+**Decisions.** The write exception covers only the hosts file and our own
+same-folder `hosts.winknife.tmp` (`HostsFence`, canonical path equality
+from `%SystemRoot%`, checked before every write; any other path is refused
+and tested). The write is a temp + `ReplaceFileW` swap with read-back
+verification; the helper refuses empty or unvalidated bytes (hash check)
+and reports a file changed since the backup instead of overwriting it.
+Backups are never deleted automatically. A declined UAC prompt is a plain
+"nothing changed" outcome.
+
+**Tests.** Parser, diff, encoding/line-ending round trips, the fence
+(refuses other paths, including `C:\Windows\…` siblings), save/restore/no-change
+and changed-underneath paths against a fake writer in a tempdir; the real
+hosts file is never touched by tests.
+
 ## 2026-10-24 — C9: provenance and verification
 
 **Built.** README "Verify this download" (official URLs, `Get-FileHash`,

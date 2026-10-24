@@ -851,3 +851,9 @@ not ours to take.
 
 - [x] 2026-10-24 (phase 6, C1): `docs/RESEARCH-FEATURES-2026-10.md` §C1 needs a registry-writing action, and the `Action` enum had none, so C1 had to come here before code. Proposed: a new mutating `Action::ApplyTweak` whose `Justification::Tweak` names the catalog entry and the prior value the user was shown; a `tweak_undo` table that records the real prior value (or "absent") **before** the write, plus the applied value; read-back after every write; undo only while the live value is still the one WinKnife wrote, so a later change by the user or another tool is never clobbered. HKCU only; HKLM stays out.
   - **Resolved 2026-10-24 (user, K-018):** "C1 ... oradan başla geliştirmeye devam et" — proceed as proposed, HKCU only, escalate anything that would need HKLM or an undo that cannot be proven. Brief: `docs/phases/PHASE-6-tweaks.md`.
+
+## Open items raised by C4 — hosts editor (2026-10-24)
+
+- [ ] 2026-10-24 (C4): the app stays unelevated; a save backs the current file up and stages the new bytes in app data, then relaunches WinKnife once through `runas` with `--write-hosts <staged> <blake3 of the file it backed up>`. The elevated helper only writes the fenced hosts path, refuses if the file changed since the backup, and exits — safest reading of "elevation via the existing runas helper pattern".
+- [ ] 2026-10-24 (C4): a file whose lines end inconsistently (some CRLF, some LF) is saved with the dominant ending; consistent files round-trip byte-for-byte. A UTF-16 hosts file is shown read-only (Windows writes it ANSI/UTF-8); non-UTF-8 bytes are kept as Latin-1 so nothing is lost.
+- [ ] 2026-10-24 (C4): backups are never removed by the app; the page only shows them in Explorer. If they pile up, a retention rule is a later decision.

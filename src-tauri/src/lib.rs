@@ -332,6 +332,14 @@ pub fn manage_state<R: tauri::Runtime>(
         Arc::new(core::platform::SystemRegistry),
     )));
 
+    // Hosts editor (K-019): the fence is resolved from %SystemRoot% once, and
+    // the elevated helper refuses until `run()` has armed real OS effects.
+    app.manage(Arc::new(modules::hosts::HostsService::new(
+        core::platform::HostsFence::system(&SystemEnv)?,
+        Arc::new(core::platform::ElevatedHostsWriter),
+        app_data_dir.to_path_buf(),
+    )));
+
     // Legacy panels: only opens Windows' own windows, gated like Explorer
     // (module spec 10).
     app.manage(Arc::new(modules::legacy_panels::LegacyPanelsService::new(
@@ -406,6 +414,13 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::restore_point_status,
         commands::restore_point_create,
         commands::restore_point_open_settings,
+        commands::hosts_read,
+        commands::hosts_preview,
+        commands::hosts_save,
+        commands::hosts_backups,
+        commands::hosts_restore,
+        commands::hosts_reveal_backup,
+        commands::hosts_flush_dns,
         commands::legacy_panels_list,
         commands::legacy_panels_open,
         commands::keep_awake_start,
@@ -460,6 +475,10 @@ pub fn run() {
     // file, no database, no window and — above all — no single-instance
     // plugin, which would forward this argv to the running app and exit with
     // no restore point made. Its exit code is the whole answer.
+    // The elevated hosts writer (K-019) stops here for the same reasons.
+    if let Some(code) = core::platform::run_helper_if_asked(std::env::args()) {
+        std::process::exit(i32::try_from(code).unwrap_or(i32::MAX));
+    }
     let launch = match modules::restore_point::launch_mode(std::env::args()) {
         modules::restore_point::LaunchMode::CreateRestorePoint { description } => {
             let code = core::platform::create_in_helper(&description);

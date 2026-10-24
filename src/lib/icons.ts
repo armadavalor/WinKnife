@@ -117,6 +117,11 @@ export const ICONS = {
   "folder": [
     ["path", {d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"}],
   ],
+  "globe": [
+    ["circle", {cx: "12", cy: "12", r: "10"}],
+    ["path", {d: "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"}],
+    ["path", {d: "M2 12h20"}],
+  ],
 } as const satisfies Record<string, readonly IconNode[]>;
 
 export type IconName = keyof typeof ICONS;
