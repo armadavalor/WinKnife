@@ -10,3 +10,4 @@
 | Svelte 5 / SvelteKit | svelte.dev | MIT | Evet | |
 | Tailwind CSS 4 | tailwindcss.com | MIT | Evet | |
 | Lucide ikonları (vendored, `src/lib/icons.ts`) | lucide.dev, lucide-static 1.57.0 | ISC (power/chevron-right/info: Feather MIT) | Evet | 2026-10-15 |
+| actions/attest-build-provenance@v3 | github.com/actions/attest-build-provenance | MIT | Evet | release.yml, yalnız CI adımı; 2026-10-24 |
