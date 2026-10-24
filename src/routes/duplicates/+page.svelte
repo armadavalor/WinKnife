@@ -421,6 +421,121 @@
       </div>
     {/if}
 
+    {#if store.folderGroups.length > 0}
+      <section class="flex flex-col gap-3">
+        <div>
+          <h2 class="text-sm font-medium">{t("duplicates.folders.title")}</h2>
+          <p class="mt-1 text-xs text-ink-muted">{t("duplicates.folders.intro")}</p>
+        </div>
+        {#each store.folderGroups as group (group.id)}
+          <section
+            class="rounded-xl border border-surface-2 bg-surface-1"
+            data-folder-group={group.id}
+          >
+            <header class="flex flex-wrap items-center gap-3 px-4 py-3">
+              <span class="min-w-0 flex-1 text-xs text-ink-muted">
+                {t("duplicates.folders.label", {
+                  count: group.members.length,
+                  files: group.fileCount,
+                  size: formatBytes(group.sizeBytes),
+                })}
+              </span>
+              <span class="text-xs text-ink-faint">{t("duplicates.folders.keepRule")}</span>
+              {#each ["oldest", "newest"] as const as kind (kind)}
+                <button
+                  type="button"
+                  class="btn-ghost px-2! py-1! text-xs!"
+                  aria-pressed={group.keepRule.kind === kind}
+                  class:font-semibold={group.keepRule.kind === kind}
+                  onclick={() => store.setKeepRule(group, { kind })}
+                >
+                  {kind === "oldest"
+                    ? t("duplicates.folders.keepOldest")
+                    : t("duplicates.folders.keepNewest")}
+                </button>
+              {/each}
+              <button
+                type="button"
+                class="btn-ghost px-2! py-1! text-xs!"
+                onclick={() => store.ignoreGroup(group)}
+              >
+                {t("duplicates.folders.ignore")}
+              </button>
+              <span class="shrink-0 text-xs tabular-nums text-risk-review">
+                {formatBytes(group.wastedBytes)}
+              </span>
+            </header>
+            <ul class="divide-y divide-surface-2 border-t border-surface-2">
+              {#each group.members as member (member.path)}
+                {@const selectable =
+                  !member.keeper && !member.protected && member.recommendationIds.length > 0}
+                <li class="flex items-start gap-3 px-4 py-3">
+                  {#if selectable}
+                    <input
+                      type="checkbox"
+                      class="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+                      checked={store.isFolderSelected(member.recommendationIds)}
+                      aria-label={member.path}
+                      onchange={(event) =>
+                        store.toggleFolder(member.recommendationIds, event.currentTarget.checked)}
+                    />
+                  {:else}
+                    <span class="mt-1 size-4 shrink-0" aria-hidden="true"></span>
+                  {/if}
+                  <span class="min-w-0 flex-1">
+                    <span class="flex items-center gap-2">
+                      <span
+                        class="min-w-0 flex-1 truncate font-mono text-xs text-ink"
+                        title={member.path}
+                      >
+                        {truncatePath(member.path)}
+                      </span>
+                      {#if member.keeper}
+                        <span
+                          class="shrink-0 rounded-md bg-risk-safe/15 px-1.5 py-0.5 text-[0.65rem] font-medium text-risk-safe"
+                        >
+                          {t("duplicates.folders.keeper")}
+                        </span>
+                      {/if}
+                      {#if member.protected}
+                        <span
+                          class="shrink-0 rounded-md bg-surface-2 px-1.5 py-0.5 text-[0.65rem] font-medium text-ink-muted"
+                        >
+                          {t("duplicates.folders.protected")}
+                        </span>
+                      {/if}
+                    </span>
+                    <span class="mt-1 block text-xs leading-relaxed text-ink-muted">
+                      {member.reason}
+                    </span>
+                    <span class="mt-1 block text-[0.7rem] text-ink-faint">
+                      {member.modified
+                        ? formatDateTime(member.modified)
+                        : t("duplicates.noDate")}
+                      {#if !member.keeper}
+                        ·
+                        <button
+                          type="button"
+                          class="underline underline-offset-2 transition-colors hover:text-ink"
+                          onclick={() =>
+                            store.setKeepRule(group, {
+                              kind: "preferredFolder",
+                              folder: member.path,
+                            })}
+                        >
+                          {t("duplicates.folders.makeKeeper")}
+                        </button>
+                      {/if}
+                    </span>
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/each}
+      </section>
+    {/if}
+
     {#if scan.linkedNames.length > 0}
       <section class="flex flex-col gap-2 rounded-xl border border-surface-2 p-4">
         <h2 class="text-sm font-medium">{t("duplicates.linkedTitle")}</h2>

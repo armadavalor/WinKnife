@@ -23,6 +23,8 @@ import type {
   EmptyFolderScanResult,
   ExecProgress,
   ExecReport,
+  FolderGroupUpdate,
+  KeepRule,
   ModuleManifest,
   MoveWarning,
   PanelInfo,
@@ -113,6 +115,29 @@ export function startDuplicateScan(
   roots?: string[],
 ): Promise<DuplicateScanResult> {
   return invoke<DuplicateScanResult>("start_duplicate_scan", { roots });
+}
+
+/** Change which folder of one duplicate-folder group stays. */
+export function setFolderKeepRule(
+  scanId: string,
+  groupId: string,
+  rule: KeepRule,
+): Promise<FolderGroupUpdate> {
+  return invoke<FolderGroupUpdate>("set_folder_keep_rule", {
+    scanId,
+    groupId,
+    rule,
+  });
+}
+
+/** Hide a duplicate-folder group from future scans. */
+export function ignoreFolderGroup(id: string): Promise<void> {
+  return invoke<void>("ignore_folder_group", { id });
+}
+
+/** Bring every ignored duplicate-folder group back. */
+export function clearIgnoredFolderGroups(): Promise<void> {
+  return invoke<void>("clear_ignored_folder_groups");
 }
 
 /* -------------------------------------------------------------------------

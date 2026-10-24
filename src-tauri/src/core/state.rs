@@ -92,6 +92,20 @@ impl ScanStore {
             .ok_or_else(|| CoreError::UnknownScan(scan_id.to_string()))
     }
 
+    /// Swap a retained scan for an updated copy with the same id.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::UnknownScan`] when the id is no longer retained.
+    pub fn replace(&self, result: ScanResult) -> Result<()> {
+        let mut scans = self.lock();
+        let slot = scans
+            .iter_mut()
+            .find(|scan| scan.scan_id == result.scan_id)
+            .ok_or_else(|| CoreError::UnknownScan(result.scan_id.to_string()))?;
+        *slot = result;
+        Ok(())
+    }
+
     /// How many scans are retained.
     pub fn len(&self) -> usize {
         self.lock().len()

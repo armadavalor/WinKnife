@@ -6,13 +6,17 @@
  * - **Nothing is selected by default.** A duplicate is a judgement about a pair,
  *   and the app has no way to know which copy somebody meant to keep. The
  *   heuristic nominates; the selection stays empty until a person agrees.
+ *   Folder groups are the exception: a whole folder that repeats another one
+ *   is a clearer call, so its non-kept copies start selected (C3).
  * - **A scan can be stopped.** A full-hash pass over a Pictures folder is
  *   minutes of reading, so `cancel_scan` is reachable while it runs.
  */
 import {
   cancelScan,
   execute as invokeExecute,
+  ignoreFolderGroup,
   onScanProgress,
+  setFolderKeepRule,
   startDuplicateScan,
 } from "$lib/api";
 import {
@@ -22,6 +26,8 @@ import {
   type DuplicateSet,
   type ExecReport,
   type ExtensionClass,
+  type FolderGroup,
+  type KeepRule,
   type Recommendation,
 } from "$lib/types";
 import { ExecTracker } from "./execProgress.svelte";
@@ -90,6 +96,10 @@ export function classOf(path: string): Exclude<ExtensionClass, "all"> {
 
 function message(error: unknown): string {
   return isApiError(error) ? error.message : String(error);
+}
+
+function folderRecIds(group: FolderGroup): string[] {
+  return group.members.flatMap((member) => member.recommendationIds);
 }
 
 class DuplicatesStore {
@@ -180,6 +190,7 @@ class DuplicatesStore {
       this.result = await startDuplicateScan(
         this.pinnedRoot === null ? undefined : [this.pinnedRoot],
       );
+      this.selected = new Set(this.folderDefaults(this.result.folderGroups));
       this.step = "review";
     } catch (error: unknown) {
       this.error = message(error);
@@ -228,7 +239,12 @@ class DuplicatesStore {
 
   /** Select every copy that is not its set's keeper. */
   selectAllNonKeepers(): void {
-    const selected = new Set<string>();
+    // Folder-group picks are their own judgement; a file-set bulk action
+    // leaves them alone.
+    const folderIds = new Set(this.folderGroups.flatMap(folderRecIds));
+    const selected = new Set(
+      [...this.selected].filter((id) => folderIds.has(id)),
+    );
     for (const set of this.sets) {
       for (const copy of set.copies) {
         if (this.isKeeper(set, copy)) {
@@ -267,6 +283,107 @@ class DuplicatesStore {
     // keeper, and offering to remove the copy the user just chose to keep is
     // exactly the mistake this module must not make.
     this.selectAllNonKeepers();
+  }
+
+  /** Duplicate-folder groups from the last scan. */
+  get folderGroups(): FolderGroup[] {
+    return this.result?.folderGroups ?? [];
+  }
+
+  /** Quarantine recommendations of every non-kept, unprotected folder. */
+  private folderDefaults(groups: FolderGroup[]): string[] {
+    const quarantine = new Set(
+      (this.result?.recommendations ?? [])
+        .filter((rec) => rec.action === "quarantine")
+        .map((rec) => rec.id),
+    );
+    return groups
+      .flatMap((group) => group.members)
+      .filter((member) => !member.keeper && !member.protected)
+      .flatMap((member) => member.recommendationIds)
+      .filter((id) => quarantine.has(id));
+  }
+
+  /** Whether every recommendation of a folder copy is selected. */
+  isFolderSelected(recommendationIds: string[]): boolean {
+    return (
+      recommendationIds.length > 0 &&
+      recommendationIds.every((id) => this.selected.has(id))
+    );
+  }
+
+  /** Toggle every recommendation of one folder copy together. */
+  toggleFolder(recommendationIds: string[], next: boolean): void {
+    const selected = new Set(this.selected);
+    for (const id of recommendationIds) {
+      if (next) {
+        selected.add(id);
+      } else {
+        selected.delete(id);
+      }
+    }
+    this.selected = selected;
+  }
+
+  /**
+   * Change a group's keep rule. The backend re-analyses the group and swaps
+   * its recommendations; the old ones leave the selection, the new non-kept
+   * copies start selected as after a scan.
+   */
+  async setKeepRule(group: FolderGroup, rule: KeepRule): Promise<void> {
+    const scan = this.result;
+    if (!scan) {
+      return;
+    }
+    this.error = null;
+    try {
+      const update = await setFolderKeepRule(scan.scanId, group.id, rule);
+      const replaced = new Set(update.replaced);
+      const result: DuplicateScanResult = {
+        ...scan,
+        folderGroups: scan.folderGroups.map((existing) =>
+          existing.id === group.id ? update.group : existing,
+        ),
+        recommendations: [
+          ...scan.recommendations.filter((rec) => !replaced.has(rec.id)),
+          ...update.recommendations,
+        ],
+      };
+      this.result = result;
+      const selected = new Set(
+        [...this.selected].filter((id) => !replaced.has(id)),
+      );
+      for (const id of this.folderDefaults([update.group])) {
+        selected.add(id);
+      }
+      this.selected = selected;
+    } catch (error: unknown) {
+      this.error = message(error);
+    }
+  }
+
+  /** Hide a group now and from future scans. */
+  async ignoreGroup(group: FolderGroup): Promise<void> {
+    const scan = this.result;
+    if (!scan) {
+      return;
+    }
+    this.error = null;
+    try {
+      await ignoreFolderGroup(group.id);
+      const dropped = new Set(folderRecIds(group));
+      this.result = {
+        ...scan,
+        folderGroups: scan.folderGroups.filter(
+          (existing) => existing.id !== group.id,
+        ),
+      };
+      this.selected = new Set(
+        [...this.selected].filter((id) => !dropped.has(id)),
+      );
+    } catch (error: unknown) {
+      this.error = message(error);
+    }
   }
 
   /** Apply the selection. Duplicates never empty the recycle bin. */

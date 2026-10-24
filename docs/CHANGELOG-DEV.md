@@ -2324,3 +2324,44 @@ list did not make. Closes DECISIONS-NEEDED 2026-10-03 notes (2) and (3).
 rating per entry and `null` for an unrated one; the Rust test for a
 protected program asserts the new wording and that none of the cleaner's
 words leak in.
+
+## 2026-10-24 — C3: duplicate folders
+
+**Built.** The duplicates scan now also groups folders whose file sets are
+identical: same relative paths, same content. The group key is a blake3 hash
+of the sorted (relative path, content hash) pairs (`modules/duplicates/folders.rs`).
+The scan stays read-only. A new "Duplicate folders" section on the duplicates
+screen shows each group with its size and wasted bytes. Every member row
+carries a reason.
+
+- **Keep rule per group.** Oldest (the default), newest, or a preferred folder,
+  set through `set_folder_keep_rule`. Changing it swaps the group's
+  recommendations in the `ScanStore` in place (`ScanStore::replace`), so
+  `execute` only sees the current plan.
+- **Selection.** Files in non-kept copies start selected for Quarantine. File-set
+  bulk actions keep the folder selections. Nothing deletes directly; the
+  existing quarantine executor runs it.
+- **Never every copy.** `pick_keeper` always returns exactly one index, and the
+  keeper's files never get a Quarantine action. A final guard
+  (`keep_at_least_one`) works per relative file: if every copy of a file would
+  be quarantined, it turns all of them into info-only Do-not-delete. Both are
+  tested
+  (`exactly_one_folder_is_kept_…`, `the_guard_never_lets_every_copy_be_quarantined`).
+  The folder keeper and the file-set keeper can differ. Folder defaults plus
+  "Select every non-keeper" can therefore tick every copy in the UI. Executor
+  gate 4 still refuses the last copy: units run in order, and by then its
+  recorded keeper is gone. `copies_that_name_each_other_as_keeper_never_all_go`
+  tests this.
+- **Protected paths.** A protected member is shown but never selected or rated
+  Safe. A folder with protected contents is never grouped.
+- **Ignore this group.** Ignored group ids persist in the existing settings
+  table under `duplicates.ignoredFolderGroups`. No new migration (C1 owns 005).
+  `clear_ignored_folder_groups` resets the list. There is no UI for it yet.
+
+**Known limits (deferred).**
+- The folder pass hashes files a second time.
+- Hard links are not collapsed.
+- Empty directories stay behind after quarantine.
+- Hidden/system files and empty subfolders are left out of the comparison.
+- Filename case counts.
+- The ignore key is content-based, so a changed folder shows up again.
