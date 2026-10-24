@@ -187,6 +187,18 @@ pub trait Registry: Send + Sync {
     /// # Errors
     /// Returns an error when the key exists but the value cannot be removed.
     fn delete_value(&self, hive: Hive, subkey: &str, name: &str) -> Result<()>;
+
+    /// Names of the keys directly under `subkey`; empty when it is absent.
+    ///
+    /// Only the context-menu scan walks keys; the other readers know their
+    /// value paths, so the default answers "none".
+    ///
+    /// # Errors
+    /// Returns an error when the key exists but cannot be read.
+    fn subkeys(&self, hive: Hive, subkey: &str) -> Result<Vec<String>> {
+        let _ = (hive, subkey);
+        Ok(Vec::new())
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -269,6 +281,19 @@ impl Registry for MapRegistry {
             .find(|value| value.name.eq_ignore_ascii_case(name)))
     }
 
+    fn subkeys(&self, hive: Hive, subkey: &str) -> Result<Vec<String>> {
+        let prefix = format!("{}\\", normalise(subkey));
+        let mut names: Vec<String> = self
+            .lock_keys()
+            .keys()
+            .filter(|(key_hive, path)| *key_hive == hive && path.starts_with(&prefix))
+            .filter_map(|(_, path)| path[prefix.len()..].split('\\').next().map(str::to_owned))
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
     fn set_value(&self, hive: Hive, subkey: &str, value: &RegValue) -> Result<()> {
         if let Some(message) = self
             .refuse_writes
@@ -333,7 +358,7 @@ mod sys {
     use windows::core::{PCWSTR, PWSTR};
     use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS};
     use windows::Win32::System::Registry::{
-        RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegEnumValueW, RegOpenKeyExW,
+        RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW,
         RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ,
         KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_VALUE_TYPE,
     };
@@ -507,6 +532,48 @@ mod sys {
         Ok(out)
     }
 
+    /// Names of the keys directly under `subkey`.
+    pub(super) fn subkeys(hive: Hive, subkey: &str) -> Result<Vec<String>> {
+        let Some(key) = open_read(hive, subkey)? else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        // Key names are at most 255 characters.
+        let mut name = vec![0u16; 256];
+        let mut index = 0u32;
+        loop {
+            let mut name_len = name.len() as u32;
+            // SAFETY: `name` is `name_len` u16s long and every other pointer is
+            // unused.
+            let status = unsafe {
+                RegEnumKeyExW(
+                    key.0,
+                    index,
+                    Some(PWSTR(name.as_mut_ptr())),
+                    &mut name_len,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            };
+            if status != ERROR_SUCCESS {
+                if status.0 != 259 {
+                    tracing::warn!(
+                        hive = hive.short_name(),
+                        subkey,
+                        code = status.0,
+                        "registry key enumeration stopped early"
+                    );
+                }
+                break;
+            }
+            out.push(String::from_utf16_lossy(&name[..name_len as usize]));
+            index += 1;
+        }
+        Ok(out)
+    }
+
     /// Read one value.
     pub(super) fn value(hive: Hive, subkey: &str, name: &str) -> Result<Option<RegValue>> {
         let Some(key) = open_read(hive, subkey)? else {
@@ -652,6 +719,18 @@ impl Registry for SystemRegistry {
         {
             let _ = (hive, subkey, name);
             Ok(None)
+        }
+    }
+
+    fn subkeys(&self, hive: Hive, subkey: &str) -> Result<Vec<String>> {
+        #[cfg(windows)]
+        {
+            sys::subkeys(hive, subkey)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (hive, subkey);
+            Ok(Vec::new())
         }
     }
 

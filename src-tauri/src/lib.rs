@@ -360,6 +360,11 @@ pub fn manage_state<R: tauri::Runtime>(
         tweaks: Arc::new(modules::tweaks::TweakService::new(Arc::new(
             core::platform::SystemRegistry,
         ))),
+        // Reads both hives; writes only under HKCU, and only once armed.
+        context_menu: Arc::new(modules::context_menu::ContextMenuService::new(
+            Arc::new(core::platform::SystemRegistry),
+            Arc::new(core::platform::SystemSignatureProbe),
+        )),
         rules_dir,
     });
     // `Arc<Database>`, as every
@@ -398,6 +403,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::startup_enable,
         commands::tweaks_scan,
         commands::tweaks_undo,
+        commands::context_menu_scan,
+        commands::context_menu_undo,
         commands::get_recommendations,
         commands::scan_summary,
         commands::execute,

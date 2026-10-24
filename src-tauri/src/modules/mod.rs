@@ -44,6 +44,7 @@ register_modules! {
     legacy_panels => legacy_panels::LegacyPanelsModule,
     hosts => hosts::HostsModule,
     tweaks => tweaks::TweaksModule,
+    context_menu => context_menu::ContextMenuModule,
 }
 
 /// Build the application's module registry.
@@ -126,6 +127,7 @@ mod tests {
             "legacy-panels",
             "hosts",
             "tweaks",
+            "context-menu",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }

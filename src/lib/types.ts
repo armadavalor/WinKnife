@@ -644,6 +644,44 @@ export interface TweaksScanResult {
 }
 
 /* -------------------------------------------------------------------------
+ * modules/context_menu.rs
+ * ---------------------------------------------------------------------- */
+
+/** One right-click menu entry and who owns it. */
+export interface ContextMenuEntry {
+  id: string;
+  /** A `shell` verb, or a `shellex` COM handler. */
+  kind: "verb" | "handler";
+  /** `HKCU` or `HKLM`. */
+  hive: string;
+  /** Class key the entry hangs off, e.g. `Directory\Background`. */
+  scope: string;
+  name: string;
+  label: string | null;
+  /** The verb's command line, or the handler's CLSID. */
+  target: string | null;
+  /** Registry key the entry lives under. */
+  path: string;
+  file: string | null;
+  /** Signer of `file`; `null` means the owner is unknown. */
+  publisher: string | null;
+  disabled: boolean;
+  /** `false` for machine-wide entries, which are never written. */
+  editable: boolean;
+  /** WinKnife disabled it and can put it back. */
+  undoable: boolean;
+  reason: string;
+}
+
+/** What `context_menu_scan` hands back. */
+export interface ContextMenuScanResult {
+  scanId: string;
+  entries: ContextMenuEntry[];
+  /** One per entry that can still be disabled. */
+  recommendations: Recommendation[];
+}
+
+/* -------------------------------------------------------------------------
  * commands.rs — settings
  * ---------------------------------------------------------------------- */
 
