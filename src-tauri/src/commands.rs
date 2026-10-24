@@ -1117,7 +1117,12 @@ fn startup_safe_refusal(entry: &startup::StartupEntry, brain: &Brain) -> Option<
     let judged = refusal.canonical.as_deref().unwrap_or(program);
     let place = brain.protected_paths().reason_for(judged).map_or_else(
         || refusal.reason.clone(),
-        |listed| listed.split_once(": ").map_or(listed, |(place, _)| place).to_owned(),
+        |listed| {
+            listed
+                .split_once(": ")
+                .map_or(listed, |(place, _)| place)
+                .to_owned()
+        },
     );
     Some(format!(
         "the program it runs, {named}, is in a place WinKnife protects ({place}), and a \
@@ -2180,7 +2185,9 @@ mod tests {
 
         assert_eq!(recommendation.risk, RiskBucket::NeedsReview);
         assert!(
-            recommendation.reason.contains("an installed-programs directory"),
+            recommendation
+                .reason
+                .contains("an installed-programs directory"),
             "the gate's verdict has to reach the user: {}",
             recommendation.reason
         );
