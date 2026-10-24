@@ -19,6 +19,8 @@
   import { t } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { glow } from "$lib/stores/glow.svelte";
+  import { hiddenModules } from "$lib/stores/hiddenModules.svelte";
+  import { visibleModules } from "$lib/hiddenModules";
   import { motion } from "$lib/stores/motion.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
   import { theme } from "$lib/stores/theme.svelte";
@@ -32,6 +34,7 @@
     theme.init();
     motion.init();
     glow.init();
+    hiddenModules.init();
     void moduleStore.load();
     void quarantineStore.reload();
     void openLaunchRoute();
@@ -97,10 +100,11 @@
   </svg>
 
   <Sidebar
-    modules={moduleStore.modules}
+    modules={visibleModules(moduleStore.modules, hiddenModules.ids)}
     loading={moduleStore.status === "loading"}
     quarantineCount={quarantineStore.stats.itemCount}
     onopenquarantine={() => quarantineStore.show()}
+    emptyText={moduleStore.modules.length > 0 ? t("nav.allToolsHidden") : undefined}
   />
 
   <main id="main" class="flex-1 overflow-y-auto">

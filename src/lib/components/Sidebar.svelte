@@ -24,6 +24,8 @@
     quarantineCount?: number;
     /** Called when the quarantine entry is clicked. */
     onopenquarantine?: () => void;
+    /** Shown instead of the usual empty note when `modules` is empty. */
+    emptyText?: string;
   }
 
   let {
@@ -31,6 +33,7 @@
     loading = false,
     quarantineCount = 0,
     onopenquarantine,
+    emptyText,
   }: Props = $props();
 
   let version = $state<string | null>(null);
@@ -100,7 +103,7 @@
     {#if loading}
       <LoadingNote text={t("dashboard.loading")} class="px-3" />
     {:else if modules.length === 0}
-      <p class="px-3 text-sm text-ink-faint">{t("dashboard.empty")}</p>
+      <p class="px-3 text-sm text-ink-faint">{emptyText ?? t("dashboard.empty")}</p>
     {:else}
       <ul class="flex flex-col gap-1">
         {#each modules as module (module.id)}
