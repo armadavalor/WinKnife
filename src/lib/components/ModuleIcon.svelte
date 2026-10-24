@@ -34,6 +34,7 @@
     panels: "app-window",
     restore: "history",
     hosts: "globe",
+    menu: "list",
   };
 </script>
 

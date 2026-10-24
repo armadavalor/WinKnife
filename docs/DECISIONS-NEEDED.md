@@ -857,3 +857,9 @@ not ours to take.
 - [ ] 2026-10-24 (C4): the app stays unelevated; a save backs the current file up and stages the new bytes in app data, then relaunches WinKnife once through `runas` with `--write-hosts <staged> <blake3 of the file it backed up>`. The elevated helper only writes the fenced hosts path, refuses if the file changed since the backup, and exits — safest reading of "elevation via the existing runas helper pattern".
 - [ ] 2026-10-24 (C4): a file whose lines end inconsistently (some CRLF, some LF) is saved with the dominant ending; consistent files round-trip byte-for-byte. A UTF-16 hosts file is shown read-only (Windows writes it ANSI/UTF-8); non-UTF-8 bytes are kept as Latin-1 so nothing is lost.
 - [ ] 2026-10-24 (C4): backups are never removed by the app; the page only shows them in Explorer. If they pile up, a retention rule is a later decision.
+
+## Open items raised by C2 — context-menu cleaner (2026-10-24)
+
+- [ ] 2026-10-24 (C2): HKLM (machine-wide) entries are shown but never written: the row says "needs admin; not changed". Disabling them would need elevation through the hosts-style `runas` helper; not done without a decision.
+- [ ] 2026-10-24 (C2): a per-user handler whose CLSID is also registered machine-wide is left alone, because blocking the CLSID would also hide the machine-wide entry. Left to the admin.
+- [ ] 2026-10-24 (C2): `LegacyDisable` on HKCU verbs and the HKCU `Shell Extensions\Blocked` list are documented Explorer mechanisms, but whether the Windows 11 compact menu (and Explorer without a restart) honours them has not been checked by hand. Manual check wanted before the feature is announced.

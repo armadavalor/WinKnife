@@ -2441,6 +2441,30 @@ installer, ZIP and `SHA256SUMS.txt`.
   exist, rather than listing install commands that fail.
 - Deferred: the attestation step is untested until the next tag build.
 
+## 2026-10-24 — C2: context-menu cleaner
+
+**Built.** `modules/context_menu.rs` + `/context-menu` page. The scan reads
+`shell` verbs and `shellex\ContextMenuHandlers` for `*`, AllFilesystemObjects,
+Directory, `Directory\Background`, Drive and Folder, in HKCU and HKLM
+`Software\Classes`. Each entry's reason names the owner: verb command or
+handler CLSID → `InprocServer32` → file → Authenticode signer. No signer =
+"owner unknown", needs review; nothing is ever pre-ticked.
+
+- Disable rides the C1 pipeline (K-018): `Action::ApplyTweak` with tweak id
+  `context-menu:<entry>`; a small `TweakRouter` sends prefixed ids to this
+  module, so the executor and `tweaks.rs` are untouched. A verb gets
+  `LegacyDisable` (HKCU); a handler gets its CLSID under HKCU
+  `Shell Extensions\Blocked`. The old value (or "absent") goes to
+  `tweak_undo` before the write, read back after; Re-enable restores it and
+  refuses if the value changed since.
+- HKLM entries are listed read-only ("needs admin; not changed"); no code path
+  writes HKLM (tested with a recording fake registry). `Registry` gained
+  `subkeys`.
+- Tests: owner classification, verb and handler disable/undo round trips,
+  HKLM never written, shared-CLSID case, undo-after-change refusal, router.
+- Deferred: whether Explorer (and the Windows 11 new menu) honours the HKCU
+  block needs a manual check; see DECISIONS-NEEDED.
+
 ## 2026-10-24 — C7: drift check and Windows Update status
 
 **Built.** The Tweaks scan now compares each live value with the value C1

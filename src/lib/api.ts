@@ -55,6 +55,7 @@ import type {
   TreeLevel,
   TreemapScanResult,
   TweaksScanResult,
+  ContextMenuScanResult,
   UpdateStatus,
   UnlockerReport,
 } from "$lib/types";
@@ -265,6 +266,23 @@ export function profileExport(path: string): Promise<void> {
  */
 export function profilePreview(path: string): Promise<ProfilePreview> {
   return invoke<ProfilePreview>("profile_preview", { path });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — context menu
+ * ---------------------------------------------------------------------- */
+
+/** Read every right-click menu entry and who owns it. Read-only. */
+export function contextMenuScan(): Promise<ContextMenuScanResult> {
+  return invoke<ContextMenuScanResult>("context_menu_scan");
+}
+
+/**
+ * Re-enable an entry WinKnife disabled, by putting back what was recorded
+ * before the write. Disabling goes through {@link execute}.
+ */
+export function contextMenuUndo(entryId: string): Promise<void> {
+  return invoke<void>("context_menu_undo", { entryId });
 }
 
 /* -------------------------------------------------------------------------

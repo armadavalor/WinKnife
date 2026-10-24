@@ -58,7 +58,7 @@ use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
 use crate::modules::legacy_panels::{LegacyPanelsService, PanelInfo};
 use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
-use crate::modules::{startup, treemap, tweaks};
+use crate::modules::{context_menu, startup, treemap, tweaks};
 
 /// Run a sync command body, turning a panic into an `internal` [`ApiError`].
 ///
@@ -187,6 +187,8 @@ pub struct Services {
     pub startup_service: Arc<startup::StartupService>,
     /// Per-user settings, for `Action::ApplyTweak` and its undo (K-018).
     pub tweaks: Arc<tweaks::TweakService>,
+    /// Per-user context-menu entries, disabled through the same undo table.
+    pub context_menu: Arc<context_menu::ContextMenuService>,
     /// Directory the rule packs were loaded from, for diagnostics.
     pub rules_dir: PathBuf,
 }
@@ -414,13 +416,17 @@ pub async fn execute<R: Runtime>(
 
         let mut throttle = ProgressThrottle::new();
         let module = scan.module.clone();
+        let tweak_router = context_menu::TweakRouter {
+            tweaks: services.tweaks.as_ref(),
+            context_menu: services.context_menu.as_ref(),
+        };
         let env = ExecEnvironment {
             quarantine: &services.quarantine,
             db: &**db,
             brain: &services.brain,
             recycle_bin: services.recycle_bin.as_ref(),
             startup: services.startup.as_ref(),
-            tweaks: services.tweaks.as_ref(),
+            tweaks: &tweak_router,
         };
         let mut emit = |done: u64, total: u64, finding: &crate::core::types::Finding| {
             // The final tick always goes out; the rest are throttled.
@@ -1439,6 +1445,89 @@ pub fn tweaks_undo(
 ) -> Result<(), ApiError> {
     guarded("tweaks_undo", || {
         Ok(db.with(|conn| services.tweaks.undo(conn, &tweak_id))?)
+    })
+}
+
+/// What a context-menu scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextMenuScanResult {
+    /// Id `execute` needs to disable an entry.
+    pub scan_id: Uuid,
+    /// Every verb and shell-extension handler found, in both hives.
+    pub entries: Vec<context_menu::ContextMenuEntry>,
+    /// One per per-user entry that can still be disabled.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+}
+
+/// Read every context-menu entry. Read-only.
+///
+/// # Errors
+/// Returns an error only if the undo records cannot be read.
+#[tauri::command]
+pub async fn context_menu_scan<R: Runtime>(
+    app: AppHandle<R>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+) -> Result<ContextMenuScanResult, ApiError> {
+    guarded_async("context_menu_scan", async {
+        let started_at = Utc::now();
+        let entries = db.with(|conn| services.context_menu.scan(conn))?;
+        let scan_id = Uuid::new_v4();
+        let (findings, recommendations): (Vec<_>, Vec<_>) = entries
+            .iter()
+            .filter_map(context_menu::recommendation)
+            .unzip();
+
+        store.insert(ScanResult {
+            scan_id,
+            module: "context-menu".to_owned(),
+            findings,
+            recommendations: recommendations.clone(),
+            skipped_rules: Vec::new(),
+            cancelled: false,
+        });
+        remember(
+            &db,
+            scan_id,
+            "context-menu",
+            started_at,
+            entries.len() as u64,
+            0,
+            false,
+        );
+        let _ = events::emit_scan_done(
+            &app,
+            &ScanDone {
+                scan_id,
+                module: "context-menu".to_owned(),
+                finding_count: entries.len() as u64,
+            },
+        );
+
+        Ok(ContextMenuScanResult {
+            scan_id,
+            entries,
+            recommendations,
+        })
+    })
+    .await
+}
+
+/// Re-enable a context-menu entry WinKnife disabled.
+///
+/// # Errors
+/// Returns an error when there is nothing to undo, when the value was changed
+/// since, or when the write or read-back fails.
+#[tauri::command(async)]
+pub fn context_menu_undo(
+    entry_id: String,
+    services: State<'_, Services>,
+    db: State<'_, Arc<Database>>,
+) -> Result<(), ApiError> {
+    guarded("context_menu_undo", || {
+        Ok(db.with(|conn| services.context_menu.undo(conn, &entry_id))?)
     })
 }
 
