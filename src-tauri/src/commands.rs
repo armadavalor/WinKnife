@@ -1233,36 +1233,7 @@ pub async fn tweaks_scan<R: Runtime>(
     guarded_async("tweaks_scan", async {
         let started_at = Utc::now();
         let states = db.with(|conn| services.tweaks.scan(conn))?;
-        let scan_id = Uuid::new_v4();
-        let (findings, recommendations): (Vec<_>, Vec<_>) =
-            states.iter().filter_map(tweaks::recommendation).unzip();
-
-        store.insert(ScanResult {
-            scan_id,
-            module: "tweaks".to_owned(),
-            findings,
-            recommendations: recommendations.clone(),
-            skipped_rules: Vec::new(),
-            cancelled: false,
-        });
-        remember(
-            &db,
-            scan_id,
-            "tweaks",
-            started_at,
-            states.len() as u64,
-            0,
-            false,
-        );
-        let _ = events::emit_scan_done(
-            &app,
-            &ScanDone {
-                scan_id,
-                module: "tweaks".to_owned(),
-                finding_count: states.len() as u64,
-            },
-        );
-
+        let (scan_id, recommendations) = store_tweaks_scan(&app, &store, &db, &states, started_at);
         Ok(TweaksScanResult {
             scan_id,
             tweaks: states,
@@ -1270,6 +1241,195 @@ pub async fn tweaks_scan<R: Runtime>(
         })
     })
     .await
+}
+
+/// Store tweak states as a scan so `execute` applies their recommendations
+/// through the executor's gates (C1's path), and log it like any other scan.
+fn store_tweaks_scan<R: Runtime>(
+    app: &AppHandle<R>,
+    store: &ScanStore,
+    db: &Database,
+    states: &[tweaks::TweakState],
+    started_at: chrono::DateTime<Utc>,
+) -> (Uuid, Vec<crate::core::types::Recommendation>) {
+    let scan_id = Uuid::new_v4();
+    let (findings, recommendations): (Vec<_>, Vec<_>) =
+        states.iter().filter_map(tweaks::recommendation).unzip();
+
+    store.insert(ScanResult {
+        scan_id,
+        module: "tweaks".to_owned(),
+        findings,
+        recommendations: recommendations.clone(),
+        skipped_rules: Vec::new(),
+        cancelled: false,
+    });
+    remember(
+        db,
+        scan_id,
+        "tweaks",
+        started_at,
+        states.len() as u64,
+        0,
+        false,
+    );
+    let _ = events::emit_scan_done(
+        app,
+        &ScanDone {
+            scan_id,
+            module: "tweaks".to_owned(),
+            finding_count: states.len() as u64,
+        },
+    );
+    (scan_id, recommendations)
+}
+
+/// Is something blocking Windows Update? Reads policy and service values only;
+/// WinKnife never writes them (C7).
+#[tauri::command(async)]
+pub fn tweaks_update_status(
+    services: State<'_, Services>,
+) -> Result<tweaks::update_block::UpdateStatus, ApiError> {
+    guarded("tweaks_update_status", || {
+        Ok(services.tweaks.update_status(Utc::now()))
+    })
+}
+
+/// What importing a profile would change, before anything is written (C10).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfilePreview {
+    /// Id `execute` needs to apply the profile's tweaks.
+    pub scan_id: Uuid,
+    /// The profile's tweaks with their live values.
+    pub tweaks: Vec<tweaks::TweakState>,
+    /// One per profile tweak not already in place.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+    /// The settings as they would be saved, already clamped.
+    pub settings: AppSettings,
+}
+
+/// Save the applied tweaks and the settings to a profile file (C10).
+///
+/// # Errors
+/// Returns an error if the state cannot be read or the file cannot be written.
+#[tauri::command(async)]
+pub fn profile_export(
+    path: PathBuf,
+    services: State<'_, Services>,
+    db: State<'_, Arc<Database>>,
+) -> Result<(), ApiError> {
+    guarded("profile_export", || {
+        let (states, current) = db.with(|conn| {
+            Ok::<_, CoreError>((services.tweaks.scan(conn)?, read_settings(&services, conn)?))
+        })?;
+        let profile = tweaks::profile::Profile {
+            version: tweaks::profile::PROFILE_VERSION,
+            tweaks: states
+                .iter()
+                .filter(|state| state.applied)
+                .map(|state| state.id.clone())
+                .collect(),
+            settings: tweaks::profile::ProfileSettings {
+                cleaner_packs: current
+                    .cleaner
+                    .packs
+                    .iter()
+                    .map(|pack| (pack.id.clone(), pack.enabled))
+                    .collect(),
+                duplicates: tweaks::profile::ProfileDuplicates {
+                    min_size_bytes: current.duplicates.min_size_bytes,
+                    roots: current.duplicates.roots,
+                },
+                quarantine: tweaks::profile::ProfileQuarantine {
+                    retention_days: current.quarantine.retention_days,
+                    max_bytes: current.quarantine.max_bytes,
+                },
+            },
+        };
+        std::fs::write(&path, tweaks::profile::to_json(&profile)?).map_err(CoreError::from)?;
+        Ok(())
+    })
+}
+
+/// Read and check a profile file and show what importing it would change.
+/// Writes nothing: the page applies the tweaks with `execute` (fenced, with
+/// undo records) and the settings with `set_settings` (re-validated).
+///
+/// # Errors
+/// Refuses a profile that is too large, malformed, of another version, or that
+/// names an unknown or fenced tweak or an unknown cleaner pack.
+#[tauri::command]
+pub async fn profile_preview<R: Runtime>(
+    path: PathBuf,
+    app: AppHandle<R>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+) -> Result<ProfilePreview, ApiError> {
+    guarded_async("profile_preview", async {
+        let started_at = Utc::now();
+        let profile = tweaks::profile::read(&path, &services.tweaks)?;
+        let (states, current) = db.with(|conn| {
+            Ok::<_, CoreError>((services.tweaks.scan(conn)?, read_settings(&services, conn)?))
+        })?;
+        let settings = merge_profile_settings(current, profile.settings)?;
+        let states: Vec<_> = states
+            .into_iter()
+            .filter(|state| profile.tweaks.contains(&state.id))
+            .collect();
+        let (scan_id, recommendations) = store_tweaks_scan(&app, &store, &db, &states, started_at);
+        Ok(ProfilePreview {
+            scan_id,
+            tweaks: states,
+            recommendations,
+            settings,
+        })
+    })
+    .await
+}
+
+/// The current settings with a profile's values laid over them, clamped the
+/// way `set_settings` clamps them.
+fn merge_profile_settings(
+    current: AppSettings,
+    incoming: tweaks::profile::ProfileSettings,
+) -> crate::core::error::Result<AppSettings> {
+    if let Some(unknown) = incoming
+        .cleaner_packs
+        .keys()
+        .find(|id| !current.cleaner.packs.iter().any(|pack| &pack.id == *id))
+    {
+        return Err(CoreError::Tweak(format!(
+            "this profile cannot be imported: unknown cleaner pack `{unknown}`"
+        )));
+    }
+    let packs = current
+        .cleaner
+        .packs
+        .into_iter()
+        .map(|pack| PackView {
+            enabled: incoming
+                .cleaner_packs
+                .get(&pack.id)
+                .copied()
+                .unwrap_or(pack.enabled),
+            ..pack
+        })
+        .collect();
+    let policy = RetentionPolicy::validated(
+        incoming.quarantine.retention_days,
+        incoming.quarantine.max_bytes,
+    );
+    Ok(AppSettings {
+        cleaner: CleanerSettingsView { packs },
+        duplicates: duplicates::DuplicatesSettings {
+            min_size_bytes: incoming.duplicates.min_size_bytes,
+            roots: incoming.duplicates.roots,
+        }
+        .validated(),
+        quarantine: policy.into(),
+    })
 }
 
 /// Put a tweak's recorded prior value back.

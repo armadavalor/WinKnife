@@ -14,17 +14,36 @@
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
+  import { tweaksUpdateStatus } from "$lib/api";
   import { tweaksStore } from "$lib/stores/tweaks.svelte";
-  import type { TweakRestart, TweakState } from "$lib/types";
+  import { isApiError, type TweakRestart, type TweakState, type UpdateStatus } from "$lib/types";
 
   const MODULE_ID = "tweaks";
   const manifest = $derived(moduleStore.find(MODULE_ID));
   const store = tweaksStore;
 
   let pending = $state<TweakState | null>(null);
+  let updateStatus = $state<UpdateStatus | null>(null);
+  let updateError = $state<string | null>(null);
+
+  async function loadUpdateStatus(): Promise<void> {
+    updateError = null;
+    try {
+      updateStatus = await tweaksUpdateStatus();
+    } catch (error: unknown) {
+      updateStatus = null;
+      updateError = isApiError(error) ? error.message : String(error);
+    }
+  }
+
+  function refresh(): void {
+    void store.reload();
+    void loadUpdateStatus();
+  }
 
   onMount(() => {
     void store.load();
+    void loadUpdateStatus();
   });
 
   const restartLabel: Record<TweakRestart, string> = {
@@ -82,7 +101,7 @@
         type="button"
         class="btn-outline px-2.5! py-1! text-xs!"
         disabled={store.busy !== null}
-        onclick={() => store.reload()}
+        onclick={refresh}
       >
         {t("tweaks.refresh")}
       </button>
@@ -108,6 +127,9 @@
             </p>
             {#if tweak.error}
               <p class="mt-1.5 text-xs leading-relaxed text-risk-warning">{tweak.error}</p>
+            {/if}
+            {#if tweak.drift}
+              <p class="mt-1.5 text-xs leading-relaxed text-risk-warning">{tweak.drift}</p>
             {/if}
             <details class="group mt-1.5">
               <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
@@ -144,7 +166,11 @@
                 disabled={store.busy !== null}
                 onclick={() => (pending = tweak)}
               >
-                {store.busy === tweak.id ? t("tweaks.working") : t("tweaks.apply")}
+                {store.busy === tweak.id
+                  ? t("tweaks.working")
+                  : tweak.drift
+                    ? t("tweaks.reapply")
+                    : t("tweaks.apply")}
               </button>
             {:else if !tweak.error}
               <span class="text-[0.7rem] text-ink-muted">{t("tweaks.done")}</span>
@@ -153,6 +179,34 @@
         </li>
       {/each}
     </ul>
+
+    <section class="rounded-xl border border-surface-2 bg-surface-1 p-4">
+      <h2 class="text-sm font-medium">{t("tweaks.updateTitle")}</h2>
+      <p class="mt-1 text-xs text-ink-muted">{t("tweaks.updateIntro")}</p>
+      {#if updateError}
+        <p class="mt-2 text-xs text-risk-warning">{updateError}</p>
+      {:else if updateStatus === null}
+        <p class="mt-2 text-xs text-ink-faint">{t("tweaks.loading")}</p>
+      {:else}
+        {#if updateStatus.blocks.length === 0 && updateStatus.errors.length === 0}
+          <p class="mt-2 text-xs text-ink-muted">{t("tweaks.updateClear")}</p>
+        {:else}
+          <ul class="mt-2 flex flex-col gap-2">
+            {#each updateStatus.blocks as block (block.path)}
+              <li class="text-xs">
+                <p class="leading-relaxed text-risk-warning">{block.reason}</p>
+                <p class="mt-0.5 select-text break-all font-mono text-[0.7rem] text-ink-faint">
+                  {block.path} = {block.value}
+                </p>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#each updateStatus.errors as error (error)}
+          <p class="mt-1.5 break-all text-xs text-risk-warning">{t("tweaks.updateUnread")} {error}</p>
+        {/each}
+      {/if}
+    </section>
 
     {#if store.lastReport}
       <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">

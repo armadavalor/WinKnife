@@ -633,6 +633,21 @@ export interface TweakState {
   sourceUrl: string;
   /** Why it could not be read or judged; such a row gets no action. */
   error: string | null;
+  /** WinKnife set it, but the live value has changed since: why, in words. */
+  drift: string | null;
+}
+
+/** One value that stops or holds back Windows Update. Read-only report. */
+export interface UpdateBlock {
+  path: string;
+  value: string;
+  reason: string;
+}
+
+/** What `tweaks_update_status` found; `errors` lists values it could not read. */
+export interface UpdateStatus {
+  blocks: UpdateBlock[];
+  errors: string[];
 }
 
 /** What `tweaks_scan` hands back. */
@@ -717,6 +732,17 @@ export interface AppSettings {
   cleaner: CleanerSettingsView;
   duplicates: DuplicatesSettings;
   quarantine: QuarantineSettings;
+}
+
+/**
+ * A checked profile, nothing applied yet. `recommendations` apply its tweaks
+ * through `execute`; `settings` is what saving would store.
+ */
+export interface ProfilePreview {
+  scanId: string;
+  tweaks: TweakState[];
+  recommendations: Recommendation[];
+  settings: AppSettings;
 }
 
 /* -------------------------------------------------------------------------

@@ -21,6 +21,9 @@ use crate::core::types::{
     Action, Finding, FindingKind, Justification, Recommendation, RiskBucket, MAX_CONFIDENCE,
 };
 
+pub mod profile;
+pub mod update_block;
+
 /// What has to happen before a changed setting shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,6 +198,10 @@ pub struct TweakState {
     pub source_url: String,
     /// Why the value could not be judged; such a row gets no action.
     pub error: Option<String>,
+    /// WinKnife set this value, and something changed it since (C7). The
+    /// reason says what was expected and what is there now. Re-applying is the
+    /// ordinary apply, offered by [`recommendation`], never done on its own.
+    pub drift: Option<String>,
 }
 
 /// An open undo record.
@@ -205,13 +212,14 @@ struct UndoRow {
     value_name: String,
     prior: Option<(u32, Vec<u8>)>,
     applied: (u32, Vec<u8>),
+    applied_at: String,
 }
 
 fn open_row(conn: &Connection, tweak_id: &str) -> Result<Option<UndoRow>> {
     Ok(conn
         .query_row(
             "SELECT id, hive, subkey, value_name, prior_kind, prior_bytes,
-                    applied_kind, applied_bytes
+                    applied_kind, applied_bytes, applied_at
              FROM tweak_undo
              WHERE tweak_id = ?1 AND closed_at IS NULL
              ORDER BY id DESC LIMIT 1",
@@ -226,6 +234,7 @@ fn open_row(conn: &Connection, tweak_id: &str) -> Result<Option<UndoRow>> {
                     value_name: row.get(3)?,
                     prior: prior_kind.zip(prior_bytes),
                     applied: (row.get(6)?, row.get(7)?),
+                    applied_at: row.get(8)?,
                 })
             },
         )
@@ -242,6 +251,26 @@ fn close_row(conn: &Connection, id: i64, reason: &str) -> Result<()> {
 
 fn same_value(value: Option<&RegValue>, expected: &(u32, Vec<u8>)) -> bool {
     value.is_some_and(|value| value.kind == expected.0 && value.bytes == expected.1)
+}
+
+/// Why a value WinKnife set no longer holds what it wrote, or `None` when it
+/// still does. Read-only.
+fn drift_reason(tweak: &Tweak, row: &UndoRow, live: Option<&RegValue>) -> Option<String> {
+    if same_value(live, &row.applied) {
+        return None;
+    }
+    let found = match live {
+        None => "it is not set".to_owned(),
+        Some(value) => match value.as_dword() {
+            Some(number) => format!("it holds {number}"),
+            None => "it holds something other than a number".to_owned(),
+        },
+    };
+    let when = row.applied_at.get(..10).unwrap_or(&row.applied_at);
+    Some(format!(
+        "WinKnife set this to {} on {when}, but {found} now. Windows Update, another app or a manual change may have reset it.",
+        tweak.target
+    ))
 }
 
 /// The tweak engine: catalogue, fence, apply with undo record, undo.
@@ -262,6 +291,11 @@ impl TweakService {
     #[cfg(test)]
     fn with_catalog(registry: Arc<dyn Registry>, catalog: Vec<Tweak>) -> Self {
         Self { registry, catalog }
+    }
+
+    /// What is holding Windows Update back, if anything. Read-only (C7).
+    pub fn update_status(&self, now: chrono::DateTime<chrono::Utc>) -> update_block::UpdateStatus {
+        update_block::check(self.registry.as_ref(), now)
     }
 
     /// A known tweak inside the fence.
@@ -290,19 +324,20 @@ impl TweakService {
         self.catalog
             .iter()
             .map(|tweak| {
-                let (current, error) = match self.live(tweak) {
+                let live = self.live(tweak);
+                let (current, error) = match &live {
                     Err(err) => (None, Some(err.to_string())),
                     Ok(value) => match observe(value.as_ref()) {
                         Ok(current) => (current, fence_refusal(tweak)),
                         Err(reason) => (None, Some(reason)),
                     },
                 };
-                let applied = match open_row(conn, tweak.id)? {
-                    Some(row) => self
-                        .live(tweak)
-                        .is_ok_and(|value| same_value(value.as_ref(), &row.applied)),
-                    None => false,
+                let drift = match (open_row(conn, tweak.id)?, &live) {
+                    (Some(row), Ok(value)) => Some(drift_reason(tweak, &row, value.as_ref())),
+                    _ => None,
                 };
+                // Applied: on record, and the live value is still what was written.
+                let applied = drift == Some(None);
                 Ok(TweakState {
                     id: tweak.id.to_owned(),
                     name: tweak.name.to_owned(),
@@ -315,6 +350,7 @@ impl TweakService {
                     undoability: tweak.undo,
                     source_url: tweak.source_url.to_owned(),
                     error,
+                    drift: drift.flatten(),
                 })
             })
             .collect()
@@ -748,5 +784,69 @@ mod tests {
         let (_, rec) = recommendation(&states[1]).expect("hidden files offered");
         assert_eq!(rec.action, Action::ApplyTweak);
         assert!(!rec.reason.is_empty());
+    }
+
+    #[test]
+    fn drift_is_reported_with_a_reason_and_nothing_is_written() {
+        let (registry, service) = service(MapRegistry::new());
+        let conn = open_in_memory().expect("db");
+        service.apply(&conn, EXT).expect("apply");
+        assert_eq!(service.scan(&conn).expect("scan")[0].drift, None);
+
+        // Something else puts the old value back.
+        registry
+            .set_value(
+                Hive::CurrentUser,
+                EXPLORER_ADVANCED,
+                &RegValue::dword("HideFileExt", 1),
+            )
+            .expect("outside change");
+        let writes = registry.writes().len();
+
+        let state = &service.scan(&conn).expect("scan")[0];
+        let reason = state.drift.as_deref().expect("drift");
+        assert!(reason.contains("set this to 0"), "{reason}");
+        assert!(reason.contains("holds 1"), "{reason}");
+        assert!(!state.applied);
+        assert_eq!(registry.writes().len(), writes, "scan is read-only");
+
+        // Removed altogether reads as "not set".
+        registry
+            .delete_value(Hive::CurrentUser, EXPLORER_ADVANCED, "HideFileExt")
+            .expect("outside delete");
+        let state = &service.scan(&conn).expect("scan")[0];
+        assert!(state.drift.as_deref().expect("drift").contains("not set"));
+
+        // A tweak WinKnife never set has no drift, whatever its value.
+        assert_eq!(service.scan(&conn).expect("scan")[1].drift, None);
+    }
+
+    #[test]
+    fn reapplying_a_drifted_tweak_goes_through_apply_and_undo_restores_the_drifted_value() {
+        let (registry, service) = service(MapRegistry::new());
+        let conn = open_in_memory().expect("db");
+        service.apply(&conn, EXT).expect("apply");
+        registry
+            .set_value(
+                Hive::CurrentUser,
+                EXPLORER_ADVANCED,
+                &RegValue::dword("HideFileExt", 1),
+            )
+            .expect("outside change");
+
+        let state = &service.scan(&conn).expect("scan")[0];
+        let (_, rec) = recommendation(state).expect("re-apply offered");
+        let Justification::Tweak { observed, .. } = rec.justification else {
+            panic!("tweak justification");
+        };
+        assert_eq!(service.refusal(EXT, observed), None);
+        service.apply(&conn, EXT).expect("re-apply");
+        let state = &service.scan(&conn).expect("scan")[0];
+        assert!(state.applied);
+        assert_eq!(state.drift, None);
+        assert_eq!(open_rows(&conn), 1);
+
+        service.undo(&conn, EXT).expect("undo");
+        assert_eq!(hide_file_ext(&registry).and_then(|v| v.as_dword()), Some(1));
     }
 }

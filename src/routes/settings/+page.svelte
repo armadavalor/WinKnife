@@ -7,10 +7,20 @@
   Rust clamps retention and the duplicate size floor, and the page says so.
 -->
 <script lang="ts">
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import LoadingNote from "$lib/components/LoadingNote.svelte";
   import { onMount } from "svelte";
 
   import PageHeader from "$lib/components/PageHeader.svelte";
+  import {
+    execute,
+    getSettings,
+    pickProfileOpen,
+    pickProfileSave,
+    profileExport,
+    profilePreview,
+    setSettings,
+  } from "$lib/api";
   import { formatBytes } from "$lib/format";
   import { t, tModuleName, type TranslationKey } from "$lib/i18n";
   import { hiddenModules } from "$lib/stores/hiddenModules.svelte";
@@ -20,6 +30,7 @@
   import { glow } from "$lib/stores/glow.svelte";
   import { motion } from "$lib/stores/motion.svelte";
   import { THEMES, theme } from "$lib/stores/theme.svelte";
+  import { isApiError, type AppSettings, type ProfilePreview } from "$lib/types";
 
   const store = settingsStore;
 
@@ -54,6 +65,123 @@
     forest: ["oklch(15% 0.014 158)", "oklch(24% 0.018 158)", "oklch(76% 0.11 182)"],
     mist: ["oklch(96% 0.004 265)", "oklch(87.5% 0.007 265)", "oklch(48% 0.12 205)"],
   } as const;
+
+  /** A checked profile and the settings it would replace; nothing applied yet. */
+  let preview = $state<{ profile: ProfilePreview; changes: string[] } | null>(null);
+  let confirming = $state(false);
+  let profileBusy = $state(false);
+  let profileNote = $state<string | null>(null);
+  let profileError = $state<string | null>(null);
+  let profileFailures = $state<string[]>([]);
+
+  function errorText(error: unknown): string {
+    return isApiError(error) ? error.message : String(error);
+  }
+
+  function resetProfileMessages(): void {
+    profileNote = null;
+    profileError = null;
+    profileFailures = [];
+  }
+
+  /** What saving `to` over the stored `from` would change, in words. */
+  function settingsChanges(from: AppSettings, to: AppSettings): string[] {
+    const changes: string[] = [];
+    for (const pack of to.cleaner.packs) {
+      const before = from.cleaner.packs.find((p) => p.id === pack.id)?.enabled;
+      if (before !== pack.enabled) {
+        changes.push(
+          t(pack.enabled ? "settings.profileDiffPackOn" : "settings.profileDiffPackOff", {
+            name: pack.name,
+          }),
+        );
+      }
+    }
+    if (from.duplicates.minSizeBytes !== to.duplicates.minSizeBytes) {
+      changes.push(
+        t("settings.profileDiffMinSize", {
+          from: formatBytes(from.duplicates.minSizeBytes),
+          to: formatBytes(to.duplicates.minSizeBytes),
+        }),
+      );
+    }
+    if (JSON.stringify(from.duplicates.roots) !== JSON.stringify(to.duplicates.roots)) {
+      changes.push(t("settings.profileDiffRoots", { count: to.duplicates.roots.length }));
+    }
+    if (from.quarantine.retentionDays !== to.quarantine.retentionDays) {
+      changes.push(
+        t("settings.profileDiffRetention", {
+          from: from.quarantine.retentionDays,
+          to: to.quarantine.retentionDays,
+        }),
+      );
+    }
+    if (from.quarantine.maxBytes !== to.quarantine.maxBytes) {
+      changes.push(
+        t("settings.profileDiffMaxBytes", {
+          from: formatBytes(from.quarantine.maxBytes),
+          to: formatBytes(to.quarantine.maxBytes),
+        }),
+      );
+    }
+    return changes;
+  }
+
+  async function exportProfile(): Promise<void> {
+    resetProfileMessages();
+    const path = await pickProfileSave();
+    if (path === null) return;
+    try {
+      await profileExport(path);
+      profileNote = t("settings.profileExported", { path });
+    } catch (error: unknown) {
+      profileError = errorText(error);
+    }
+  }
+
+  async function importProfile(): Promise<void> {
+    resetProfileMessages();
+    preview = null;
+    const path = await pickProfileOpen();
+    if (path === null) return;
+    profileBusy = true;
+    try {
+      const [profile, stored] = await Promise.all([profilePreview(path), getSettings()]);
+      preview = { profile, changes: settingsChanges(stored, profile.settings) };
+    } catch (error: unknown) {
+      profileError = errorText(error);
+    } finally {
+      profileBusy = false;
+    }
+  }
+
+  // Tweaks go through the ordinary execute path, so the fence and the undo
+  // store apply exactly as on the Tweaks page.
+  async function applyProfile(): Promise<void> {
+    confirming = false;
+    const checked = preview?.profile;
+    if (!checked) return;
+    profileBusy = true;
+    try {
+      const ids = checked.recommendations.map((rec) => rec.id);
+      const report = ids.length > 0 ? await execute(checked.scanId, ids, false) : null;
+      profileFailures = (report?.items ?? []).flatMap((item) =>
+        item.outcome.status === "failed"
+          ? [`${item.path}: ${item.outcome.error}`]
+          : item.outcome.status === "skipped"
+            ? [`${item.path}: ${item.outcome.reason}`]
+            : [],
+      );
+      await setSettings(checked.settings);
+      await store.load();
+      profileNote = t("settings.profileApplied");
+      preview = null;
+    } catch (error: unknown) {
+      profileError = errorText(error);
+    } finally {
+      profileBusy = false;
+    }
+  }
 
   // Run-once mounting, deliberately not reactive: as an effect this subscribed
   // to the store's own `status` and reloaded on every transition it caused.
@@ -331,5 +459,108 @@
         <p class="text-xs text-risk-safe">{t("settings.saved")}</p>
       {/if}
     </div>
+
+    <section class="flex flex-col gap-4 rounded-xl border border-surface-2 bg-surface-1 p-6">
+      <div>
+        <h2 class="text-sm font-medium">{t("settings.profileTitle")}</h2>
+        <p class="mt-1 text-xs leading-relaxed text-ink-muted">
+          {t("settings.profileSubtitle")}
+        </p>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn-secondary" disabled={profileBusy} onclick={exportProfile}>
+          {t("settings.profileExport")}
+        </button>
+        <button type="button" class="btn-secondary" disabled={profileBusy} onclick={importProfile}>
+          {t("settings.profileImport")}
+        </button>
+      </div>
+
+      {#if preview}
+        {@const checked = preview.profile}
+        {@const pending = checked.recommendations.length}
+        <div class="flex flex-col gap-3 rounded-lg border border-surface-2 p-4">
+          <h3 class="text-sm text-ink">{t("settings.profileTweaksHeading")}</h3>
+          {#if checked.tweaks.length === 0}
+            <p class="text-xs text-ink-faint">{t("settings.profileNoTweaks")}</p>
+          {:else}
+            <ul class="flex flex-col gap-1.5 text-xs">
+              {#each checked.tweaks as tweak (tweak.id)}
+                <li class="flex flex-col">
+                  <span class="text-ink">{tweak.name}</span>
+                  <span class="text-ink-faint">
+                    {#if tweak.error}
+                      {tweak.error}
+                    {:else if tweak.applied}
+                      {t("settings.profileTweakAlready")}
+                    {:else}
+                      {t("settings.profileTweakChange", {
+                        from: tweak.current === null ? t("settings.profileNotSet") : tweak.current,
+                        to: tweak.target,
+                      })}
+                    {/if}
+                  </span>
+                  <span class="select-text break-all text-[0.7rem] text-ink-faint">{tweak.path}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+
+          <h3 class="text-sm text-ink">{t("settings.profileSettingsHeading")}</h3>
+          {#if preview.changes.length === 0}
+            <p class="text-xs text-ink-faint">{t("settings.profileNoSettingChanges")}</p>
+          {:else}
+            <ul class="flex list-disc flex-col gap-1 pl-5 text-xs text-ink-muted">
+              {#each preview.changes as change (change)}
+                <li>{change}</li>
+              {/each}
+            </ul>
+          {/if}
+
+          <div class="flex gap-2">
+            <button
+              type="button"
+              class="btn-primary"
+              disabled={profileBusy || (pending === 0 && preview.changes.length === 0)}
+              onclick={() => (confirming = true)}
+            >
+              {t("settings.profileApply")}
+            </button>
+            <button
+              type="button"
+              class="btn-secondary"
+              disabled={profileBusy}
+              onclick={() => (preview = null)}
+            >
+              {t("settings.profileCancel")}
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      {#if profileNote}
+        <p class="select-text break-all text-xs text-risk-safe">{profileNote}</p>
+      {/if}
+      {#if profileError}
+        <p class="text-xs text-risk-danger">{profileError}</p>
+      {/if}
+      {#each profileFailures as failure (failure)}
+        <p class="select-text break-all text-xs text-risk-review">{failure}</p>
+      {/each}
+    </section>
   {/if}
 </div>
+
+<ConfirmDialog
+  open={confirming}
+  title={t("settings.profileConfirmTitle")}
+  message={t("settings.profileConfirmBody", {
+    tweaks: preview?.profile.recommendations.length ?? 0,
+    settings: preview?.changes.length ?? 0,
+  })}
+  note={t("settings.profileConfirmNote")}
+  confirmLabel={t("settings.profileApply")}
+  onconfirm={applyProfile}
+  oncancel={() => (confirming = false)}
+/>

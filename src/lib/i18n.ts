@@ -251,6 +251,33 @@ const en = {
   "settings.save": "Save settings",
   "settings.saving": "Saving…",
   "settings.saved": "Saved.",
+  "settings.profileTitle": "Settings profile",
+  "settings.profileSubtitle":
+    "Export saves the tweaks WinKnife has applied and your saved settings to a JSON file. Import checks a file first, shows what it would change, and applies nothing until you confirm. Tweaks are applied the same way as on the Tweaks page, so each one can be undone there.",
+  "settings.profileExport": "Export profile…",
+  "settings.profileImport": "Import profile…",
+  "settings.profileExported": "Profile saved to {path}",
+  "settings.profileTweaksHeading": "Tweaks in this profile",
+  "settings.profileNoTweaks": "This profile applies no tweaks.",
+  "settings.profileTweakAlready": "Already applied.",
+  "settings.profileTweakChange": "Will change from {from} to {to}.",
+  "settings.profileNotSet": "not set",
+  "settings.profileSettingsHeading": "Settings changes",
+  "settings.profileNoSettingChanges": "No settings change.",
+  "settings.profileDiffPackOn": "Turn on the “{name}” pack.",
+  "settings.profileDiffPackOff": "Turn off the “{name}” pack.",
+  "settings.profileDiffMinSize": "Duplicate minimum size: {from} → {to}.",
+  "settings.profileDiffRoots": "Replace the duplicate scan folders ({count} in the profile).",
+  "settings.profileDiffRetention": "Quarantine retention: {from} → {to} days.",
+  "settings.profileDiffMaxBytes": "Quarantine size cap: {from} → {to}.",
+  "settings.profileApply": "Apply profile",
+  "settings.profileCancel": "Cancel",
+  "settings.profileApplied": "Profile applied.",
+  "settings.profileConfirmTitle": "Apply this profile?",
+  "settings.profileConfirmBody":
+    "{tweaks} tweak(s) will be applied and {settings} setting(s) changed.",
+  "settings.profileConfirmNote":
+    "Each tweak records its old value first and can be undone on the Tweaks page.",
   "settings.adjusted":
     "Some values were outside the allowed range and have been adjusted.",
   "settings.packsTitle": "What the cleaner checks",
@@ -657,6 +684,12 @@ const en = {
   "tweaks.confirmNote":
     "The current value is recorded first, so Undo on this page puts it back exactly.",
   "tweaks.confirmAction": "Apply",
+  "tweaks.reapply": "Re-apply",
+  "tweaks.updateTitle": "Is something blocking Windows Update?",
+  "tweaks.updateIntro":
+    "WinKnife only reads these values and never changes them. Policies are often set by an employer or another tool.",
+  "tweaks.updateClear": "Nothing WinKnife checks for is holding Windows Update back.",
+  "tweaks.updateUnread": "Could not read",
   "module.duplicates.description":
     "Find files that are exact copies of each other, pick which one to keep, and tidy the rest away.",
   "module.startup.description":
