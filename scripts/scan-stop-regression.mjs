@@ -26,6 +26,8 @@ globalThis.__scanApi = {
   treemapChildren() { return Promise.resolve(null); },
   treemapDrives() { return Promise.resolve([]); },
   execute() { return Promise.reject(new Error('not under test')); },
+  setFolderKeepRule() { return Promise.reject(new Error('not under test')); },
+  ignoreFolderGroup() { return Promise.reject(new Error('not under test')); },
 };
 const emit = (module, scanId, itemsScanned = 0) =>
   listeners.forEach(handler => handler({ module, scanId, itemsScanned, currentPath: 'C:\\big', pct: null, itemsTotal: null }));
@@ -58,7 +60,7 @@ const { treemapStore } = await import(compileStore('treemap.svelte.ts'));
   assert.deepEqual(cancels, ['dup-1'], 'The first event must carry the deferred Stop');
   emit('duplicates', 'dup-1', 5);
   assert.equal(cancels.length, 1, 'One Stop, one cancel');
-  scans.at(-1).resolve({ scanId: 'dup-1', wastedBytes: 0, scan: { sets: [], findings: [], linkedNames: [], skippedRoots: [], filesHashed: 0, unreadable: 0, cancelled: true }, recommendations: [] });
+  scans.at(-1).resolve({ scanId: 'dup-1', wastedBytes: 0, scan: { sets: [], findings: [], linkedNames: [], skippedRoots: [], filesHashed: 0, unreadable: 0, cancelled: true }, folderGroups: [], recommendations: [] });
   await run;
   assert.equal(duplicatesStore.step, 'review');
   assert.equal(duplicatesStore.result.scan.cancelled, true);
