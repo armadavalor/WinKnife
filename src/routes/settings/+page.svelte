@@ -177,6 +177,19 @@
     </ul>
   </section>
 
+  <section class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-6">
+    <h2 class="text-sm font-medium">{t("about.title")}</h2>
+    <p class="text-xs leading-relaxed text-ink-muted">{t("about.official")}</p>
+    <h3 class="mt-1 text-sm text-ink">{t("about.neverTitle")}</h3>
+    <ul class="flex list-disc flex-col gap-1.5 pl-5 text-xs leading-relaxed text-ink-muted">
+      <li>{t("about.never.network")}</li>
+      <li>{t("about.never.update")}</li>
+      <li>{t("about.never.service")}</li>
+      <li>{t("about.never.delete")}</li>
+    </ul>
+    <p class="text-xs text-ink-faint">{t("about.verify")}</p>
+  </section>
+
   {#if store.error}
     <p
       class="rounded-xl border border-risk-danger/30 bg-surface-1 p-4 text-sm text-risk-danger"

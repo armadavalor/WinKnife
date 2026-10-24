@@ -47,6 +47,27 @@ Releases are currently **unsigned**, so Windows SmartScreen may warn on first ru
 | Reviewers (review every change from non-committers) | [@armadavalor](https://github.com/armadavalor) |
 | Approvers (approve each signing request) | [@armadavalor](https://github.com/armadavalor) |
 
+Flagged anyway? See the [antivirus false-positive note](docs/ANTIVIRUS-FALSE-POSITIVE.md).
+
+## Verify this download
+
+Get WinKnife only from the [GitHub releases page](https://github.com/armadavalor/WinKnife/releases) (`armadavalor/WinKnife`). A winget package (`armadavalor.WinKnife`) is submitted to the winget community repository and may not be available yet; there is no Scoop package. Copies from anywhere else are not ours.
+
+Check the SHA-256 against `SHA256SUMS.txt` from the same release:
+
+```powershell
+Get-FileHash .\WinKnife_<version>_x64-setup.exe -Algorithm SHA256
+Get-Content .\SHA256SUMS.txt
+```
+
+The two hashes for that file name must be identical. Release files also carry a GitHub build attestation, which proves they were built from this repository by `release.yml` (not that the code is safe). With the [GitHub CLI](https://cli.github.com/):
+
+```powershell
+gh attestation verify .\WinKnife_<version>_x64-setup.exe --repo armadavalor/WinKnife
+```
+
+Attestations start with the first release built after they were added; older releases only have `SHA256SUMS.txt`. The installer is unsigned, so Windows will still show SmartScreen.
+
 Privacy: WinKnife does not transfer any information to other networked systems.
 
 ## Build and run
