@@ -1111,10 +1111,22 @@ fn startup_safe_refusal(entry: &startup::StartupEntry, brain: &Brain) -> Option<
         Some(canonical) => format!("`{}` (really `{}`)", program.display(), canonical.display()),
         None => format!("`{}`", program.display()),
     };
+    // `refusal.reason` is worded for the cleaner ("not cleanable … use the
+    // app's own uninstaller"). The list's own entry, up to its advice, names
+    // the place; a gate refusal the list did not make keeps the gate's words.
+    let judged = refusal.canonical.as_deref().unwrap_or(program);
+    let place = brain.protected_paths().reason_for(judged).map_or_else(
+        || refusal.reason.clone(),
+        |listed| {
+            listed
+                .split_once(": ")
+                .map_or(listed, |(place, _)| place)
+                .to_owned()
+        },
+    );
     Some(format!(
-        "the program it runs, {named}, is treated as a protected location ({}), and WinKnife \
-         never rates anything there as safe.",
-        refusal.reason
+        "the program it runs, {named}, is in a place WinKnife protects ({place}), and a \
+         startup entry is only rated safe when its program lives outside every such place."
     ))
 }
 
@@ -2173,10 +2185,21 @@ mod tests {
 
         assert_eq!(recommendation.risk, RiskBucket::NeedsReview);
         assert!(
-            recommendation.reason.contains(&refusal.reason),
-            "the gate's reason has to reach the user: {}",
+            recommendation
+                .reason
+                .contains("an installed-programs directory"),
+            "the gate's verdict has to reach the user: {}",
             recommendation.reason
         );
+        // The gate words its refusal for the cleaner; none of that reads right
+        // on the Startup page, where nothing is cleaned or uninstalled.
+        for cleaner_wording in ["not cleanable", "uninstaller", &refusal.reason] {
+            assert!(
+                !recommendation.reason.contains(cleaner_wording),
+                "`{cleaner_wording}` is the cleaner's wording: {}",
+                recommendation.reason
+            );
+        }
         assert!(
             recommendation
                 .reason

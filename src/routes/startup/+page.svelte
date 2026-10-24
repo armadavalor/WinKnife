@@ -24,7 +24,7 @@
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { startupStore } from "$lib/stores/startup.svelte";
-  import type { StartupEntry } from "$lib/types";
+  import type { RiskBucket, StartupEntry } from "$lib/types";
 
   const MODULE_ID = "startup";
   const manifest = $derived(moduleStore.find(MODULE_ID));
@@ -49,6 +49,18 @@
     "user-choice": t("startup.verdictUserChoice"),
     "safe-to-disable": t("startup.verdictSafeToDisable"),
     unknown: t("startup.verdictUnknown"),
+  };
+
+  // Rust's rating for an entry it offers to turn off; colours match RiskBadge.
+  const ratingLabel: Record<RiskBucket, string> = {
+    safe: t("startup.ratingSafe"),
+    needsReview: t("startup.ratingReview"),
+    doNotDelete: t("startup.verdictKeep"),
+  };
+  const ratingStyle: Record<RiskBucket, string> = {
+    safe: "text-risk-safe",
+    needsReview: "text-risk-review",
+    doNotDelete: "text-risk-danger",
   };
 
   function toggle(entry: StartupEntry): void {
@@ -138,6 +150,7 @@
 
     <ul class="flex flex-col gap-2">
       {#each store.entries as entry (entry.id)}
+        {@const rating = store.ratingOf(entry)}
         <li
           class="flex flex-wrap items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-4 {entry.osOwned
             ? 'opacity-60'
@@ -171,6 +184,14 @@
               {entry.location} · {truncatePath(entry.command, 64)}
             </p>
             <p class="mt-1.5 text-xs leading-relaxed text-ink-muted">{entry.note}</p>
+            {#if rating}
+              <details class="group mt-1.5">
+                <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
+                  {t("startup.ratingWhy")}
+                </summary>
+                <p class="mt-1 text-xs leading-relaxed text-ink-muted">{rating.reason}</p>
+              </details>
+            {/if}
             {#if entry.leftoverShortcut}
               <details class="group mt-1.5">
                 <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
@@ -190,7 +211,13 @@
             <span class="text-[0.7rem] text-ink-faint" title={entry.impactReason}>
               {t("startup.impact", { tier: impactLabel[entry.impact] })}
             </span>
-            <span class="text-[0.7rem] text-ink-faint">{verdictLabel[entry.verdict]}</span>
+            {#if rating}
+              <span class="text-[0.7rem] font-medium {ratingStyle[rating.risk]}">
+                {ratingLabel[rating.risk]}
+              </span>
+            {:else}
+              <span class="text-[0.7rem] text-ink-faint">{verdictLabel[entry.verdict]}</span>
+            {/if}
             <button
               type="button"
               role="switch"

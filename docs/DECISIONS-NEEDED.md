@@ -551,13 +551,18 @@ not ours to take.
       (2) the gate's wording ("protected location, not cleanable: … use the
       app's own uninstaller instead") was written for the cleaner and reads
       oddly inside a startup reason. Reword when the startup reason reaches
-      the UI;
+      the UI. **Resolved 2026-10-24 (#4):** the startup reason names the
+      protected place from the list's own entry and drops the cleaner's
+      advice;
       (3) the startup page still shows the known-app label "Safe to turn off"
       (grey, from `entry.verdict`) beside the known-app note, never the
       rating or its reason. That is no green rating, and the note explains
       the label, so it is not a hard-rule breach; but for a protected program
       the page and the backend now disagree. Open for polish: show the rating
-      and reason, or soften the label;
+      and reason, or soften the label. **Resolved 2026-10-24 (#4):** an
+      entry Rust rated shows the rating (green "Safe to turn off" or yellow
+      "Review before turning off") and its reason under "Why this rating?";
+      entries without a rating keep the grey known-app label;
       (4) QA exercised the gate only through unit tests: the protected
       entries on the QA machine (Epic, Spotify) were already disabled, so no
       live entry flipped from green to review.
@@ -839,4 +844,5 @@ not ours to take.
 
 ## Open items raised by the QA/QC pass (2026-10-20)
 
-- [x] 2026-10-20 (QA/QC, docs/QA-CHECKLIST.md A9): a restore claims the ledger row (`restored_at` set) before it moves the bytes back (security review M2, so two restores cannot race). If the process is killed between the claim and the move, the row is hidden from the drawer and skipped by purge: the bytes stay in the quarantine folder forever, with no way to restore or free them from the UI. Nothing is lost, but it leaks space and the user cannot see the item. Proposed fix: on startup, clear `restored_at` for rows whose `quarantine_path` still exists, so the item shows as held again. Caveat: after a crash in the middle of a cross-volume copy, the partial copy at the original path stays, and the item shows as held (a later restore then gets a `(restored)` name). Destructive-path change, so escalated, not implemented. **Resolved 2026-10-20:** the user approved the proposed fix; implemented as `Quarantine::recover_interrupted_restores`, run at startup before retention (K-017). Rows pointing outside the quarantine root are not trusted. Leftovers of a finished cross-volume restore also come back as held, visible instead of leaking; nothing is deleted.
+- [x] 2026-10-20 (QA/QC, docs/QA-CHECKLIST.md A9): a restore claims the ledger row (`restored_at` set) before it moves the bytes back (security review M2, so two restores cannot race). If the process is killed between the claim and the move, the row is hidden from the drawer and skipped by purge: the bytes stay in the quarantine folder forever, with no way to restore or free them from the UI. Nothing is lost, but it leaks space and the user cannot see the item. Proposed fix: on startup, clear `restored_at` for rows whose `quarantine_path` still exists, so the item shows as held again. Caveat: after a crash in the middle of a cross-volume copy, the partial copy at the original path stays, and the item shows as held (a later restore then gets a `(restored)` name). Destructive-path change, so escalated, not implemented.
+ **Resolved 2026-10-20:** the user approved the proposed fix; implemented as `Quarantine::recover_interrupted_restores`, run at startup before retention (K-017). Rows pointing outside the quarantine root are not trusted. Leftovers of a finished cross-volume restore also come back as held, visible instead of leaking; nothing is deleted.
