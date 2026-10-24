@@ -117,6 +117,9 @@ pub enum Action {
     Quarantine,
     /// Disable (not remove) an autostart entry.
     DisableStartupEntry,
+    /// Write one per-user setting, after recording what was there so it can be
+    /// put back (K-018).
+    ApplyTweak,
     /// Explicitly leave it alone; remembered so we stop re-suggesting it.
     Ignore,
     /// Nothing to do — shown for information only.
@@ -126,7 +129,10 @@ pub enum Action {
 impl Action {
     /// Whether applying this action changes the system.
     pub fn is_mutating(self) -> bool {
-        matches!(self, Self::Quarantine | Self::DisableStartupEntry)
+        matches!(
+            self,
+            Self::Quarantine | Self::DisableStartupEntry | Self::ApplyTweak
+        )
     }
 }
 
@@ -210,6 +216,15 @@ pub enum Justification {
         /// The command line as the scan read it. A different one now means the
         /// entry was replaced while the review screen was open.
         command: String,
+    },
+    /// A setting from the tweak catalogue. The executor re-reads the value and
+    /// refuses if it changed since the scan or already holds the target.
+    #[serde(rename_all = "camelCase")]
+    Tweak {
+        /// Catalogue id, e.g. `show-file-extensions`.
+        tweak_id: String,
+        /// The value as the scan read it; `None` when it was not set at all.
+        observed: Option<u32>,
     },
 }
 
@@ -523,13 +538,14 @@ mod tests {
         let json = serde_json::to_string(&[
             Action::Quarantine,
             Action::DisableStartupEntry,
+            Action::ApplyTweak,
             Action::Ignore,
             Action::InfoOnly,
         ])
         .expect("serialize");
         assert_eq!(
             json,
-            r#"["quarantine","disableStartupEntry","ignore","infoOnly"]"#
+            r#"["quarantine","disableStartupEntry","applyTweak","ignore","infoOnly"]"#
         );
     }
 
@@ -601,7 +617,11 @@ mod tests {
 
     #[test]
     fn do_not_delete_may_not_carry_a_mutating_action() {
-        for action in [Action::Quarantine, Action::DisableStartupEntry] {
+        for action in [
+            Action::Quarantine,
+            Action::DisableStartupEntry,
+            Action::ApplyTweak,
+        ] {
             let err = Recommendation::new(
                 finding_ids(),
                 RiskBucket::DoNotDelete,
@@ -637,7 +657,11 @@ mod tests {
     /// a justification get it verified" rather than "every action is verified".
     #[test]
     fn a_mutating_action_cannot_be_built_without_a_verifiable_justification() {
-        for action in [Action::Quarantine, Action::DisableStartupEntry] {
+        for action in [
+            Action::Quarantine,
+            Action::DisableStartupEntry,
+            Action::ApplyTweak,
+        ] {
             let err = Recommendation::new(
                 finding_ids(),
                 RiskBucket::Safe,
@@ -674,6 +698,11 @@ mod tests {
             command: "C:\\OneDrive.exe".to_owned(),
         }
         .is_verifiable());
+        assert!(Justification::Tweak {
+            tweak_id: "show-file-extensions".to_owned(),
+            observed: None,
+        }
+        .is_verifiable());
     }
 
     #[test]
@@ -692,6 +721,15 @@ mod tests {
         assert_eq!(
             startup,
             r#"{"kind":"startupEntry","source":"localMachineRun32","key":"Updater","command":"u.exe"}"#
+        );
+        let tweak = serde_json::to_string(&Justification::Tweak {
+            tweak_id: "show-hidden-files".to_owned(),
+            observed: Some(2),
+        })
+        .expect("serialize");
+        assert_eq!(
+            tweak,
+            r#"{"kind":"tweak","tweakId":"show-hidden-files","observed":2}"#
         );
     }
 

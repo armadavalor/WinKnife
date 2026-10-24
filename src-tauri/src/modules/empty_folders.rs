@@ -424,6 +424,7 @@ mod tests {
     use crate::core::db;
     use crate::core::executor::{
         execute, ExecEnvironment, ExecOptions, ExecUnit, NoStartupControl,
+        NoTweakControl,
     };
     use crate::core::platform::{AlwaysUnlocked, MapEnv, StubProcessProbe, StubRecycleBin};
     use crate::core::quarantine::{Quarantine, RetentionPolicy};
@@ -797,6 +798,7 @@ mod tests {
             brain,
             recycle_bin: &bin,
             startup: &NoStartupControl,
+            tweaks: &NoTweakControl,
         };
         let units = [ExecUnit {
             recommendation: rec,

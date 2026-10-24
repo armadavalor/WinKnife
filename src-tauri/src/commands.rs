@@ -56,7 +56,7 @@ use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
 use crate::modules::legacy_panels::{LegacyPanelsService, PanelInfo};
 use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
-use crate::modules::{startup, treemap};
+use crate::modules::{startup, treemap, tweaks};
 
 /// Run a sync command body, turning a panic into an `internal` [`ApiError`].
 ///
@@ -183,6 +183,8 @@ pub struct Services {
     pub startup: Arc<dyn executor::StartupControl>,
     /// The same service, for the enumeration and the re-enable path.
     pub startup_service: Arc<startup::StartupService>,
+    /// Per-user settings, for `Action::ApplyTweak` and its undo (K-018).
+    pub tweaks: Arc<tweaks::TweakService>,
     /// Directory the rule packs were loaded from, for diagnostics.
     pub rules_dir: PathBuf,
 }
@@ -416,6 +418,7 @@ pub async fn execute<R: Runtime>(
             brain: &services.brain,
             recycle_bin: services.recycle_bin.as_ref(),
             startup: services.startup.as_ref(),
+            tweaks: services.tweaks.as_ref(),
         };
         let mut emit = |done: u64, total: u64, finding: &crate::core::types::Finding| {
             // The final tick always goes out; the rest are throttled.
@@ -1086,6 +1089,92 @@ pub async fn startup_scan<R: Runtime>(
         })
     })
     .await
+}
+
+/* ----------------------------------------------------------------------
+ * Tweaks
+ * ---------------------------------------------------------------------- */
+
+/// What a tweaks scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TweaksScanResult {
+    /// Id `execute` needs to apply a tweak.
+    pub scan_id: Uuid,
+    /// Every catalogue tweak with its live value.
+    pub tweaks: Vec<tweaks::TweakState>,
+    /// One per tweak that can still be applied, so applying goes through the
+    /// executor's gates and lands in the audit log.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+}
+
+/// Read every catalogue tweak's live value. Read-only.
+///
+/// # Errors
+/// Returns an error only if the undo records cannot be read.
+#[tauri::command]
+pub async fn tweaks_scan<R: Runtime>(
+    app: AppHandle<R>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+) -> Result<TweaksScanResult, ApiError> {
+    guarded_async("tweaks_scan", async {
+        let started_at = Utc::now();
+        let states = db.with(|conn| services.tweaks.scan(conn))?;
+        let scan_id = Uuid::new_v4();
+        let (findings, recommendations): (Vec<_>, Vec<_>) =
+            states.iter().filter_map(tweaks::recommendation).unzip();
+
+        store.insert(ScanResult {
+            scan_id,
+            module: "tweaks".to_owned(),
+            findings,
+            recommendations: recommendations.clone(),
+            skipped_rules: Vec::new(),
+            cancelled: false,
+        });
+        remember(
+            &db,
+            scan_id,
+            "tweaks",
+            started_at,
+            states.len() as u64,
+            0,
+            false,
+        );
+        let _ = events::emit_scan_done(
+            &app,
+            &ScanDone {
+                scan_id,
+                module: "tweaks".to_owned(),
+                finding_count: states.len() as u64,
+            },
+        );
+
+        Ok(TweaksScanResult {
+            scan_id,
+            tweaks: states,
+            recommendations,
+        })
+    })
+    .await
+}
+
+/// Put a tweak's recorded prior value back.
+///
+/// # Errors
+/// Returns an error when there is nothing to undo, when the value was changed
+/// since the tweak was applied, or when the write or read-back fails.
+#[tauri::command(async)]
+pub fn tweaks_undo(
+    tweak_id: String,
+    services: State<'_, Services>,
+    db: State<'_, Arc<Database>>,
+) -> Result<(), ApiError> {
+    guarded("tweaks_undo", || {
+        Ok(db.with(|conn| services.tweaks.undo(conn, &tweak_id))?)
+    })
 }
 
 /// How every note explaining a withheld green rating opens.
