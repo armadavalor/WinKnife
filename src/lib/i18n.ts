@@ -564,6 +564,14 @@ const en = {
   "startup.leftoverSummary": "Why is this listed twice?",
   "restorePoint.uacSummary": "Why does Windows ask for permission?",
   "quarantine.detailsSummary": "Details",
+  "about.title": "About WinKnife",
+  "about.official": "The only official source is github.com/armadavalor/WinKnife. Releases there list a SHA-256 for every file; compare it with the one you computed.",
+  "about.neverTitle": "What WinKnife never does",
+  "about.never.network": "Makes no network connection unless you turn on an optional feature. Nothing is sent anywhere, and this page fetches nothing.",
+  "about.never.update": "Does not update itself. You install new versions yourself.",
+  "about.never.service": "Runs no background service. When the window closes, WinKnife stops.",
+  "about.never.delete": "Never deletes your files outright. Cleanup moves them to quarantine, where you can restore them; they are purged only when the retention age or size limit you set is reached. The one exception is emptying the Windows recycle bin: that is permanent, needs its own confirmation, and starts unticked.",
+  "about.verify": "How to verify a download: see \"Verify this download\" in the README on GitHub.",
 } as const;
 
 /** Turkish overrides. Missing keys fall back to English. */
@@ -793,6 +801,14 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "startup.ratingWhy": "Bu değerlendirme neden?",
   "restorePoint.uacSummary": "Windows neden izin istiyor?",
   "quarantine.detailsSummary": "Ayrıntılar",
+  "about.title": "WinKnife hakkında",
+  "about.official": "Tek resmî kaynak github.com/armadavalor/WinKnife. Oradaki sürümler her dosya için SHA-256 listeler; hesapladığınla karşılaştır.",
+  "about.neverTitle": "WinKnife'ın asla yapmadıkları",
+  "about.never.network": "İsteğe bağlı bir özelliği açmadıkça ağ bağlantısı kurmaz. Hiçbir yere bir şey göndermez, bu sayfa da hiçbir şey indirmez.",
+  "about.never.update": "Kendini güncellemez. Yeni sürümleri sen kurarsın.",
+  "about.never.service": "Arka planda hizmet çalıştırmaz. Pencere kapanınca WinKnife durur.",
+  "about.never.delete": "Dosyalarını doğrudan silmez. Temizlik onları geri yükleyebileceğin karantinaya taşır; yalnız belirlediğin saklama süresi veya boyut sınırı dolunca temizlenir. Tek istisna Windows geri dönüşüm kutusunu boşaltmak: kalıcıdır, ayrı onay ister ve tiksiz başlar.",
+  "about.verify": "İndirmeyi doğrulamak için GitHub'daki README'de \"Verify this download\" bölümüne bak.",
 };
 
 /** Every key the dictionary knows. */

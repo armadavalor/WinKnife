@@ -2365,3 +2365,19 @@ carries a reason.
 - Hidden/system files and empty subfolders are left out of the comparison.
 - Filename case counts.
 - The ignore key is content-based, so a changed folder shows up again.
+
+## 2026-10-24 — C9: provenance and verification
+
+**Built.** README "Verify this download" (official URLs, `Get-FileHash`,
+`gh attestation verify`), `docs/ANTIVIRUS-FALSE-POSITIVE.md`, an About block
+in Settings ("What WinKnife never does", official URL as text, no network
+call), and `actions/attest-build-provenance` in `release.yml` for the
+installer, ZIP and `SHA256SUMS.txt`.
+
+- `SHA256SUMS.txt` was already produced by `scripts/package-release.ps1`; no
+  change needed there.
+- Release workflow gained `id-token: write` and `attestations: write`. Triggers
+  untouched; no tag pushed.
+- README says winget is submitted but maybe not live and that Scoop does not
+  exist, rather than listing install commands that fail.
+- Deferred: the attestation step is untested until the next tag build.
