@@ -870,7 +870,12 @@ export interface PurgeReport {
    * across batch boundaries, so a batch can lose part of itself.
    */
   affectedBatches: string[];
+  /** Why each failed id could not be removed. */
+  failureReasons: Record<string, PurgeFailure>;
 }
+
+/** Why a purge could not remove one item. */
+export type PurgeFailure = "locked" | "accessDenied" | "outsideQuarantine" | "other";
 
 /* -------------------------------------------------------------------------
  * modules/shutdown_timer.rs

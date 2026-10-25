@@ -207,7 +207,10 @@ fn quarantine_writers() -> Vec<(&'static str, serde_json::Value)> {
         ("quarantine_restore", json!({ "batchId": nil })),
         ("quarantine_restore_item", json!({ "itemId": nil })),
         ("quarantine_purge", json!({})),
-        ("quarantine_purge_item", json!({ "itemId": nil })),
+        (
+            "quarantine_purge_items",
+            json!({ "itemIds": [nil], "confirmed": false }),
+        ),
     ]
 }
 

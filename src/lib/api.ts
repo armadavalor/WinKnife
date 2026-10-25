@@ -378,11 +378,12 @@ export function quarantinePurge(): Promise<PurgeReport> {
 }
 
 /**
- * Permanently remove one item whose encrypted restore was refused. The
- * backend refuses any other item (decision b, 2026-10-12).
+ * Permanently remove held items: one, a selection or a whole batch (K-020).
+ * Only call this after the drawer's "cannot be undone" dialog; the backend
+ * refuses without the confirmation flag.
  */
-export function quarantinePurgeItem(itemId: string): Promise<PurgeReport> {
-  return invoke<PurgeReport>("quarantine_purge_item", { itemId });
+export function quarantinePurgeItems(itemIds: string[]): Promise<PurgeReport> {
+  return invoke<PurgeReport>("quarantine_purge_items", { itemIds, confirmed: true });
 }
 
 /* -------------------------------------------------------------------------

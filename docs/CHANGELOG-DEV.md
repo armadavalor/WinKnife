@@ -2496,6 +2496,53 @@ settings save.
   refused by the settings merge. Test: a hand-crafted profile naming a fenced
   or unknown tweak is refused with no registry writes and no undo rows.
 
+## 2026-10-25 — Quarantine purge feedback and drawer QoL
+
+**Fixed.** "Remove for good now" looked broken. It runs only the retention
+purge and the size cap, so items still inside their keeping period stay, and
+the drawer said nothing when nothing was due. On top of that,
+`items_in_batch` also listed restored rows, so a batch kept showing items that
+were already gone from quarantine.
+
+- `items_in_batch` filters `restored_at IS NULL`. Test:
+  `a_restored_item_is_not_listed_in_its_batch`.
+- `PurgeReport.failureReasons` gives each failed id a reason: `locked`,
+  `accessDenied`, `outsideQuarantine` or `other`, mapped from the io error.
+  Tests: `a_purge_blocked_by_an_open_file_reports_it_as_locked`, and the climb
+  test now asserts `outsideQuarantine`.
+- Drawer:
+  - the purge asks for confirmation;
+  - the button shows "Removing…" while it runs;
+  - a status line always follows: either what was removed, the reasons for any
+    failures (with an admin hint for access denied), or when the oldest group
+    becomes due.
+  - Expanded lists are fetched again, so purged rows leave at once and failed
+    ones stay with a reason badge.
+- QoL:
+  - a path filter;
+  - per-item checkboxes with select-all-shown;
+  - "Restore selected", which reuses `quarantine_restore_item` one item at a
+    time.
+  - No new deletion path: the purge scope is unchanged.
+- The view logic lives in `src/lib/stores/quarantineView.ts`, with node tests.
+
+**Remove for good, by hand (K-020).** The user decided the deferred point:
+- `Quarantine::purge_items(ids, confirmed)` replaces `purge_item`. It removes
+  any held item through the same `destroy()` root guards, and returns a
+  `PurgeReport` with per-item failure reasons. Without `confirmed` it returns
+  `purge_not_confirmed` and touches nothing. The `quarantine_item_not_marked`
+  check is gone.
+- Command `quarantine_purge_items(itemIds, confirmed)`; the old
+  `quarantine_purge_item` is removed. The probes in `command_wiring` and
+  `panic_and_busy` were updated.
+- Drawer: "Remove {count} for good" for a selection, "Remove for good" per
+  batch, and "Remove" on every item. One dialog names the item count and total
+  size and says it cannot be undone. Items that are locked or refused stay
+  listed with a reason badge, and the summary line counts them.
+- Test `removing_items_for_good_needs_confirmation` replaces the old
+  "unmarked item is refused" test.
+- "Remove for good now" (expired only) already says when nothing is due and
+  until when the oldest group is kept.
 ---
 
 ## 2026-10-25 — List QoL: shared filter / select-visible toolbar

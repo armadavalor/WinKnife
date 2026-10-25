@@ -678,7 +678,14 @@ not ours to take.
         until you remove it".
       Scope choice, open for review: `purge_item` refuses an item without
       the marker, so it does not become a second delete button for
-      ordinary held items (those stay with their retention window). The
+      ordinary held items (those stay with their retention window).
+      *(Resolved 2026-10-25, K-020: reversed by the user. Any held item, a
+      selection or a whole batch can now be removed for good through
+      `quarantine_purge_items`, behind the drawer's "cannot be undone"
+      dialog with item count and size; the backend refuses the call
+      without `confirmed: true`. Deletion still goes only through
+      `destroy()`. The marker now only shields items from the automatic
+      purge and the size cap.)* The
       marker is not cleared by a later successful restore; once restored,
       the row is no longer held and the marker has no effect.
 
@@ -781,6 +788,8 @@ not ours to take.
   returns its own code, `quarantine_item_not_marked`, instead of sharing
   `unknown_quarantine_item`; the drawer maps it to its own message ("its
   restore was never refused … stays held until its retention window ends").
+  *(Superseded 2026-10-25, K-020: `quarantine_purge_items` removes any held
+  item after confirmation, so the code and its check are gone.)*
 - [ ] 2026-10-12 (phase 5): the brief asks for EN and TR strings, but the app
   had no Turkish dictionary. A partial `tr` dictionary was added holding the
   phase 5 keys only (missing keys fall back to English), with no locale

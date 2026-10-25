@@ -344,6 +344,39 @@ const en = {
   "quarantine.removeAction": "Remove permanently",
   "quarantine.restoredAlongside":
     "Something already occupied the original path, so this was restored as {path}.",
+  "quarantine.purging": "Removing…",
+  "quarantine.purgeTitle": "Remove expired items for good?",
+  "quarantine.purgeBody":
+    "Items whose keeping period has ended are deleted permanently, and the oldest go first if the quarantine is over its size limit. Everything else stays and can still be restored.",
+  "quarantine.purgeWarning": "This cannot be undone.",
+  "quarantine.purgeNothingDue":
+    "Nothing was removed: no item has reached the end of its keeping period yet. The oldest group is kept until {when}.",
+  "quarantine.purgeNothingHeld": "Nothing was removed: the quarantine is empty.",
+  "quarantine.purgeReason.locked":
+    "{count} in use by another program. Close it and try again.",
+  "quarantine.purgeReason.accessDenied":
+    "{count} refused by Windows (access denied). Running WinKnife as administrator may help.",
+  "quarantine.purgeReason.outsideQuarantine":
+    "{count} not touched: the record points outside the quarantine folder.",
+  "quarantine.purgeReason.other": "{count} failed for another reason; see the log.",
+  "quarantine.filter": "Filter shown items by path",
+  "quarantine.removeSelected": "Remove {count} for good",
+  "quarantine.removeBatch": "Remove for good",
+  "quarantine.purgeItemsTitle": "Remove for good?",
+  "quarantine.purgeItemsBody": "{count} items, {size} in total, will be deleted permanently.",
+  "quarantine.purgeItemsNote":
+    "Anything in use by another program, or that Windows refuses, is not deleted: it stays listed with the reason.",
+  "quarantine.purgeItemsWarning": "This cannot be undone.",
+  "quarantine.purgeItemsFailed": "{count} items could not be removed and are still held here.",
+  "quarantine.selectAll": "Select all shown",
+  "quarantine.selectItem": "Select {path}",
+  "quarantine.restoreSelected": "Restore selected ({count})",
+  "quarantine.clearSelection": "Clear",
+  "quarantine.noMatch": "No shown item matches.",
+  "quarantine.failedBadge.locked": "In use",
+  "quarantine.failedBadge.accessDenied": "Access denied",
+  "quarantine.failedBadge.outsideQuarantine": "Outside quarantine",
+  "quarantine.failedBadge.other": "Could not remove",
 
   "shutdown.noTimer": "No timer is set.",
   "shutdown.cancel": "Cancel timer",
