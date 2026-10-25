@@ -2629,3 +2629,11 @@ absent).
 
 - Version 0.4.0 in package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json and the demo/install-smoke workflow defaults; CHANGELOG `[Unreleased]` cut to `[0.4.0]` and filled in for everything merged since v0.3.0 (#61–#92).
 - README: thirteen tools, Tweaks / Context menu / Hosts File rows, EN+TR noted. First release with the build attestation step (C9).
+
+---
+
+## 2026-10-25 — Phase 7: accessibility pass (C8)
+
+**Built.** `focusTrap` action (focus on open, Esc, focus return, optional Tab trap) for ConfirmDialog and the quarantine drawer; skip link target is focusable; scan status lines are live regions; contrast tokens fixed for AA in graphite, forest and mist; sidebar scrolls on short windows.
+**Decisions.** No new strings, no backend change. See `docs/phases/PHASE-7-a11y.md`.
+**Deferred.** Graphite `ink-muted` on `accent-soft` (3.88:1, hover/active only).

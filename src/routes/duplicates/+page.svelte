@@ -200,7 +200,7 @@
     <section
       class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-6"
     >
-      <p class="text-sm">{t("duplicates.scanning")}</p>
+      <p class="text-sm" role="status">{t("duplicates.scanning")}</p>
       <ProgressBar
         label={t("duplicates.scanning")}
         pct={store.pct}
