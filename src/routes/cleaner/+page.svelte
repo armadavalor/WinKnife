@@ -180,7 +180,7 @@
     {@const label = total === null ? t("cleaner.scanning") : t("cleaner.analyzing")}
     <section class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-6">
       <div class="flex items-center gap-3">
-        <p class="flex-1 text-sm">{label}</p>
+        <p class="flex-1 text-sm" role="status">{label}</p>
         <button
           type="button"
           class="btn-ghost px-3! py-1.5!"

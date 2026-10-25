@@ -129,7 +129,7 @@
     <section
       class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-6"
     >
-      <p class="text-sm">{t("emptyFolders.scanning")}</p>
+      <p class="text-sm" role="status">{t("emptyFolders.scanning")}</p>
       <ProgressBar label={t("emptyFolders.scanning")} pct={store.pct} />
       <p class="font-mono text-xs text-ink-faint">
         {store.currentPath ? truncatePath(store.currentPath, 70) : "…"}

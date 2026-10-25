@@ -56,7 +56,7 @@
 </script>
 
 <nav
-  class="flex w-60 shrink-0 flex-col gap-6 border-r border-surface-2 bg-surface-1 p-4"
+  class="flex w-60 shrink-0 flex-col gap-6 overflow-y-auto border-r border-surface-2 bg-surface-1 p-4"
   aria-label={t("nav.tools")}
 >
   <a
