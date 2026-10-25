@@ -22,6 +22,7 @@
     beaker: "flask-conical",
     broom: "brush-cleaning",
     power: "power",
+    clock: "clock",
     coffee: "coffee",
     folder: "folder-search",
     shield: "shield-check",

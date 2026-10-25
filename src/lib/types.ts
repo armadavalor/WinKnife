@@ -1300,3 +1300,50 @@ export interface EnvPreview {
   after: EnvValue | null;
   diff: HostsDiffLine[];
 }
+
+/* -------------------------------------------------------------------------
+ * modules/scheduled_scan.rs (C11)
+ * ---------------------------------------------------------------------- */
+
+/** How often the scheduled scan runs; `weekday` counts from Monday = 0. */
+export type ScheduleFrequency =
+  | { kind: "off" }
+  | { kind: "daily" }
+  | { kind: "weekly"; weekday: number };
+
+/** Saved schedule. `armedAt` is set by the backend; send it back untouched. */
+export interface ScheduledScanSettings {
+  frequency: ScheduleFrequency;
+  hour: number;
+  minute: number;
+  /** Opt-in, off by default: move only green items to quarantine after a run. */
+  autoQuarantine: boolean;
+  armedAt?: string | null;
+}
+
+export interface BucketTotals {
+  count: number;
+  bytes: number;
+}
+
+export type AutoQuarantineSkip = "busy" | "cancelled" | "failed";
+
+export type AutoQuarantineOutcome =
+  | { kind: "ran"; moved: number; notMoved: number; bytes: number; batchId: string | null }
+  | { kind: "skipped"; reason: AutoQuarantineSkip };
+
+/** What a scheduled run left behind. */
+export interface ScheduledReport {
+  scanId: string;
+  ranAt: string;
+  cancelled: boolean;
+  safe: BucketTotals;
+  review: BucketTotals;
+  blocked: BucketTotals;
+  autoQuarantine: AutoQuarantineOutcome | null;
+}
+
+export interface ScheduledScanState {
+  settings: ScheduledScanSettings;
+  lastReport: ScheduledReport | null;
+}

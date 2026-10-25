@@ -481,6 +481,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::unlocker_request_close,
         commands::elevation_status,
         commands::restart_as_admin,
+        commands::scheduled_scan_get,
+        commands::scheduled_scan_set,
+        commands::scheduled_scan_run_due,
     ]
 }
 

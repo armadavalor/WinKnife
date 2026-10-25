@@ -26,6 +26,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -60,6 +61,9 @@ use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
 use crate::modules::legacy_panels::{LegacyPanelsService, PanelInfo};
 use crate::modules::repair::{RepairOutcome, RepairService, RepairTool, RepairToolInfo};
 use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
+use crate::modules::scheduled_scan::{
+    self, AutoQuarantine, ScheduledReport, ScheduledScanSettings, ScheduledScanState, SkipReason,
+};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
 use crate::modules::{context_menu, startup, treemap, tweaks};
 
@@ -229,7 +233,25 @@ pub async fn start_scan<R: Runtime>(
         if module_id != "cleaner" {
             return Err(CoreError::UnknownModule(module_id).into());
         }
+        let result = run_cleaner_scan(Some(&app), &services, &db, &cancels)?;
+        store.insert(result.clone());
+        Ok(result)
+    })
+    .await
+}
 
+/// The cleaner scan behind [`start_scan`] and the scheduled scan.
+///
+/// With no `app` it emits nothing: a background scan must not drive the
+/// cleaner page's progress bar or take over its Stop button.
+fn run_cleaner_scan<R: Runtime>(
+    app: Option<&AppHandle<R>>,
+    services: &Services,
+    db: &Database,
+    cancels: &CancelRegistry,
+) -> Result<ScanResult, ApiError> {
+    {
+        let module_id = String::from("cleaner");
         // Which packs run is the user's decision, re-read per scan so a change on
         // the settings page takes effect on the next scan rather than the next
         // restart.
@@ -244,6 +266,7 @@ pub async fn start_scan<R: Runtime>(
 
         let output = {
             let mut emit = |items: u64, path: &std::path::Path| {
+                let Some(app) = app else { return };
                 if !throttle.should_emit() {
                     return;
                 }
@@ -255,7 +278,7 @@ pub async fn start_scan<R: Runtime>(
                     pct: None,
                     items_total: None,
                 };
-                if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                if let Err(err) = events::emit_scan_progress(app, &payload) {
                     tracing::debug!(error = %err, "scan progress event was not delivered");
                 }
             };
@@ -286,6 +309,7 @@ pub async fn start_scan<R: Runtime>(
         let analysed = {
             let mut throttle = ProgressThrottle::new();
             let mut emit = |done: u64, total: u64, path: &Path| {
+                let Some(app) = app else { return };
                 // The final tick always goes out; the rest are throttled.
                 if done != total && !throttle.should_emit() {
                     return;
@@ -298,7 +322,7 @@ pub async fn start_scan<R: Runtime>(
                     pct: percent(done, total),
                     items_total: Some(total),
                 };
-                if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                if let Err(err) = events::emit_scan_progress(app, &payload) {
                     tracing::debug!(error = %err, "scan progress event was not delivered");
                 }
             };
@@ -335,7 +359,7 @@ pub async fn start_scan<R: Runtime>(
         );
 
         remember(
-            &db,
+            db,
             scan_id,
             "cleaner",
             started_at,
@@ -344,17 +368,16 @@ pub async fn start_scan<R: Runtime>(
             result.cancelled,
         );
 
-        let done = ScanDone {
-            scan_id,
-            module: module_id,
-            finding_count: result.findings.len() as u64,
-        };
-        let _ = events::emit_scan_done(&app, &done);
-
-        store.insert(result.clone());
+        if let Some(app) = app {
+            let done = ScanDone {
+                scan_id,
+                module: module_id,
+                finding_count: result.findings.len() as u64,
+            };
+            let _ = events::emit_scan_done(app, &done);
+        }
         Ok(result)
-    })
-    .await
+    }
 }
 
 /// Fetch a scan the UI already ran.
@@ -419,18 +442,6 @@ pub async fn execute<R: Runtime>(
 
         let mut throttle = ProgressThrottle::new();
         let module = scan.module.clone();
-        let tweak_router = context_menu::TweakRouter {
-            tweaks: services.tweaks.as_ref(),
-            context_menu: services.context_menu.as_ref(),
-        };
-        let env = ExecEnvironment {
-            quarantine: &services.quarantine,
-            db: &**db,
-            brain: &services.brain,
-            recycle_bin: services.recycle_bin.as_ref(),
-            startup: services.startup.as_ref(),
-            tweaks: &tweak_router,
-        };
         let mut emit = |done: u64, total: u64, finding: &crate::core::types::Finding| {
             // The final tick always goes out; the rest are throttled.
             if done != total && !throttle.should_emit() {
@@ -447,9 +458,10 @@ pub async fn execute<R: Runtime>(
                 tracing::debug!(error = %err, "exec progress event was not delivered");
             }
         };
-        let report = executor::execute(
+        let report = run_units(
+            &services,
+            &db,
             &units,
-            &env,
             &executor::ExecOptions {
                 confirm_empty_recycle_bin,
                 cancel: Some(ticket.token()),
@@ -461,6 +473,173 @@ pub async fn execute<R: Runtime>(
         Ok(report)
     })
     .await
+}
+
+/// Run planned units through the one executor, with every gate it applies.
+fn run_units(
+    services: &Services,
+    db: &Database,
+    units: &[executor::ExecUnit<'_>],
+    options: &executor::ExecOptions<'_>,
+    progress: Option<executor::ProgressSink<'_>>,
+) -> Result<ExecReport, ApiError> {
+    let tweak_router = context_menu::TweakRouter {
+        tweaks: services.tweaks.as_ref(),
+        context_menu: services.context_menu.as_ref(),
+    };
+    let env = ExecEnvironment {
+        quarantine: &services.quarantine,
+        db,
+        brain: &services.brain,
+        recycle_bin: services.recycle_bin.as_ref(),
+        startup: services.startup.as_ref(),
+        tweaks: &tweak_router,
+    };
+    Ok(executor::execute(units, &env, options, progress)?)
+}
+
+/* ----------------------------------------------------------------------
+ * Scheduled scan (C11)
+ * ---------------------------------------------------------------------- */
+
+/// Set while a scheduled run is in progress, so a timer tick that lands on a
+/// slow scan is a no-op instead of a second scan.
+static SCHEDULED_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Clears [`SCHEDULED_RUNNING`] however the run ends.
+struct ScheduledRunGuard;
+
+impl Drop for ScheduledRunGuard {
+    fn drop(&mut self) {
+        SCHEDULED_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The schedule and the last report.
+///
+/// # Errors
+/// Returns an error if the settings store is unreadable.
+#[tauri::command(async)]
+pub fn scheduled_scan_get(db: State<'_, Arc<Database>>) -> Result<ScheduledScanState, ApiError> {
+    guarded("scheduled_scan_get", || Ok(scheduled_state(&db)?))
+}
+
+/// Save the schedule. Changing the slot re-arms it: the next run is the next
+/// slot from now, not one that already passed.
+///
+/// # Errors
+/// Returns an error for an impossible time or an unwritable settings store.
+#[tauri::command(async)]
+pub fn scheduled_scan_set(
+    settings: ScheduledScanSettings,
+    db: State<'_, Arc<Database>>,
+) -> Result<ScheduledScanState, ApiError> {
+    guarded("scheduled_scan_set", || {
+        settings.validate()?;
+        let previous: ScheduledScanSettings = db
+            .with(|conn| settings::get_module(conn, scheduled_scan::MODULE_ID))?
+            .unwrap_or_default();
+        let next = ScheduledScanSettings::updated(&previous, &settings, Utc::now());
+        db.with(|conn| settings::set_module(conn, scheduled_scan::MODULE_ID, &next))?;
+        Ok(scheduled_state(&db)?)
+    })
+}
+
+/// Run the scheduled scan if its slot is due; `None` when it is not.
+///
+/// The app calls this on start and on a timer while open: there is no OS
+/// scheduler (K-021). The scan is the normal read-only cleaner scan; the only
+/// thing it may move is the green bucket, and only with the opt-in on, through
+/// the same executor and quarantine as a click.
+///
+/// # Errors
+/// Returns an error if the scan could not start or the report could not be
+/// saved. A failed auto-quarantine lands in the report instead.
+#[tauri::command]
+pub async fn scheduled_scan_run_due<R: Runtime>(
+    app: AppHandle<R>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+    cancels: State<'_, CancelRegistry>,
+) -> Result<Option<ScheduledReport>, ApiError> {
+    guarded_async("scheduled_scan_run_due", async {
+        if SCHEDULED_RUNNING.swap(true, Ordering::SeqCst) {
+            return Ok(None);
+        }
+        let _running = ScheduledRunGuard;
+
+        let state = scheduled_state(&db)?;
+        let last_run = state.last_report.as_ref().map(|report| report.ran_at);
+        if !scheduled_scan::is_due_now(&state.settings, last_run) {
+            return Ok(None);
+        }
+
+        let ran_at = Utc::now();
+        let scan = run_cleaner_scan::<R>(None, &services, &db, &cancels)?;
+        store.insert(scan.clone());
+        let mut report = ScheduledReport::from_scan(&scan, ran_at);
+        if state.settings.auto_quarantine {
+            report.auto_quarantine = Some(auto_quarantine(&app, &services, &db, &scan));
+        }
+        db.with(|conn| settings::set_json(conn, scheduled_scan::KEY_LAST_REPORT, &report))?;
+        tracing::info!(scan = %scan.scan_id, "scheduled scan finished");
+        Ok(Some(report))
+    })
+    .await
+}
+
+fn scheduled_state(db: &Database) -> crate::core::error::Result<ScheduledScanState> {
+    db.with(|conn| {
+        Ok(ScheduledScanState {
+            settings: settings::get_module(conn, scheduled_scan::MODULE_ID)?.unwrap_or_default(),
+            last_report: settings::get_json(conn, scheduled_scan::KEY_LAST_REPORT)?,
+        })
+    })
+}
+
+/// Move the green quarantine rows of `scan`, nothing else.
+fn auto_quarantine<R: Runtime>(
+    app: &AppHandle<R>,
+    services: &Services,
+    db: &Database,
+    scan: &ScanResult,
+) -> AutoQuarantine {
+    if scan.cancelled {
+        return AutoQuarantine::Skipped {
+            reason: SkipReason::Cancelled,
+        };
+    }
+    // A clean or restore the user started wins; this run just skips.
+    let Ok(_busy) = services.quarantine.begin(Operation::Clean) else {
+        return AutoQuarantine::Skipped {
+            reason: SkipReason::Busy,
+        };
+    };
+    let approved = scheduled_scan::auto_quarantine_ids(&scan.recommendations, &scan.findings);
+    let units = executor::plan(&approved, &scan.recommendations, &scan.findings);
+    let options = executor::ExecOptions {
+        confirm_empty_recycle_bin: false,
+        cancel: None,
+    };
+    match run_units(services, db, &units, &options, None) {
+        Ok(report) => {
+            notify_quarantine_changed(app, services, db, report.batch_id);
+            let moved = report.succeeded() as u64;
+            AutoQuarantine::Ran {
+                moved,
+                not_moved: report.items.len() as u64 - moved,
+                bytes: report.reclaimed_bytes,
+                batch_id: report.batch_id,
+            }
+        }
+        Err(err) => {
+            tracing::warn!(error = ?err, "scheduled auto-quarantine failed");
+            AutoQuarantine::Skipped {
+                reason: SkipReason::Failed,
+            }
+        }
+    }
 }
 
 /// Ask a running scan to stop (ARCHITECTURE section 3).
