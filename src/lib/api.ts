@@ -59,6 +59,8 @@ import type {
   UpdateStatus,
   UnlockerReport,
   RelaunchOutcome,
+  AppsList,
+  SignerInfo,
 } from "$lib/types";
 import { isApiError } from "$lib/types";
 
@@ -715,4 +717,20 @@ export function onShutdownTick(
  */
 export function onLaunchNavigate(handler: () => void): Promise<UnlistenFn> {
   return subscribe<null>(EVENTS.launchNavigate, () => handler());
+}
+
+/* Commands — installed apps (read-only) */
+
+export function appsList(): Promise<AppsList> {
+  return invoke<AppsList>("apps_list");
+}
+
+/** Authenticode signer of one Win32 entry, looked up on demand. */
+export function appsSigner(id: string): Promise<SignerInfo> {
+  return invoke<SignerInfo>("apps_signer", { id });
+}
+
+/** Opens Settings > Apps & features. WinKnife never uninstalls. */
+export function appsOpenSettings(): Promise<void> {
+  return invoke<void>("apps_open_settings");
 }

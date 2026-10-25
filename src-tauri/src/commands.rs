@@ -50,6 +50,7 @@ use crate::core::quarantine::{
 use crate::core::settings;
 use crate::core::state::{CancelRegistry, ScanResult, ScanStore};
 use crate::core::types::ExecReport;
+use crate::modules::apps::{AppsList, AppsService, SignerInfo};
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, folders, DuplicateProgress, DuplicateScan};
 use crate::modules::empty_folders;
@@ -2379,6 +2380,42 @@ pub fn legacy_panels_open(
     id: String,
 ) -> Result<(), ApiError> {
     guarded("legacy_panels_open", || Ok(service.open(&id)?))
+}
+
+/* -------------------------------------------------------------------------
+ * Installed apps (C19)
+ * ---------------------------------------------------------------------- */
+
+/// Installed Win32 programs and Store packages, from the registry only.
+/// Read-only; no signer lookups happen here.
+///
+/// # Errors
+/// Infallible today: unreadable registry locations come back as notes.
+#[tauri::command(async)]
+pub fn apps_list(service: State<'_, Arc<AppsService>>) -> Result<AppsList, ApiError> {
+    guarded("apps_list", || Ok(service.list()))
+}
+
+/// The Authenticode signer of one listed app's exe. Read-only; one file per call.
+///
+/// # Errors
+/// Returns an error for an id that has no resolvable exe in the last list.
+#[tauri::command(async)]
+pub fn apps_signer(
+    service: State<'_, Arc<AppsService>>,
+    id: String,
+) -> Result<SignerInfo, ApiError> {
+    guarded("apps_signer", || Ok(service.signer(&id)?))
+}
+
+/// Open Windows' own Apps settings page. The only way WinKnife helps remove
+/// an app: it never does so itself.
+///
+/// # Errors
+/// Returns an error when the shell could not open the page.
+#[tauri::command]
+pub fn apps_open_settings(service: State<'_, Arc<AppsService>>) -> Result<(), ApiError> {
+    guarded("apps_open_settings", || Ok(service.open_settings()?))
 }
 
 /* -------------------------------------------------------------------------

@@ -1133,3 +1133,33 @@ export interface CloseReport {
   outcome: CloseOutcome;
   exe_path: string | null;
 }
+
+/* modules/apps.rs */
+
+export type AppSource = "win32" | "store";
+export type PackageKind = "app" | "framework" | "resource";
+
+/** One installed program or Store package. Read-only. */
+export interface AppEntry {
+  id: string;
+  source: AppSource;
+  name: string;
+  publisher: string | null;
+  version: string | null;
+  installDate: string | null;
+  sizeKb: number | null;
+  installFolder: string | null;
+  family: string | null;
+  kind: PackageKind;
+  canCheckSigner: boolean;
+}
+
+export interface AppsList {
+  entries: AppEntry[];
+  notes: string[];
+}
+
+export interface SignerInfo {
+  state: "signed" | "unsigned" | "unknown";
+  publisher: string | null;
+}

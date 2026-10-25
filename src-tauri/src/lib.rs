@@ -347,6 +347,14 @@ pub fn manage_state<R: tauri::Runtime>(
         SystemEnv.var("SystemRoot").map(std::path::PathBuf::from),
     )));
 
+    // Installed apps (C19): registry reads and lazy signer checks; the
+    // launcher only ever opens the Apps settings page.
+    app.manage(Arc::new(modules::apps::AppsService::new(
+        Arc::new(core::platform::SystemRegistry),
+        Arc::new(core::platform::SystemSignatureProbe),
+        Arc::new(core::platform::SystemPanelLauncher),
+    )));
+
     app.manage(commands::Services {
         quarantine,
         brain,
@@ -436,6 +444,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::hosts_flush_dns,
         commands::legacy_panels_list,
         commands::legacy_panels_open,
+        commands::apps_list,
+        commands::apps_signer,
+        commands::apps_open_settings,
         commands::keep_awake_start,
         commands::keep_awake_stop,
         commands::keep_awake_status,
