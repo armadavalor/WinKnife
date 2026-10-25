@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+PackageIdentifier: armadavalor.WinKnife
+PackageVersion: 0.4.0
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+- interactive
+- silent
+UpgradeBehavior: install
+ReleaseDate: 2026-10-25
+Dependencies:
+  PackageDependencies:
+  - PackageIdentifier: Microsoft.EdgeWebView2Runtime
+ProductCode: WinKnife
+AppsAndFeaturesEntries:
+- DisplayName: WinKnife
+  Publisher: winknife
+  ProductCode: WinKnife
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/armadavalor/WinKnife/releases/download/v0.4.0/WinKnife_0.4.0_x64-setup.exe
+  InstallerSha256: B95BC7B7BB42BDDD853262F2014D65A1218DA6706590696BB3811C32B2ACDD0D
+ManifestType: installer
+ManifestVersion: 1.12.0
