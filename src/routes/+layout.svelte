@@ -115,7 +115,7 @@
     emptyText={moduleStore.modules.length > 0 ? t("nav.allToolsHidden") : undefined}
   />
 
-  <main id="main" class="flex-1 overflow-y-auto">
+  <main id="main" tabindex="-1" class="flex-1 overflow-y-auto outline-none">
     {#if elevation.needsAdmin || elevation.notice}
       <div
         class="mx-6 mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-surface-3 bg-surface-2 px-4 py-3 text-sm text-ink"

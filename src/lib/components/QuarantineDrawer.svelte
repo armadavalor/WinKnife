@@ -9,6 +9,7 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
+  import { focusTrap } from "$lib/focusTrap";
   import { formatBytes, formatDateTime, formatRelativeDays, truncatePath } from "$lib/format";
   import { t } from "$lib/i18n";
   import { isRestoreRefused, refusedHeld, warningsOf } from "$lib/stores/execNotes";
@@ -77,8 +78,10 @@
 
 {#if store.open}
   <aside
-    class="fixed inset-y-0 right-0 z-30 flex w-full max-w-md flex-col border-l border-surface-2 bg-surface-1 shadow-2xl"
+    class="fixed inset-y-0 right-0 z-30 flex w-full max-w-md flex-col border-l border-surface-2 bg-surface-1 shadow-2xl outline-none"
     aria-label={t("quarantine.title")}
+    tabindex="-1"
+    use:focusTrap={{ onescape: () => store.hide() }}
   >
     <header class="flex items-start gap-3 border-b border-surface-2 px-5 py-4">
       <div class="flex-1">
