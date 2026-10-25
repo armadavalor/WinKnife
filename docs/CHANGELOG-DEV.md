@@ -2646,6 +2646,12 @@ absent).
 **Decisions.** No new strings, no backend change. See `docs/phases/PHASE-7-a11y.md`.
 **Deferred.** Graphite `ink-muted` on `accent-soft` (3.88:1, hover/active only).
 
+## 2026-10-25 — Phase 7: repair kit (C6)
+
+**Built.** New `repair` module: SFC and DISM (CheckHealth, ScanHealth, RestoreHealth, AnalyzeComponentStore) on click, exact command shown, live output over `repair:output`, one-line verdict, full log under `log_dir` with "Open log". `SystemRepairRunner` (CREATE_NO_WINDOW, UTF-16/OEM decoding, cancel kills the child) or `FakeRepairRunner` when real OS effects are not armed.
+**Decisions.** K-025. RestoreHealth and sfc confirm first; unelevated runs return `needs_admin`. See `docs/phases/PHASE-7-repair.md`.
+**Deferred.** StartComponentCleanup; verdict parsing is English-only with exit-code fallback; repair logs are not pruned (DECISIONS-NEEDED).
+
 ---
 
 ## 2026-10-25 — C19: installed apps
@@ -2668,6 +2674,10 @@ absent).
 - Tests against `MapRegistry` + in-memory DB: split/join round-trip, all four flags, validation, create/modify/delete → undo (kind kept), HKLM refusal, stale and outside-change refusals.
 
 **Deferred.** See DECISIONS-NEEDED, "Open items raised by the environment-variable editor".
+
+## 2026-10-25 — C7 follow-up: type-changed drift test
+
+C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; this adds the one missing case from the brief, a value whose registry type changed (`REG_DWORD` to `REG_SZ`), pinned as drift with a reason. No behaviour change.
 
 ## 2026-10-25 — Cancel and timeouts for long operations (#41)
 

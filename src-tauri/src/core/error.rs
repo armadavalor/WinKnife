@@ -174,6 +174,9 @@ pub enum CoreError {
     #[error("hosts file: {0}")]
     Hosts(String),
 
+    /// The repair kit (module C6) could not start or read SFC / DISM.
+    #[error("repair: {0}")]
+    Repair(String),
     /// Reading the socket tables failed (module C14).
     #[error("network: {0}")]
     Network(String),
@@ -227,6 +230,7 @@ impl CoreError {
             Self::SchemaTooNew { .. } => "schema_too_new",
             Self::Busy(_) => "busy",
             Self::Hosts(_) => "hosts",
+            Self::Repair(_) => "repair",
             Self::Network(_) => "network",
             Self::NeedsAdmin(_) => "needs_admin",
             Self::ElevationBlocked => "elevation_blocked",
