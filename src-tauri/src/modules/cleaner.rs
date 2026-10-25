@@ -1020,7 +1020,7 @@ mod tests {
         assert!(!packs.is_empty(), "the app ships with no rule packs");
         for pack in &packs {
             assert!(
-                ["cleaner", "empty-folders"].contains(&pack.spec.module.as_str()),
+                ["cleaner", "empty-folders", "uninstaller"].contains(&pack.spec.module.as_str()),
                 "{} targets no known module",
                 pack.id()
             );
@@ -1058,6 +1058,7 @@ mod tests {
                 "old-downloads",
                 "recycle-bin",
                 "thumbnail-icon-cache",
+                "uninstaller-leftovers",
                 "windows-temp",
                 "windows-update-leftovers",
             ]

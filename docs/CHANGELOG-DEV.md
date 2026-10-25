@@ -2696,3 +2696,25 @@ C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; th
   that the unlocker already shows as a failure message. The close stays the
   same polite request; nothing is forced. Shortcut: a timed-out call keeps its
   worker thread until Windows answers.
+
+## 2026-10-25 — Uninstaller+ leftover scan (C5, K-026)
+
+**Built.** New `uninstaller` module: lists immediate child folders of
+`%AppData%`, `%LocalAppData%`, `%ProgramData%` and `Program Files*` that no
+app in the HKLM/HKCU Uninstall keys claims. It never runs an uninstaller,
+never writes the registry and is not a registry cleaner.
+
+- Scan is read-only; Uninstall keys are only read. Matching is generous
+  towards "installed" so a missed leftover, not a broken app, is the failure
+  mode.
+- Rating: `uninstaller-leftovers` pack, Needs Review at most, never Safe.
+  Protected paths, ancestors of protected paths, `Program Files*` and folders
+  with a link inside are info only. Every finding has a reason.
+- Execute: whole folder to quarantine through the shared executor; gate 3 has
+  a `uninstaller`-only exception that runs a fail-closed re-check right before
+  the move (K-026).
+- `start_uninstaller_scan` command + wiring probe, `/uninstaller` route,
+  EN/TR strings, sidebar icon.
+
+**Deferred.** ProgramData leftovers stay info-only; no vendor allow-list for
+dev-cache folders (DECISIONS-NEEDED).

@@ -136,6 +136,10 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             args: json!({ "root": &root }),
         },
         Probe {
+            command: "start_uninstaller_scan",
+            args: json!({ "roots": [&root] }),
+        },
+        Probe {
             command: "treemap_drives",
             args: json!({}),
         },

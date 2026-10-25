@@ -426,7 +426,7 @@ mod tests {
         execute, ExecEnvironment, ExecOptions, ExecUnit, NoStartupControl,
         NoTweakControl,
     };
-    use crate::core::platform::{AlwaysUnlocked, MapEnv, StubProcessProbe, StubRecycleBin};
+    use crate::core::platform::{AlwaysUnlocked, MapEnv, MapRegistry, StubProcessProbe, StubRecycleBin};
     use crate::core::quarantine::{Quarantine, RetentionPolicy};
     use crate::core::types::ExecOutcome;
     use std::fs;
@@ -799,6 +799,7 @@ mod tests {
             recycle_bin: &bin,
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
+            registry: &MapRegistry::new(),
         };
         let units = [ExecUnit {
             recommendation: rec,

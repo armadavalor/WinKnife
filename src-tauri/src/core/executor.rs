@@ -50,14 +50,14 @@ use uuid::Uuid;
 
 use crate::core::brain::Brain;
 use crate::core::error::Result;
-use crate::core::platform::RecycleBin;
+use crate::core::platform::{RecycleBin, Registry};
 use crate::core::quarantine::Quarantine;
 use crate::core::scanner::CancellationToken;
 use crate::core::types::{
     Action, ExecItemResult, ExecOutcome, ExecReport, Finding, FindingKind, Justification,
     MoveWarning, Recommendation, StartupSource,
 };
-use crate::modules::empty_folders;
+use crate::modules::{empty_folders, uninstaller};
 
 /// One unit of work: a recommendation paired with the finding it acts on.
 #[derive(Debug, Clone, Copy)]
@@ -206,6 +206,8 @@ pub struct ExecEnvironment<'a> {
     pub startup: &'a dyn StartupControl,
     /// Per-user settings, for [`Action::ApplyTweak`].
     pub tweaks: &'a dyn TweakControl,
+    /// Read-only: the uninstaller re-reads the Uninstall keys before a move.
+    pub registry: &'a dyn Registry,
 }
 
 /// Per-request confirmations, separate from the services in
@@ -425,14 +427,16 @@ fn apply_one(
     // 3. Locks are re-checked too: a file can be opened between review and
     //    confirm. Skipped, reported, batch continues.
     //    A folder has no lock state of its own (the probe can only say
-    //    `Inaccessible`); the owning module's emptiness re-check in gate 4
-    //    stands in for it, so only that module may hand a folder through.
+    //    `Inaccessible`); the owning module's re-check in gate 4 stands in
+    //    for it, so only a module that has one may hand a folder through
+    //    (empty folders; uninstaller leftovers, K-026).
     if unit.finding.kind == FindingKind::Directory
         && unit.finding.module != empty_folders::MODULE_ID
+        && unit.finding.module != uninstaller::MODULE_ID
     {
         return skipped(
-            "skipped: only the empty-folders module can move a whole folder, \
-             because only it re-checks the folder right before moving it"
+            "skipped: only the empty-folders and uninstaller modules can move a whole folder, \
+             because only they re-check the folder right before moving it"
                 .to_owned(),
         );
     }
@@ -506,6 +510,14 @@ fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Opti
             // that is only true until something is written into it.
             if unit.finding.module == empty_folders::MODULE_ID {
                 if let Some(reason) = empty_folders::recheck_refusal(&unit.finding.path) {
+                    return Some(reason);
+                }
+            }
+            // A leftover stops being one the moment an app claims it again.
+            if unit.finding.module == uninstaller::MODULE_ID {
+                if let Some(reason) =
+                    uninstaller::recheck_refusal(&unit.finding.path, env.registry, env.brain)
+                {
                     return Some(reason);
                 }
             }
@@ -910,7 +922,9 @@ mod tests {
     use super::*;
     use crate::core::brain::{Brain, ProtectedPaths};
     use crate::core::db;
-    use crate::core::platform::{AlwaysUnlocked, LockProbe, LockState, StubRecycleBin};
+    use crate::core::platform::{
+        AlwaysUnlocked, LockProbe, LockState, MapRegistry, StubRecycleBin,
+    };
     use crate::core::quarantine::RetentionPolicy;
     use crate::core::scanner::CancellationToken;
     use crate::core::types::RiskBucket;
@@ -1041,6 +1055,7 @@ mod tests {
             recycle_bin: bin,
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
+            registry: Box::leak(Box::new(MapRegistry::new())),
         }
     }
 
@@ -1105,6 +1120,7 @@ mod tests {
                     recycle_bin: &bin,
                     startup: &NoStartupControl,
                     tweaks: &NoTweakControl,
+                    registry: &MapRegistry::new(),
                 };
                 execute(&units, &env, &ExecOptions::default(), None)
             });
