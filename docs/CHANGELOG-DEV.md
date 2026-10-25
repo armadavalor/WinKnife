@@ -2696,3 +2696,24 @@ C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; th
   that the unlocker already shows as a failure message. The close stays the
   same polite request; nothing is forced. Shortcut: a timed-out call keeps its
   worker thread until Windows answers.
+
+## 2026-10-26 — Big-file archiver (C16)
+
+- New `archiver` module (`modules/archiver.rs`, sidebar "Big-File Archiver").
+  Read-only scan lists files of at least `MIN_SIZE_BYTES` (1 GiB) not used
+  for `MIN_AGE_DAYS` (365) days; age is the newer of last write and last
+  access. Protected-path files are counted (`skippedProtected`) and, if
+  listed, rated `doNotDelete` and cannot be selected. Every finding has a reason.
+- `archive_files` moves a selection to a user-chosen folder: copy with
+  `create_new` (never over an existing file), verify size + `full_hash`
+  against the source, then send the original to Quarantine.
+  A failed copy or verify leaves the original untouched; the module removes
+  nothing, so a half-made copy stays in the destination and the report names it. Each archived file appends a line to
+  `WinKnife-archive-manifest.jsonl` in the destination (original path,
+  archived path, size, hash, quarantine item id, batch id).
+- The destination is validated as external input: must exist, be a folder,
+  not be protected, and not lie inside the scanned root.
+- Commands `start_archiver_scan`, `archive_files` with wiring probes; EN + TR
+  strings; route `/archiver`.
+- Decisions: K-026. Deferred: cancelling a running move, restore from the
+  manifest in one click (restore goes through Quarantine today).

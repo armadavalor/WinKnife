@@ -911,3 +911,10 @@ not ours to take.
 - [ ] 2026-10-25 (phase 7): deleting a user variable is a registry change, not a file deletion, so it goes through C1 like any other write. `tweak_undo.applied_*` is NOT NULL, so a delete stores `REG_NONE` + empty bytes as "absent after" instead of adding a migration — safest interpretation taken: undo of a delete only runs while the value is still absent, then restores the saved value and kind.
 - [ ] 2026-10-25 (phase 7): undo is one step, like C1 (a newer change supersedes the older row). Multi-step history was not asked for — left out.
 - [ ] 2026-10-25 (phase 7): env changes bypass the executor/`TweakRouter` (no scan, no recommendations); the page calls `env_vars_apply` / `env_vars_undo` directly, like the hosts editor. Revisit if C7 drift check should cover `env:` rows.
+
+## Open items raised by the big-file archiver (2026-10-26, C16)
+
+- [ ] 2026-10-26 (phase 7): a running move cannot be cancelled; a multi-GB copy runs to the end of the current file and the batch. Safest interpretation taken: no cancel.
+- [ ] 2026-10-26 (phase 7): if a source changes between hashing and quarantine, the archived copy is the older version but nothing is lost — Quarantine holds the newer original. Safest interpretation taken: no re-hash after the copy; the report shows the archived hash.
+- [ ] 2026-10-26 (phase 7): a copy that fails half way leaves an incomplete file in the destination, because only quarantine may remove files. Safest interpretation taken: leave it and name it in the report; a retry refuses to overwrite it until the user deletes it. Alternative: quarantine the partial copy (costs a second copy across volumes).
+- [ ] 2026-10-26 (phase 7): restoring from the manifest (copy back from the archive drive) is not built; undo goes through Quarantine only. Revisit if users archive and then purge quarantine.
