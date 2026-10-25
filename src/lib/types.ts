@@ -111,7 +111,8 @@ export type Justification =
       key: string;
       command: string;
     }
-  | { kind: "tweak"; tweakId: string; observed: number | null };
+  | { kind: "tweak"; tweakId: string; observed: number | null }
+  | { kind: "userTagged"; sizeBytes: number; modified: string | null };
 
 /** A suggestion about one or more findings. Always carries a `reason`. */
 export interface Recommendation {
@@ -510,6 +511,21 @@ export interface TreeChild {
   category: TreemapCategory;
   /** `1`, except for the folded tail row. */
   itemCount: number;
+}
+
+/** A path the disk map's tag list could not take, with Rust's reason. */
+export interface TaggedRefusal {
+  path: string;
+  reason: string;
+}
+
+/** The tag list turned into a stored scan `execute` can act on (C13). */
+export interface TaggedProposal {
+  scanId: string;
+  findings: Finding[];
+  recommendations: Recommendation[];
+  /** Tagged paths Rust would not accept: protected, folders, missing. */
+  refused: TaggedRefusal[];
 }
 
 /** One directory's worth of rectangles. */

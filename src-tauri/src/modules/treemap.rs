@@ -50,11 +50,18 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::core::brain::Brain;
 use crate::core::db::{with_db, DbAccess};
 use crate::core::error::{CoreError, Result};
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
 use crate::core::path_compare::CanonicalPath;
 use crate::core::scanner::{self, CancellationToken, WalkOptions};
+use crate::core::types::{
+    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+};
+
+/// Module id, also the `module` of every finding [`propose`] makes.
+pub const MODULE_ID: &str = "treemap";
 
 /// How many children one `children` call returns before the tail is folded into
 /// a single "everything else" row.
@@ -953,21 +960,175 @@ impl SizeOracle for CacheOracle<'_> {
 }
 
 /* -------------------------------------------------------------------------
+ * Tagging (C13, K-027)
+ * ---------------------------------------------------------------------- */
+
+/// The user picked the file by hand, so the opinion is theirs, not ours.
+const TAGGED_CONFIDENCE: u8 = 100;
+
+/// A tagged path the backend would not turn into an action, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaggedRefusal {
+    /// The path as the UI sent it.
+    pub path: PathBuf,
+    /// Plain-language reason, shown verbatim.
+    pub reason: String,
+}
+
+/// What [`propose`] made of a tagged list.
+#[derive(Debug, Clone, Default)]
+pub struct TaggedProposal {
+    /// One per accepted file.
+    pub findings: Vec<Finding>,
+    /// One `Quarantine` recommendation per finding.
+    pub recommendations: Vec<Recommendation>,
+    /// Paths that were refused, in the order they arrived.
+    pub refused: Vec<TaggedRefusal>,
+}
+
+/// Turn the paths the user tagged on the disk map into quarantine proposals.
+///
+/// The UI is not trusted: a protected path, anything that is not a plain file
+/// (folders, links, missing paths) and duplicates are refused here, in code,
+/// and reported back. Reads metadata only; nothing moves until `execute`.
+pub fn propose(paths: &[PathBuf], brain: &Brain) -> TaggedProposal {
+    let mut out = TaggedProposal::default();
+    let mut seen = std::collections::HashSet::new();
+    for path in paths {
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        match tagged_file(path, brain) {
+            Ok((finding, recommendation)) => {
+                out.findings.push(finding);
+                out.recommendations.push(recommendation);
+            }
+            Err(reason) => out.refused.push(TaggedRefusal {
+                path: path.clone(),
+                reason,
+            }),
+        }
+    }
+    out
+}
+
+fn tagged_file(
+    path: &Path,
+    brain: &Brain,
+) -> std::result::Result<(Finding, Recommendation), String> {
+    if let Some(refusal) = brain.path_refusal(path) {
+        return Err(refusal.reason);
+    }
+    if let Some(reason) = drive_root_refusal(path) {
+        return Err(reason);
+    }
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|err| format!("`{}` could not be read: {err}", path.display()))?;
+    if !meta.file_type().is_file() {
+        return Err(format!(
+            "`{}` is not a plain file; only files can be tagged",
+            path.display()
+        ));
+    }
+    let modified = meta.modified().ok().map(DateTime::<Utc>::from);
+    let mut finding = Finding::new(MODULE_ID, path, FindingKind::File);
+    finding.size_bytes = meta.len();
+    finding.modified = modified;
+    let recommendation = Recommendation::new(
+        vec![finding.id],
+        RiskBucket::NeedsReview,
+        TAGGED_CONFIDENCE,
+        Action::Quarantine,
+        "You tagged this file on the disk map.",
+        meta.len(),
+        Justification::UserTagged {
+            size_bytes: meta.len(),
+            modified,
+        },
+    )
+    .map_err(|err| err.to_string())?;
+    Ok((finding, recommendation))
+}
+
+/// Files sitting directly on a drive (or share) root, such as `C:\bootmgr`, are
+/// never taggable: moving one can leave Windows unable to start, and then
+/// WinKnife cannot run to restore it (K-028). Tagging-only rule; the global
+/// protected list is unchanged. The resolved path is checked too, so `..` or a
+/// junction cannot route around it.
+fn drive_root_refusal(path: &Path) -> Option<String> {
+    let resolved = std::fs::canonicalize(path).ok();
+    let on_root = std::iter::once(path)
+        .chain(resolved.as_deref())
+        .any(parent_is_root);
+    on_root.then(|| {
+        format!(
+            "`{}` sits directly on the root of a drive, where Windows keeps its \
+             start-up files; files there cannot be tagged",
+            path.display()
+        )
+    })
+}
+
+fn parent_is_root(path: &Path) -> bool {
+    use std::path::Component;
+    path.parent().is_some_and(|parent| {
+        let mut parts = parent.components().peekable();
+        matches!(parts.peek(), Some(Component::Prefix(_)))
+            && parts.all(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+    })
+}
+
+/// Gate 4 for a tagged file: refuse when it is no longer the file the user saw.
+///
+/// The reason was "you tagged this file"; that stays true only while it is the
+/// same plain file with the same size and modified time.
+pub fn tagged_refusal(
+    path: &Path,
+    size_bytes: u64,
+    modified: Option<DateTime<Utc>>,
+) -> Option<String> {
+    if let Some(reason) = drive_root_refusal(path) {
+        return Some(format!("skipped: {reason}"));
+    }
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return Some(format!(
+            "skipped: `{}` is no longer there to move",
+            path.display()
+        ));
+    };
+    if !meta.file_type().is_file() {
+        return Some(format!(
+            "skipped: `{}` is no longer a plain file",
+            path.display()
+        ));
+    }
+    let now = meta.modified().ok().map(DateTime::<Utc>::from);
+    if meta.len() != size_bytes || now != modified {
+        return Some(format!(
+            "skipped: `{}` changed after it was tagged, so it may no longer be \
+             what you meant to remove",
+            path.display()
+        ));
+    }
+    None
+}
+
+/* -------------------------------------------------------------------------
  * Module registration
  * ---------------------------------------------------------------------- */
 
 /// The treemap tool.
 ///
-/// It scans but never executes: a treemap answers a question, and the actions it
-/// leads to are the cleaner's and the duplicate finder's. `has_execute` is
-/// therefore false, and there is no `analyze` — every rectangle is a fact, and
-/// this module has no opinions to record.
+/// A treemap answers a question and has no opinions of its own: there is no
+/// `analyze`. It executes only what the user tagged by hand ([`propose`]), and
+/// only through the quarantine, so `has_execute` is true (K-027).
 #[derive(Debug, Default)]
 pub struct TreemapModule;
 
 impl ToolModule for TreemapModule {
     fn id(&self) -> &'static str {
-        "treemap"
+        MODULE_ID
     }
 
     fn manifest(&self) -> ModuleManifest {
@@ -978,7 +1139,7 @@ impl ToolModule for TreemapModule {
             icon: "treemap".to_owned(),
             capabilities: ModuleCapabilities {
                 has_scan: true,
-                has_execute: false,
+                has_execute: true,
                 has_settings: false,
             },
         }
@@ -1481,14 +1642,110 @@ mod tests {
     }
 
     #[test]
-    fn the_manifest_declares_a_scan_only_module() {
+    fn the_manifest_declares_scan_and_tagged_execute() {
         let manifest = TreemapModule.manifest();
         assert_eq!(manifest.id, "treemap");
         assert!(manifest.capabilities.has_scan);
-        assert!(
-            !manifest.capabilities.has_execute,
-            "a map answers a question; the cleaner and the duplicate finder act"
+        assert!(manifest.capabilities.has_execute, "tagged files can be quarantined");
+    }
+
+    #[test]
+    fn propose_accepts_files_and_refuses_folders_protected_and_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("big.bin");
+        fs::write(&file, vec![0u8; 1_234]).expect("write");
+        let folder = dir.path().join("folder");
+        fs::create_dir(&folder).expect("mkdir");
+        let missing = dir.path().join("gone.bin");
+        let guarded = dir.path().join("guarded");
+        fs::create_dir(&guarded).expect("mkdir");
+        let protected = guarded.join("system.dll");
+        fs::write(&protected, b"x").expect("write");
+
+        let brain = Brain::builder()
+            .protected_paths(crate::core::brain::ProtectedPaths::from_trees([
+                fs::canonicalize(&guarded).expect("canonical"),
+            ]))
+            .build();
+        let out = propose(
+            &[
+                file.clone(),
+                folder.clone(),
+                protected.clone(),
+                missing.clone(),
+                file.clone(),
+            ],
+            &brain,
         );
+
+        assert_eq!(out.findings.len(), 1, "the duplicate entry is dropped");
+        assert_eq!(out.findings[0].path, file);
+        assert_eq!(out.findings[0].size_bytes, 1_234);
+        let rec = &out.recommendations[0];
+        assert_eq!(rec.action, Action::Quarantine);
+        assert_eq!(rec.risk, RiskBucket::NeedsReview);
+        assert!(!rec.reason.is_empty());
+        assert!(matches!(
+            rec.justification,
+            Justification::UserTagged { size_bytes: 1_234, .. }
+        ));
+
+        let refused: Vec<_> = out.refused.iter().map(|r| r.path.clone()).collect();
+        assert_eq!(refused, vec![folder, protected, missing]);
+        assert!(out.refused.iter().all(|r| !r.reason.is_empty()));
+        assert!(out.refused[0].reason.contains("only files"));
+    }
+
+    #[test]
+    fn tagged_refusal_passes_an_unchanged_file_and_refuses_a_changed_one() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("a.bin");
+        fs::write(&file, b"abc").expect("write");
+        let out = propose(std::slice::from_ref(&file), &Brain::new());
+        let Justification::UserTagged {
+            size_bytes,
+            modified,
+        } = out.recommendations[0].justification.clone()
+        else {
+            panic!("expected a UserTagged justification");
+        };
+        assert_eq!(tagged_refusal(&file, size_bytes, modified), None);
+
+        fs::write(&file, b"abcdef").expect("rewrite");
+        let reason = tagged_refusal(&file, size_bytes, modified).expect("refused");
+        assert!(reason.contains("changed after it was tagged"));
+    }
+
+    #[test]
+    fn a_file_on_a_drive_root_is_refused_and_one_level_down_is_not() {
+        for root_file in [r"C:\bootmgr", r"\\?\C:\BOOTNXT", r"C:\x\..\bootmgr"] {
+            let path = Path::new(root_file);
+            let reason = drive_root_refusal(path).expect(root_file);
+            assert!(reason.contains("root of a drive"), "{reason}");
+            assert!(tagged_refusal(path, 0, None)
+                .expect("gate 4 refuses")
+                .contains("root of a drive"));
+            let out = propose(&[path.to_path_buf()], &Brain::new());
+            // The global protected check may refuse first, with its own reason.
+            assert!(out.findings.is_empty(), "{root_file} must not be proposed");
+            assert_eq!(out.refused.len(), 1);
+        }
+        assert_eq!(drive_root_refusal(Path::new(r"C:\Data\bootmgr")), None);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("one-level-down.bin");
+        fs::write(&file, b"x").expect("write");
+        let out = propose(std::slice::from_ref(&file), &Brain::new());
+        assert_eq!(out.findings.len(), 1, "{:?}", out.refused);
+    }
+
+    #[test]
+    fn tagged_refusal_refuses_a_folder_and_a_missing_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(tagged_refusal(dir.path(), 0, None)
+            .expect("folder refused")
+            .contains("no longer a plain file"));
+        assert!(tagged_refusal(&dir.path().join("x"), 0, None).is_some());
     }
 
     /// `analyze` has no opinions to record, so it must produce none — and in

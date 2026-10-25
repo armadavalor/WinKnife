@@ -1104,6 +1104,55 @@ pub fn treemap_cached(
     })
 }
 
+/// What `treemap_propose` hands back: an executable scan plus what was refused.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaggedProposalResult {
+    /// Pass to `execute` with the recommendation ids the user confirmed.
+    pub scan_id: Uuid,
+    /// One per accepted file.
+    pub findings: Vec<crate::core::types::Finding>,
+    /// One `Quarantine` recommendation per finding.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+    /// Tagged paths that will not be acted on, each with its reason.
+    pub refused: Vec<treemap::TaggedRefusal>,
+}
+
+/// Turn the files tagged on the disk map into a quarantine proposal (C13).
+///
+/// Moves nothing: the UI confirms and then calls the ordinary `execute`, so the
+/// executor's four gates and the quarantine are the only path to a move.
+/// Protected paths and anything that is not a plain file are refused here and
+/// reported back, whatever the UI sent.
+///
+/// # Errors
+/// Never in practice; refusals are part of the result.
+#[tauri::command(async)]
+pub fn treemap_propose(
+    paths: Vec<PathBuf>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+) -> Result<TaggedProposalResult, ApiError> {
+    guarded("treemap_propose", || {
+        let proposal = treemap::propose(&paths, &services.brain);
+        let scan_id = Uuid::new_v4();
+        store.insert(ScanResult {
+            scan_id,
+            module: treemap::MODULE_ID.to_owned(),
+            findings: proposal.findings.clone(),
+            recommendations: proposal.recommendations.clone(),
+            skipped_rules: Vec::new(),
+            cancelled: false,
+        });
+        Ok(TaggedProposalResult {
+            scan_id,
+            findings: proposal.findings,
+            recommendations: proposal.recommendations,
+            refused: proposal.refused,
+        })
+    })
+}
+
 /// Open a path in Explorer, selecting it when it is a file.
 ///
 /// The Swiss-knife glue module spec 04 asks for. It shows a location; it never

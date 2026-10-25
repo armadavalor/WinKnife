@@ -911,3 +911,7 @@ not ours to take.
 - [ ] 2026-10-25 (phase 7): deleting a user variable is a registry change, not a file deletion, so it goes through C1 like any other write. `tweak_undo.applied_*` is NOT NULL, so a delete stores `REG_NONE` + empty bytes as "absent after" instead of adding a migration — safest interpretation taken: undo of a delete only runs while the value is still absent, then restores the saved value and kind.
 - [ ] 2026-10-25 (phase 7): undo is one step, like C1 (a newer change supersedes the older row). Multi-step history was not asked for — left out.
 - [ ] 2026-10-25 (phase 7): env changes bypass the executor/`TweakRouter` (no scan, no recommendations); the page calls `env_vars_apply` / `env_vars_undo` directly, like the hosts editor. Revisit if C7 drift check should cover `env:` rows.
+
+## Open items raised by treemap tagging (C13, 2026-10-26)
+
+- [ ] 2026-10-26 (K-027): folder tagging is not offered. Quarantining a whole folder from the treemap needs its own gate-4 check (a folder's contents can change between tagging and sending; size + mtime of the folder itself does not prove that) and a decision on protected children. The UI only lets files be tagged; the backend refuses folders.

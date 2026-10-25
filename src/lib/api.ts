@@ -60,6 +60,7 @@ import type {
   StartupScanResult,
   StartupSource,
   TimerStatus,
+  TaggedProposal,
   TreeLevel,
   TreemapScanResult,
   TweaksScanResult,
@@ -261,6 +262,16 @@ export function treemapChildren(
 /** The cached header for a drive, or null when it has never been scanned. */
 export function treemapCached(root: string): Promise<CachedScan | null> {
   return invoke<CachedScan | null>("treemap_cached", { root });
+}
+
+/**
+ * Turn the files tagged on the disk map into a stored scan.
+ *
+ * Read-only: Rust refuses protected paths, folders and links and reports them
+ * in `refused`; the rest go to quarantine only through {@link execute}.
+ */
+export function treemapPropose(paths: string[]): Promise<TaggedProposal> {
+  return invoke<TaggedProposal>("treemap_propose", { paths });
 }
 
 /** Show a path in File Explorer. Opens a window; changes nothing. */

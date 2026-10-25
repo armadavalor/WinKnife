@@ -57,7 +57,7 @@ use crate::core::types::{
     Action, ExecItemResult, ExecOutcome, ExecReport, Finding, FindingKind, Justification,
     MoveWarning, Recommendation, StartupSource,
 };
-use crate::modules::empty_folders;
+use crate::modules::{empty_folders, treemap};
 
 /// One unit of work: a recommendation paired with the finding it acts on.
 #[derive(Debug, Clone, Copy)]
@@ -527,6 +527,10 @@ fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Opti
             command,
         } => startup_refusal(*source, key, command, env),
         Justification::Tweak { tweak_id, observed } => env.tweaks.refusal(tweak_id, *observed),
+        Justification::UserTagged {
+            size_bytes,
+            modified,
+        } => treemap::tagged_refusal(&unit.finding.path, *size_bytes, *modified),
     }
 }
 
