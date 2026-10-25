@@ -7,6 +7,7 @@
   action that is not reversible.
 -->
 <script lang="ts">
+  import { focusTrap } from "$lib/focusTrap";
   import { t } from "$lib/i18n";
 
   interface Props {
@@ -41,22 +42,6 @@
     onconfirm,
     oncancel,
   }: Props = $props();
-
-  let dialog = $state<HTMLDivElement | null>(null);
-
-  // Focus lands on the dialog when it opens, so Escape and Tab behave.
-  $effect(() => {
-    if (open) {
-      dialog?.focus();
-    }
-  });
-
-  function onkeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      oncancel();
-    }
-  }
 </script>
 
 {#if open}
@@ -64,13 +49,12 @@
     class="fixed inset-0 z-40 flex items-center justify-center bg-scrim p-6"
   >
     <div
-      bind:this={dialog}
+      use:focusTrap={{ onescape: oncancel, trap: true }}
       class="w-full max-w-md rounded-xl border border-surface-3 bg-surface-1 p-6 shadow-2xl outline-none"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="confirm-title"
       tabindex="-1"
-      {onkeydown}
     >
       <h2 id="confirm-title" class="text-lg font-semibold tracking-tight">
         {title}

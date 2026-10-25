@@ -2637,3 +2637,11 @@ absent).
 **Decisions.** Read-only; no process kill, winsock/IP reset, firewall change or outbound lookup this round. The snapshot is taken on open and on Refresh, not live.
 
 **Deferred.** See DECISIONS-NEEDED "network module".
+
+---
+
+## 2026-10-25 — Phase 7: accessibility pass (C8)
+
+**Built.** `focusTrap` action (focus on open, Esc, focus return, optional Tab trap) for ConfirmDialog and the quarantine drawer; skip link target is focusable; scan status lines are live regions; contrast tokens fixed for AA in graphite, forest and mist; sidebar scrolls on short windows.
+**Decisions.** No new strings, no backend change. See `docs/phases/PHASE-7-a11y.md`.
+**Deferred.** Graphite `ink-muted` on `accent-soft` (3.88:1, hover/active only).
