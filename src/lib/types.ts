@@ -132,7 +132,18 @@ export interface Recommendation {
 export type ExecOutcome =
   | { status: "succeeded" }
   | { status: "skipped"; reason: string }
-  | { status: "failed"; error: string };
+  | {
+      status: "failed";
+      error: string;
+      /** Windows refused for lack of administrator rights (K-020). */
+      needsAdmin?: boolean;
+    };
+
+/** How a "Restart as administrator" request ended. */
+export type RelaunchOutcome =
+  | { status: "started" }
+  | { status: "declined" }
+  | { status: "failed"; code: number };
 
 /** Per-item result inside an {@link ExecReport}. */
 export interface ExecItemResult {

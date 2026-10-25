@@ -588,6 +588,17 @@ const en = {
   "unlocker.closeError": "Could not ask {app} to close.",
 
   "status.version": "Version {version}",
+  "elevation.standard": "Standard",
+  "elevation.admin": "Administrator",
+  "elevation.standardHint": "Running with your own rights. A few actions need more.",
+  "elevation.adminHint": "Running with administrator rights.",
+  "elevation.restart": "Restart as admin",
+  "elevation.restarting": "Waiting for Windows…",
+  "elevation.declined": "Administrator rights were not granted. WinKnife keeps running as before.",
+  "elevation.failed": "Could not restart as administrator: {error}",
+  "elevation.needsAdmin": "This needs administrator rights — Restart as admin",
+  "elevation.needsAdminDetail": "Windows refused the last action for lack of rights. Restarting reopens this page.",
+  "elevation.dismiss": "Dismiss",
 
   // --- appearance (WP-B) ---
   "settings.appearanceTitle": "Appearance",

@@ -2495,3 +2495,26 @@ settings save.
   known and inside the fence; unknown pack ids and invalid retention are
   refused by the settings merge. Test: a hand-crafted profile naming a fenced
   or unknown tweak is refused with no registry writes and no undo rows.
+
+## 2026-10-25 — Admin elevation on request (K-020)
+
+**Built.** WinKnife can tell whether it runs elevated and restart itself as
+administrator on a click; actions that fail for lack of rights say so instead
+of showing a raw "access denied".
+
+- `core/platform/elevation.rs`: `is_elevated` (TokenElevation),
+  `relaunch_elevated` (ShellExecuteExW `runas`, same exe; UAC "No" = 1223 →
+  `Declined`), `relaunch_parameters` (keeps `--module` only for a plain id,
+  `--dry-run`, `--after-elevation <pid>`), `wait_for_exit`. The elevated copy
+  waits for the old pid before the single-instance plugin runs, so it is not
+  turned away. Not armed in tests (`elevation_blocked`).
+- Commands `elevation_status`, `restart_as_admin` (exits on `Started`).
+- `CoreError::NeedsAdmin` / code `needs_admin`; `Io` PermissionDenied, registry
+  `ERROR_ACCESS_DENIED` and Task Scheduler `E_ACCESSDENIED` map to it.
+  `ExecOutcome::Failed` gains `needsAdmin`.
+- UI: Standard/Administrator badge + "Restart as admin" in the sidebar; a
+  banner when any command or exec item comes back `needs_admin`; UAC declined
+  keeps running with a notice. Failed items show a fixed "needs administrator
+  rights" note.
+- Deferred: "Always start as admin" rejected (DECISIONS-NEEDED); upfront HKLM
+  hint on the startup page left to the list-QoL work.

@@ -422,7 +422,21 @@ pub enum ExecOutcome {
     Failed {
         /// The error, already flattened to a string for the UI.
         error: String,
+        /// Windows refused for lack of administrator rights (K-020); the
+        /// report offers "Restart as administrator".
+        #[serde(default, rename = "needsAdmin", skip_serializing_if = "std::ops::Not::not")]
+        needs_admin: bool,
     },
+}
+
+impl ExecOutcome {
+    /// A failure from `err`, flagged when it is a missing-admin-rights one.
+    pub fn failed(err: &CoreError) -> Self {
+        Self::Failed {
+            error: err.to_string(),
+            needs_admin: err.code() == "needs_admin",
+        }
+    }
 }
 
 /// Per-item result inside an [`ExecReport`].
@@ -756,6 +770,24 @@ mod tests {
     }
 
     #[test]
+    fn a_failure_for_lack_of_admin_rights_is_flagged_for_the_ui() {
+        let denied = CoreError::NeedsAdmin(r"HKLM\...\Run".into());
+        assert!(matches!(
+            ExecOutcome::failed(&denied),
+            ExecOutcome::Failed { needs_admin: true, .. }
+        ));
+        let json = serde_json::to_string(&ExecOutcome::failed(&denied)).expect("serialize");
+        assert!(json.contains(r#""needsAdmin":true"#), "got {json}");
+        let other = ExecOutcome::failed(&CoreError::Registry("gone".into()));
+        let json = serde_json::to_string(&other).expect("serialize");
+        assert!(!json.contains("needsAdmin"), "got {json}");
+        // Rows recorded before the flag existed still read back.
+        let old: ExecOutcome =
+            serde_json::from_str(r#"{"status":"failed","error":"x"}"#).expect("old row");
+        assert!(matches!(old, ExecOutcome::Failed { needs_admin: false, .. }));
+    }
+
+    #[test]
     fn exec_report_sums_only_successful_items() {
         let item = |outcome: ExecOutcome, bytes: u64| ExecItemResult {
             recommendation_id: Uuid::nil(),
@@ -772,6 +804,7 @@ mod tests {
                 item(
                     ExecOutcome::Failed {
                         error: "locked".to_owned(),
+                        needs_admin: false,
                     },
                     900,
                 ),

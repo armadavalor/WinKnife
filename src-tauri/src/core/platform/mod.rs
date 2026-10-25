@@ -18,6 +18,7 @@
 //! and those refuse to act until [`guard::arm_real_os_effects`] has run, which
 //! only `lib.rs::run()` can do (security review H5).
 
+pub(crate) mod elevation;
 pub(crate) mod env;
 pub(crate) mod execution_state;
 pub(crate) mod explorer;
@@ -40,6 +41,10 @@ pub(crate) mod volume;
 
 use std::sync::Arc;
 
+pub use elevation::{
+    is_elevated, previous_instance, relaunch_elevated, relaunch_parameters, wait_for_exit,
+    RelaunchOutcome, AFTER_ELEVATION_FLAG,
+};
 pub use env::{EnvResolver, MapEnv, SystemEnv};
 pub use execution_state::{AwakeRequest, ExecutionState, RecordedCall, RecordingExecutionState};
 pub use explorer::reveal_in_explorer;

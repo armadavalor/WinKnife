@@ -17,6 +17,8 @@
   import QuarantineDrawer from "$lib/components/QuarantineDrawer.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import { t } from "$lib/i18n";
+  import { page } from "$app/state";
+  import { elevation } from "$lib/stores/elevation.svelte";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { glow } from "$lib/stores/glow.svelte";
   import { hiddenModules } from "$lib/stores/hiddenModules.svelte";
@@ -35,6 +37,7 @@
     motion.init();
     glow.init();
     hiddenModules.init();
+    void elevation.init();
     void moduleStore.load();
     void quarantineStore.reload();
     void openLaunchRoute();
@@ -108,6 +111,41 @@
   />
 
   <main id="main" class="flex-1 overflow-y-auto">
+    {#if elevation.needsAdmin || elevation.notice}
+      <div
+        class="mx-6 mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-surface-3 bg-surface-2 px-4 py-3 text-sm text-ink"
+        role="status"
+        data-testid="needs-admin-banner"
+      >
+        <div class="min-w-0 flex-1">
+          {#if elevation.notice === "declined"}
+            <p>{t("elevation.declined")}</p>
+          {:else if elevation.notice === "failed"}
+            <p>{t("elevation.failed", { error: elevation.error ?? "" })}</p>
+          {:else}
+            <p class="font-medium">{t("elevation.needsAdmin")}</p>
+            <p class="text-ink-muted">{t("elevation.needsAdminDetail")}</p>
+          {/if}
+        </div>
+        {#if elevation.needsAdmin}
+          <button
+            type="button"
+            class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60"
+            disabled={elevation.busy}
+            onclick={() => void elevation.restart(page.url.pathname)}
+          >
+            {elevation.busy ? t("elevation.restarting") : t("elevation.restart")}
+          </button>
+        {/if}
+        <button
+          type="button"
+          class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          onclick={() => elevation.dismiss()}
+        >
+          {t("elevation.dismiss")}
+        </button>
+      </div>
+    {/if}
     {@render children()}
   </main>
 </div>
