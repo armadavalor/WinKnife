@@ -107,6 +107,12 @@ pub struct RuleSpec {
     /// the user profile (RULES-FORMAT.md).
     #[serde(default)]
     pub requires_admin: bool,
+    /// Clean the contents but keep the folder (C12): each `paths` entry names a
+    /// folder, and every file anywhere under it is matched while the folder and
+    /// its subfolders stay. Same reach as writing `Folder\**`; the cleaner
+    /// never proposes a directory either way.
+    #[serde(default)]
+    pub keep_folder: bool,
 }
 
 /// A pack file as written on disk.
@@ -283,6 +289,12 @@ pub fn parse_pack(pack_name: &str, json: &str) -> Result<RulePackSpec> {
                 "a `do_not_delete` rule must not propose an action".to_owned(),
             ));
         }
+        if rule.keep_folder && rule.action != RuleAction::Quarantine {
+            return Err(invalid(
+                &field("keep_folder"),
+                "`keep_folder` only applies to a `quarantine` rule".to_owned(),
+            ));
+        }
         if let Some(extensions) = &rule.match_.extensions {
             if extensions.iter().any(|e| e.starts_with('.')) {
                 return Err(invalid(
@@ -366,6 +378,11 @@ pub fn compile_spec(spec: RulePackSpec, env: &dyn EnvResolver) -> Result<RulePac
         for pattern in &rule.paths {
             match env::expand(pattern, env) {
                 env::Expansion::Expanded(expanded) => {
+                    let expanded = if rule.keep_folder {
+                        contents_of(&expanded)
+                    } else {
+                        expanded
+                    };
                     let glob = compile_glob(&expanded).map_err(|message| CoreError::RulePack {
                         pack: spec.id.clone(),
                         field: format!("rules.{}.paths", rule.id),
@@ -450,6 +467,12 @@ pub fn compile_spec(spec: RulePackSpec, env: &dyn EnvResolver) -> Result<RulePac
         rules,
         skipped,
     })
+}
+
+/// The pattern for everything under the folder `pattern` names, but not the
+/// folder itself.
+fn contents_of(pattern: &str) -> String {
+    format!("{}\\**", pattern.trim_end_matches(['\\', '/']))
 }
 
 /// Load every `*.json` pack in `dir` (ignoring the schema file).
@@ -1018,6 +1041,37 @@ mod tests {
         let rule = &pack.rules[0];
         assert!(rule.matches_path(Path::new("C:\\Temp\\sub\\a.txt")));
         assert!(!rule.matches_path(Path::new("C:\\Temp\\sub\\a.lock")));
+    }
+
+    #[test]
+    fn keep_folder_defaults_off_and_parses_when_set() {
+        let spec = parse_pack("windows-temp", VALID).expect("valid pack");
+        assert!(!spec.rules[0].keep_folder);
+        let json = with_rule_field("keep_folder", "true");
+        let spec = parse_pack("windows-temp", &json).expect("keep_folder pack");
+        assert!(spec.rules[0].keep_folder);
+    }
+
+    #[test]
+    fn keep_folder_is_refused_on_a_non_quarantine_rule() {
+        let json = with_rule_field("keep_folder", "true")
+            .replace(r#""action": "quarantine""#, r#""action": "info_only""#);
+        let err = parse_pack("windows-temp", &json).expect_err("must refuse");
+        assert!(err.to_string().contains("keep_folder"), "{err}");
+    }
+
+    #[test]
+    fn keep_folder_matches_every_file_under_the_folder_but_not_the_folder() {
+        let json = with_rule_field("keep_folder", "true")
+            .replace(r#""%TEMP%\\**""#, r#""%TEMP%\\Cache\\""#)
+            .replace(r#""exclude": ["%TEMP%\\**\\*.lock"],"#, "");
+        let pack = compile_pack("windows-temp", &json, &env()).expect("compile");
+        let rule = &pack.rules[0];
+        assert_eq!(rule.roots(), [PathBuf::from(r"C:\Temp\Cache")]);
+        assert!(rule.matches_path(Path::new(r"C:\Temp\Cache\a.tmp")));
+        assert!(rule.matches_path(Path::new(r"C:\Temp\Cache\sub\b.tmp")));
+        assert!(!rule.matches_path(Path::new(r"C:\Temp\Cache")));
+        assert!(!rule.matches_path(Path::new(r"C:\Temp\other.tmp")));
     }
 
     #[test]

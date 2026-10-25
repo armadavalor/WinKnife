@@ -1562,6 +1562,80 @@ mod tests {
         assert_eq!(cases, 5 * 3 * 2 * 2, "the combination count is the claim");
     }
 
+    /// C12: a `keep_folder` rule proposes every file under the folder, never
+    /// the folder or a subfolder, and a protected child stays red.
+    #[test]
+    fn a_keep_folder_rule_takes_the_contents_and_leaves_the_folders() {
+        let fixture = Fixture::new();
+        let keep = fixture.root.join("AppData/Local/KeepMe");
+        aged(&keep.join("a.tmp"), b"top", 48);
+        aged(&keep.join("sub/b.tmp"), b"nested", 48);
+        fs::create_dir_all(keep.join("empty")).expect("empty subfolder");
+        let pack = rules::compile_pack(
+            "keep-test",
+            r#"{
+                "id": "keep-test", "name": "Keep test", "version": 1,
+                "module": "cleaner", "enabled_by_default": true,
+                "description": "C12 fixture.",
+                "rules": [{
+                    "id": "keep-me-contents",
+                    "paths": ["%LOCALAPPDATA%\\KeepMe"],
+                    "keep_folder": true,
+                    "match": { "min_age_hours": 24 },
+                    "score": { "base": 90, "max_bucket": "safe" },
+                    "action": "quarantine",
+                    "reason": "Cache contents; the folder stays."
+                }]
+            }"#,
+            &fixture.env,
+        )
+        .expect("keep_folder pack");
+        let packs = vec![pack];
+        let protected = fixture.protected();
+        let cancel = CancellationToken::new();
+        let settings = CleanerSettings::default();
+        let bin = StubRecycleBin::new(0, 0);
+        let output = scan(
+            &CleanerContext {
+                packs: &packs,
+                settings: &settings,
+                protected: &protected,
+                recycle_bin: &bin,
+                now: Utc::now(),
+                cancel: &cancel,
+            },
+            None,
+        );
+
+        let mut found: Vec<_> = output.findings.iter().map(|f| f.path.clone()).collect();
+        found.sort();
+        assert_eq!(found, [keep.join("a.tmp"), keep.join("sub").join("b.tmp")]);
+        assert!(output.findings.iter().all(|f| f.kind == FindingKind::File));
+        assert!(keep.is_dir() && keep.join("sub").is_dir() && keep.join("empty").is_dir());
+
+        let brain = Brain::builder()
+            .protected_paths(ProtectedPaths::from_trees([keep.join("sub")]))
+            .packs(packs)
+            .lock_probe(Arc::new(AlwaysUnlocked))
+            .process_probe(Arc::new(StubProcessProbe::none()))
+            .build();
+        let recommendations = analyze(&output.findings, &brain);
+        assert_eq!(recommendations.len(), 2);
+        for rec in recommendations {
+            let finding = output
+                .findings
+                .iter()
+                .find(|f| rec.finding_ids.contains(&f.id))
+                .expect("finding");
+            if finding.path.starts_with(keep.join("sub")) {
+                assert_eq!(rec.risk, RiskBucket::DoNotDelete);
+                assert_eq!(rec.action, Action::InfoOnly);
+            } else {
+                assert_eq!(rec.action, Action::Quarantine);
+            }
+        }
+    }
+
     #[test]
     fn the_injected_protected_path_is_never_actionable() {
         let fixture = Fixture::new();
