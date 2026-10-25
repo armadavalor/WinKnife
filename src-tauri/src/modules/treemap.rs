@@ -1058,7 +1058,9 @@ fn tagged_file(
 /// junction cannot route around it.
 fn drive_root_refusal(path: &Path) -> Option<String> {
     let resolved = std::fs::canonicalize(path).ok();
-    let on_root = std::iter::once(path)
+    let lexical = lexically_normal(path);
+    let on_root = [path, lexical.as_path()]
+        .into_iter()
         .chain(resolved.as_deref())
         .any(parent_is_root);
     on_root.then(|| {
@@ -1068,6 +1070,28 @@ fn drive_root_refusal(path: &Path) -> Option<String> {
             path.display()
         )
     })
+}
+
+/// Folds `.` and `..` without touching the disk; `canonicalize` fails when a
+/// folder named before `..` does not exist, yet Windows still resolves the path.
+fn lexically_normal(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !matches!(
+                    out.components().next_back(),
+                    None | Some(Component::Prefix(_) | Component::RootDir)
+                ) {
+                    out.pop();
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 fn parent_is_root(path: &Path) -> bool {
@@ -1718,7 +1742,10 @@ mod tests {
 
     #[test]
     fn a_file_on_a_drive_root_is_refused_and_one_level_down_is_not() {
-        for root_file in [r"C:\bootmgr", r"\\?\C:\BOOTNXT", r"C:\x\..\bootmgr"] {
+        for root_file in [r"C:\bootmgr", r"\\?\C:\BOOTNXT", r"C:\x\..\bootmgr",
+            // `canonicalize` fails here, so the lexical fold must catch it.
+            r"C:\winknife-no-such-dir\.\..\bootmgr",
+        ] {
             let path = Path::new(root_file);
             let reason = drive_root_refusal(path).expect(root_file);
             assert!(reason.contains("root of a drive"), "{reason}");
