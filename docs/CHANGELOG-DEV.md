@@ -2674,3 +2674,8 @@ absent).
 - Tests against `MapRegistry` + in-memory DB: split/join round-trip, all four flags, validation, create/modify/delete → undo (kind kept), HKLM refusal, stale and outside-change refusals.
 
 **Deferred.** See DECISIONS-NEEDED, "Open items raised by the environment-variable editor".
+
+## 2026-10-25 — C7 follow-up: type-changed drift test
+
+C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; this adds the one missing case from the brief, a value whose registry type changed (`REG_DWORD` to `REG_SZ`), pinned as drift with a reason. No behaviour change.
+

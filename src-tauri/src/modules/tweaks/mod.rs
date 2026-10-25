@@ -980,6 +980,25 @@ mod tests {
     }
 
     #[test]
+    fn a_value_whose_type_changed_is_drift_with_a_reason() {
+        let (registry, service) = service(MapRegistry::new());
+        let conn = open_in_memory().expect("db");
+        service.apply(&conn, EXT).expect("apply");
+        registry
+            .set_value(
+                Hive::CurrentUser,
+                EXPLORER_ADVANCED,
+                &RegValue::string("HideFileExt", 1, "0"),
+            )
+            .expect("outside change");
+
+        let state = &service.scan(&conn).expect("scan")[0];
+        let reason = state.drift.as_deref().expect("drift");
+        assert!(reason.contains("something other than a number"), "{reason}");
+        assert!(!state.applied);
+    }
+
+    #[test]
     fn reapplying_a_drifted_tweak_goes_through_apply_and_undo_restores_the_drifted_value() {
         let (registry, service) = service(MapRegistry::new());
         let conn = open_in_memory().expect("db");
