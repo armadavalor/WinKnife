@@ -8,7 +8,7 @@ on:
       version:
         description: Release version without the leading v
         required: true
-        default: "0.3.0"
+        default: "0.4.0"
 
 permissions:
   contents: read
@@ -17,7 +17,7 @@ jobs:
   install:
     runs-on: windows-latest
     env:
-      VERSION: ${{ inputs.version || '0.3.0' }}
+      VERSION: ${{ inputs.version || '0.4.0' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4

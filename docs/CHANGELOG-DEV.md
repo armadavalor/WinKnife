@@ -2624,3 +2624,8 @@ absent).
 - `i18n-parity.test.ts`: EN/TR key parity and `{placeholder}` parity; `localePref.test.ts`, `format.test.ts` extended.
 
 **Deferred.** Rust-generated reasons/errors stay English (see DECISIONS-NEEDED, 2026-10-25 K-022).
+
+## 2026-10-25 — v0.4.0 release prep
+
+- Version 0.4.0 in package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json and the demo/install-smoke workflow defaults; CHANGELOG `[Unreleased]` cut to `[0.4.0]` and filled in for everything merged since v0.3.0 (#61–#92).
+- README: thirteen tools, Tweaks / Context menu / Hosts File rows, EN+TR noted. First release with the build attestation step (C9).

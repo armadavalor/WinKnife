@@ -13,7 +13,7 @@ a shutdown timer into one window.
 
 ![Scan, review, clean up into quarantine, then restore everything](assets/demo.gif)
 
-**Status:** ten tools implemented; current release v0.3.0.
+**Status:** thirteen tools implemented; current release v0.4.0. Interface in English and Turkish.
 
 | Tool | What works |
 | --- | --- |
@@ -27,6 +27,9 @@ a shutdown timer into one window.
 | Keep Awake | Keeps the PC (optionally the screen) awake for up to 24 hours. Nothing is persisted. |
 | Restore Point | Shows System Protection status and creates a restore point (UAC prompt). |
 | Legacy Panels | Opens 22 classic Windows tools from one page; unavailable ones are disabled. |
+| Tweaks | 27 reversible current-user Windows settings; the old value is saved and Undo restores it. |
+| Context menu | Lists right-click menu entries with owner and publisher; disables an entry for the current user, reversibly. |
+| Hosts File | View and edit the hosts file with a backup and diff before every save (UAC prompt). |
 
 ## Safety and privacy
 

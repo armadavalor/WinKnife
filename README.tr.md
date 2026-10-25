@@ -6,7 +6,7 @@ Disk temizliği, aynı dosyaları ve boş klasörleri bulma, disk haritası, ba�
 uygulamaları, dosya kilidi açıcı, uyanık tutma, geri yükleme noktası ve kapatma
 zamanlayıcısını tek pencerede sunan açık kaynak Windows aracı.
 
-**Durum:** On araç uygulanmış durumda; güncel sürüm v0.3.0.
+**Durum:** On üç araç uygulanmış durumda; güncel sürüm v0.4.0. Arayüz İngilizce ve Türkçe.
 
 | Araç | İşlev |
 | --- | --- |
