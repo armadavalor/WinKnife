@@ -33,6 +33,7 @@ pub(crate) mod power;
 pub(crate) mod process;
 pub(crate) mod recycle_bin;
 pub(crate) mod registry;
+pub(crate) mod repair;
 pub(crate) mod restart_manager;
 pub(crate) mod restore_point;
 pub(crate) mod signature;
@@ -65,6 +66,7 @@ pub use registry::{
     Hive, MapRegistry, RegValue, Registry, SystemRegistry, REG_TYPE_BINARY, REG_TYPE_DWORD,
     REG_TYPE_EXPAND_SZ, REG_TYPE_SZ,
 };
+pub use repair::{FakeRepairRunner, OutputDecoder, RepairRunner, SystemRepairRunner};
 pub use restart_manager::{
     close_policy, real_restart_manager, AppKind, CloseOutcome, ClosePolicy, LockInfo,
     RestartManager, RmError, UniqueProcess,

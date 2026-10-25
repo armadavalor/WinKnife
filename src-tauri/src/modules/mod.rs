@@ -45,6 +45,7 @@ register_modules! {
     hosts => hosts::HostsModule,
     tweaks => tweaks::TweaksModule,
     context_menu => context_menu::ContextMenuModule,
+    repair => repair::RepairModule,
 }
 
 /// Build the application's module registry.
@@ -128,6 +129,7 @@ mod tests {
             "hosts",
             "tweaks",
             "context-menu",
+            "repair",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }

@@ -1029,6 +1029,52 @@ export interface HostsBackup {
 }
 
 /* -------------------------------------------------------------------------
+ * modules/repair.rs (C6)
+ * ---------------------------------------------------------------------- */
+
+export type RepairTool =
+  | "sfc"
+  | "check-health"
+  | "scan-health"
+  | "restore-health"
+  | "analyze-component-store";
+
+export type RepairVerdict =
+  | "no-problems"
+  | "repaired"
+  | "could-not-repair"
+  | "restart-needed"
+  | "store-repairable"
+  | "cleanup-recommended"
+  | "cleanup-not-needed"
+  | "failed"
+  | "cancelled"
+  | "unknown";
+
+export interface RepairToolInfo {
+  tool: RepairTool;
+  /** The exact command line run. */
+  command: string;
+  needsConfirm: boolean;
+}
+
+export interface RepairOutcome {
+  tool: RepairTool;
+  command: string;
+  verdict: RepairVerdict;
+  exitCode: number | null;
+  /** The saved full log; null if it could not be written. */
+  logPath: string | null;
+}
+
+/** Payload of `repair:output`. A progress line is replaced by the next line. */
+export interface RepairLine {
+  tool: RepairTool;
+  text: string;
+  progress: boolean;
+}
+
+/* -------------------------------------------------------------------------
  * modules/legacy_panels.rs
  * ---------------------------------------------------------------------- */
 

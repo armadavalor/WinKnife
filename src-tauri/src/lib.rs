@@ -347,6 +347,19 @@ pub fn manage_state<R: tauri::Runtime>(
         SystemEnv.var("SystemRoot").map(std::path::PathBuf::from),
     )));
 
+    // Repair kit (C6): tests, dev dry runs and anything unarmed get the fake
+    // runner, so no build but the real one ever starts SFC or DISM.
+    let repair_runner: Arc<dyn core::platform::RepairRunner> =
+        if dry_run || !core::platform::real_os_effects_armed() {
+            Arc::new(core::platform::FakeRepairRunner { elevated: true })
+        } else {
+            Arc::new(core::platform::SystemRepairRunner)
+        };
+    app.manage(Arc::new(modules::repair::RepairService::new(
+        repair_runner,
+        core::logging::log_dir(app_data_dir),
+    )));
+
     app.manage(commands::Services {
         quarantine,
         brain,
@@ -434,6 +447,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::hosts_restore,
         commands::hosts_reveal_backup,
         commands::hosts_flush_dns,
+        commands::repair_tools,
+        commands::repair_run,
+        commands::repair_cancel,
         commands::legacy_panels_list,
         commands::legacy_panels_open,
         commands::keep_awake_start,

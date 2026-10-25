@@ -23,6 +23,9 @@ pub enum Operation {
     Restore,
     /// Permanently removing expired or chosen quarantine items.
     Purge,
+    /// An SFC or DISM run from the repair kit (C6). Not a quarantine
+    /// operation; it only borrows the "already running" message.
+    Repair,
 }
 
 impl Operation {
@@ -32,6 +35,7 @@ impl Operation {
             Self::Clean => "A clean-up",
             Self::Restore => "A restore",
             Self::Purge => "A purge",
+            Self::Repair => "A repair",
         }
     }
 }

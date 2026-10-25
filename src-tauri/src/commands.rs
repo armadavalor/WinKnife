@@ -56,6 +56,7 @@ use crate::modules::empty_folders;
 use crate::modules::hosts::{HostsBackup, HostsDocument, HostsPreview, HostsService, SaveOutcome};
 use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
 use crate::modules::legacy_panels::{LegacyPanelsService, PanelInfo};
+use crate::modules::repair::{RepairOutcome, RepairService, RepairTool, RepairToolInfo};
 use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
 use crate::modules::{context_menu, startup, treemap, tweaks};
@@ -2349,6 +2350,46 @@ pub async fn hosts_flush_dns() -> Result<String, ApiError> {
         .map_err(ApiError::from)
     })
     .await
+}
+
+/* -------------------------------------------------------------------------
+ * Repair kit (C6)
+ * ---------------------------------------------------------------------- */
+
+/// The repair tools with their exact command lines. Runs nothing.
+#[tauri::command]
+pub fn repair_tools() -> Result<Vec<RepairToolInfo>, ApiError> {
+    guarded("repair_tools", || Ok(RepairService::tools()))
+}
+
+/// Run one SFC/DISM tool, streaming its output as [`events::REPAIR_OUTPUT`].
+/// Only ever on a button click; refused with `needs_admin` when unelevated.
+///
+/// # Errors
+/// `needs_admin`, `busy` while another tool runs, or the tool failing to start.
+#[tauri::command(async)]
+pub fn repair_run<R: Runtime>(
+    app: AppHandle<R>,
+    service: State<'_, Arc<RepairService>>,
+    tool: RepairTool,
+) -> Result<RepairOutcome, ApiError> {
+    guarded("repair_run", || {
+        let mut throttle = ProgressThrottle::new();
+        Ok(service.run(tool, &mut |line| {
+            if line.progress && !throttle.should_emit() {
+                return;
+            }
+            if let Err(err) = events::emit_repair_output(&app, &line) {
+                tracing::warn!(error = %err, "repair output not delivered");
+            }
+        })?)
+    })
+}
+
+/// Stop the running tool. Returns whether one was running.
+#[tauri::command]
+pub fn repair_cancel(service: State<'_, Arc<RepairService>>) -> Result<bool, ApiError> {
+    guarded("repair_cancel", || Ok(service.cancel()))
 }
 
 /* -------------------------------------------------------------------------

@@ -30,6 +30,10 @@ import type {
   HostsDocument,
   HostsPreview,
   HostsSaveOutcome,
+  RepairLine,
+  RepairOutcome,
+  RepairTool,
+  RepairToolInfo,
   ModuleManifest,
   MoveWarning,
   PanelInfo,
@@ -122,6 +126,7 @@ export const EVENTS = {
   shutdownTick: "shutdown:tick",
   launchNavigate: "launch:navigate",
   keepAwakeChanged: "keep-awake:changed",
+  repairOutput: "repair:output",
 } as const;
 
 /* -------------------------------------------------------------------------
@@ -525,6 +530,25 @@ export function hostsFlushDns(): Promise<string> {
 }
 
 /* -------------------------------------------------------------------------
+ * Commands — repair kit (C6)
+ * ---------------------------------------------------------------------- */
+
+/** The SFC/DISM tools with their exact command lines. Runs nothing. */
+export function repairTools(): Promise<RepairToolInfo[]> {
+  return invoke<RepairToolInfo[]>("repair_tools");
+}
+
+/** Run one tool; output streams as {@link onRepairOutput}. Rejects with `needs_admin` when unelevated. */
+export function repairRun(tool: RepairTool): Promise<RepairOutcome> {
+  return invoke<RepairOutcome>("repair_run", { tool });
+}
+
+/** Stop the running tool. Resolves with whether one was running. */
+export function repairCancel(): Promise<boolean> {
+  return invoke<boolean>("repair_cancel");
+}
+
+/* -------------------------------------------------------------------------
  * Commands — legacy panels (module spec 10)
  * ---------------------------------------------------------------------- */
 
@@ -700,6 +724,11 @@ export function onQuarantineChanged(
 /** Subscribe to keep-awake start, stop and expiry. */
 export function onKeepAwakeChanged(handler: () => void): Promise<UnlistenFn> {
   return subscribe(EVENTS.keepAwakeChanged, handler);
+}
+
+/** Subscribe to repair-kit output lines. Resolves with the unsubscribe function. */
+export function onRepairOutput(handler: (line: RepairLine) => void): Promise<UnlistenFn> {
+  return subscribe(EVENTS.repairOutput, handler);
 }
 
 /** Subscribe to the once-a-second shutdown countdown. */

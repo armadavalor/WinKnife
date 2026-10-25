@@ -170,6 +170,10 @@ pub enum CoreError {
     #[error("hosts file: {0}")]
     Hosts(String),
 
+    /// The repair kit (module C6) could not start or read SFC / DISM.
+    #[error("repair: {0}")]
+    Repair(String),
+
     /// Windows refused the change because WinKnife runs without administrator
     /// rights (K-021). The UI offers "Restart as administrator" for this code.
     #[error("this needs administrator rights: {0}")]
@@ -218,6 +222,7 @@ impl CoreError {
             Self::SchemaTooNew { .. } => "schema_too_new",
             Self::Busy(_) => "busy",
             Self::Hosts(_) => "hosts",
+            Self::Repair(_) => "repair",
             Self::NeedsAdmin(_) => "needs_admin",
             Self::ElevationBlocked => "elevation_blocked",
         }

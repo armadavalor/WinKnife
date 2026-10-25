@@ -325,6 +325,19 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "hosts_flush_dns",
             args: json!({}),
         },
+        // Repair kit: the test process is unarmed, so a fake runner answers.
+        Probe {
+            command: "repair_tools",
+            args: json!({}),
+        },
+        Probe {
+            command: "repair_run",
+            args: json!({ "tool": "check-health" }),
+        },
+        Probe {
+            command: "repair_cancel",
+            args: json!({}),
+        },
         // Read-only: checks which System32 files exist.
         Probe {
             command: "legacy_panels_list",

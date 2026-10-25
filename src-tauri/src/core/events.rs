@@ -26,6 +26,8 @@ pub const RESTORE_PROGRESS: &str = "quarantine:restore-progress";
 /// A keep-awake session started, stopped or expired. No payload: the UI
 /// re-reads `keep_awake_status`.
 pub const KEEP_AWAKE_CHANGED: &str = "keep-awake:changed";
+/// A repair-kit tool printed a line (C6).
+pub const REPAIR_OUTPUT: &str = "repair:output";
 
 /// Upper bound on progress events per second, per ARCHITECTURE section 3.
 pub const MAX_PROGRESS_EVENTS_PER_SEC: u32 = 10;
@@ -173,6 +175,17 @@ pub fn emit_quarantine_changed<R: Runtime>(
 /// See [`CoreError::Emit`].
 pub fn emit_keep_awake_changed<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
     emit(app, KEEP_AWAKE_CHANGED, &())
+}
+
+/// Emit [`REPAIR_OUTPUT`]. Callers gate progress lines with a [`ProgressThrottle`].
+///
+/// # Errors
+/// See [`CoreError::Emit`].
+pub fn emit_repair_output<R: Runtime>(
+    app: &AppHandle<R>,
+    payload: &crate::modules::repair::RepairLine,
+) -> Result<()> {
+    emit(app, REPAIR_OUTPUT, payload)
 }
 
 /// Rate limiter for progress events.
