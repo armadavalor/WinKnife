@@ -20,6 +20,7 @@
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import {
     deselectVisible,
+    hiddenSelectedCount,
     invertVisible,
     matchesFilter,
     selectVisible,
@@ -235,6 +236,7 @@
         bind:filter
         shown={visibleFindings.length}
         total={result.findings.length}
+        hiddenSelected={filter.trim() ? hiddenSelectedCount(store.selected, pickable) : 0}
         onselectall={() => (store.selected = selectVisible(store.selected, pickable))}
         onselectnone={() => (store.selected = deselectVisible(store.selected, pickable))}
         oninvert={() => (store.selected = invertVisible(store.selected, pickable))}

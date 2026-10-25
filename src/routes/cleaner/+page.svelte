@@ -29,6 +29,7 @@
   import { itemsToReport, stopSummary, warningsOf } from "$lib/stores/execNotes";
   import {
     deselectVisible,
+    hiddenSelectedCount,
     invertVisible,
     matchesFilter,
     selectVisible,
@@ -295,6 +296,7 @@
       bind:sort
       shown={safeRows.length + reviewRows.length + blockedRows.length}
       total={totalRows}
+      hiddenSelected={filter.trim() ? hiddenSelectedCount(store.selected, pickable) : 0}
       onselectall={() => (store.selected = selectVisible(store.selected, pickable))}
       onselectnone={() => (store.selected = deselectVisible(store.selected, pickable))}
       oninvert={() => (store.selected = invertVisible(store.selected, pickable))}

@@ -721,6 +721,7 @@ const en = {
   "list.invert": "Invert",
   "list.shown": "{shown} of {total} shown",
   "list.noMatch": "Nothing matches the filter.",
+  "list.hiddenSelected": "+{count} selected, hidden by the filter",
 } as const;
 
 /** Turkish overrides. Missing keys fall back to English. */
@@ -1026,6 +1027,7 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "list.invert": "Tersine çevir",
   "list.shown": "{total} içinden {shown} gösteriliyor",
   "list.noMatch": "Süzgece uyan bir şey yok.",
+  "list.hiddenSelected": "+{count} seçili satır süzgeç yüzünden gizli",
 };
 
 /** Every key the dictionary knows. */

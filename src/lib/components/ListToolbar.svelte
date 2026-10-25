@@ -16,6 +16,8 @@
     /** Rows after filtering, and rows before. Hides the counter when equal. */
     shown: number;
     total: number;
+    /** Ticked rows the filter hides; they are still acted on, so say so. */
+    hiddenSelected?: number;
     /** Omit all three to hide the select buttons (lists with no selection). */
     onselectall?: () => void;
     onselectnone?: () => void;
@@ -27,6 +29,7 @@
     sort = $bindable(),
     shown,
     total,
+    hiddenSelected = 0,
     onselectall,
     onselectnone,
     oninvert,
@@ -65,6 +68,11 @@
     <button type="button" class="btn-ghost px-3! py-1.5! text-xs" onclick={oninvert}>
       {t("list.invert")}
     </button>
+  {/if}
+  {#if hiddenSelected > 0}
+    <span class="text-xs font-medium text-risk-review" role="status">
+      {t("list.hiddenSelected", { count: hiddenSelected })}
+    </span>
   {/if}
   {#if shown !== total}
     <span class="text-xs tabular-nums text-ink-faint">

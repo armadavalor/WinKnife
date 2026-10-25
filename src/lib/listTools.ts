@@ -35,6 +35,17 @@ export function selectVisible(
   return next;
 }
 
+/** Selected ids that are not among the visible rows (filtered out of view). */
+export function hiddenSelectedCount(
+  selected: ReadonlySet<string>,
+  visible: readonly ListItem[],
+): number {
+  const ids = new Set(visible.map((row) => row.id));
+  let hidden = 0;
+  for (const id of selected) if (!ids.has(id)) hidden += 1;
+  return hidden;
+}
+
 /** Removes every visible row from the selection; hidden rows keep their state. */
 export function deselectVisible(
   selected: ReadonlySet<string>,

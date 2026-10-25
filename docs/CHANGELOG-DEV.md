@@ -2510,4 +2510,8 @@ recycle-bin, keepers, protected folder members and non-quarantine rows are never
 Filter and sort are view-only. "Select none" now clears only visible rows.
 
 **Deferred.** File unlocker (few rows) untouched; no collapse persistence on Duplicates
-(set ids are per scan); no before/after screenshots taken.
+(set ids are per scan).
+
+**Review follow-up.** A filter that hides still-ticked rows now says so ("+N selected, hidden by the
+filter", `hiddenSelectedCount`, unit-tested); selection itself is unchanged. Screenshots of Cleaner
+and Duplicates (toolbar, middle-ellipsis paths with full path in the tooltip) checked in the dev app.

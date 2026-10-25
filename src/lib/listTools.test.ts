@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   deselectVisible,
+  hiddenSelectedCount,
   invertVisible,
   matchesFilter,
   parseCollapsed,
@@ -32,6 +33,11 @@ test("select-visible never ticks a non-selectable row", () => {
 test("deselect-visible keeps hidden rows selected", () => {
   const next = deselectVisible(new Set(["a", "hidden"]), rows);
   assert.deepEqual([...next], ["hidden"]);
+});
+
+test("hidden selection is counted so a filter cannot hide ticked rows", () => {
+  assert.equal(hiddenSelectedCount(new Set(["a", "x", "y"]), rows), 2);
+  assert.equal(hiddenSelectedCount(new Set(), rows), 0);
 });
 
 test("invert flips selectable visible rows only", () => {

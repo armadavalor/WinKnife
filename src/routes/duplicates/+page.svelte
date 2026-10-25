@@ -21,6 +21,7 @@
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import {
     deselectVisible,
+    hiddenSelectedCount,
     invertVisible,
     matchesFilter,
     selectVisible,
@@ -357,6 +358,7 @@
       bind:sort
       shown={sets.length + folderGroups.length}
       total={totalSets}
+      hiddenSelected={filter.trim() ? hiddenSelectedCount(store.selected, pickable) : 0}
       onselectall={() => (store.selected = selectVisible(store.selected, pickable))}
       onselectnone={() => (store.selected = deselectVisible(store.selected, pickable))}
       oninvert={() => (store.selected = invertVisible(store.selected, pickable))}
