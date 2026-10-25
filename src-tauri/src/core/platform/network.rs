@@ -123,9 +123,7 @@ mod imp {
             let is_v6 = family == u32::from(AF_INET6.0);
             let tcp = table(|buf, size| {
                 // SAFETY: `buf` is null or `size` bytes long; `size` is valid.
-                unsafe {
-                    GetExtendedTcpTable(buf, size, false, family, TCP_TABLE_OWNER_PID_ALL, 0)
-                }
+                unsafe { GetExtendedTcpTable(buf, size, false, family, TCP_TABLE_OWNER_PID_ALL, 0) }
             })?;
             sockets.extend(if is_v6 { tcp6(&tcp) } else { tcp4(&tcp) });
             let udp = table(|buf, size| {
