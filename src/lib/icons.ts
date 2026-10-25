@@ -33,6 +33,12 @@
 export type IconNode = readonly [tag: string, attrs: Record<string, string>];
 
 export const ICONS = {
+  "layout-grid": [
+    ["rect", {width: "7", height: "7", x: "3", y: "3", rx: "1"}],
+    ["rect", {width: "7", height: "7", x: "14", y: "3", rx: "1"}],
+    ["rect", {width: "7", height: "7", x: "14", y: "14", rx: "1"}],
+    ["rect", {width: "7", height: "7", x: "3", y: "14", rx: "1"}],
+  ],
   "layout-dashboard": [
     ["rect", {width: "7", height: "9", x: "3", y: "3", rx: "1"}],
     ["rect", {width: "7", height: "5", x: "14", y: "3", rx: "1"}],

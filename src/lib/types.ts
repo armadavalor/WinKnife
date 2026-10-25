@@ -1180,6 +1180,60 @@ export interface CloseReport {
   exe_path: string | null;
 }
 
+/* modules/apps.rs */
+
+export type AppSource = "win32" | "store";
+export type PackageKind = "app" | "framework" | "resource";
+
+/** One installed program or Store package. Read-only. */
+export interface AppEntry {
+  id: string;
+  source: AppSource;
+  name: string;
+  publisher: string | null;
+  version: string | null;
+  installDate: string | null;
+  sizeKb: number | null;
+  installFolder: string | null;
+  family: string | null;
+  kind: PackageKind;
+  canCheckSigner: boolean;
+}
+
+export interface AppsList {
+  entries: AppEntry[];
+  notes: string[];
+}
+
+export interface SignerInfo {
+  state: "signed" | "unsigned" | "unknown";
+  publisher: string | null;
+}
+
+/* -------------------------------------------------------------------------
+ * modules/network.rs
+ * ---------------------------------------------------------------------- */
+
+/** Where a socket can be reached from. */
+export type NetworkReach = "allInterfaces" | "localOnly" | "oneInterface";
+
+/** One line on the Network page (`network_list`). */
+export interface PortRow {
+  protocol: "TCP" | "UDP";
+  kind: "listening" | "connection";
+  /** `LISTEN`, `ESTABLISHED`; null for UDP. */
+  state: string | null;
+  localAddress: string;
+  localPort: number;
+  remoteAddress: string | null;
+  remotePort: number | null;
+  reach: NetworkReach;
+  pid: number;
+  processName: string;
+  exePath: string | null;
+  reason: string;
+}
+
 /* -------------------------------------------------------------------------
  * Environment variables (C15, K-024) — mirrors modules/env_vars.rs
  * ---------------------------------------------------------------------- */

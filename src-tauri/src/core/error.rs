@@ -152,6 +152,10 @@ pub enum CoreError {
     #[error("unknown Windows panel: {0}")]
     UnknownLegacyPanel(String),
 
+    /// An installed-app id the UI sent is not in the last list.
+    #[error("unknown installed app: {0}")]
+    UnknownApp(String),
+
     /// The database was written by a newer build. Opening it here could
     /// purge items the newer build promised to keep (round 3).
     #[error(
@@ -173,6 +177,9 @@ pub enum CoreError {
     /// The repair kit (module C6) could not start or read SFC / DISM.
     #[error("repair: {0}")]
     Repair(String),
+    /// Reading the socket tables failed (module C14).
+    #[error("network: {0}")]
+    Network(String),
 
     /// Windows refused the change because WinKnife runs without administrator
     /// rights (K-021). The UI offers "Restart as administrator" for this code.
@@ -219,10 +226,12 @@ impl CoreError {
             Self::RestorePoint(_) => "restore_point",
             Self::LegacyPanel(_) => "legacy_panel",
             Self::UnknownLegacyPanel(_) => "unknown_legacy_panel",
+            Self::UnknownApp(_) => "unknown_app",
             Self::SchemaTooNew { .. } => "schema_too_new",
             Self::Busy(_) => "busy",
             Self::Hosts(_) => "hosts",
             Self::Repair(_) => "repair",
+            Self::Network(_) => "network",
             Self::NeedsAdmin(_) => "needs_admin",
             Self::ElevationBlocked => "elevation_blocked",
         }

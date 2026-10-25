@@ -92,6 +92,10 @@ windows = { version = "0.61", features = [
     # cheapest read-only way to ask (core/platform/process.rs).
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Power",
+    # The network page lists sockets with their owning process
+    # (core/platform/network.rs, K-023). Read-only.
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
     # The restore-point helper: `SRSetRestorePointW`, the read-only WMI
     # `SystemRestore` list for the 24-hour check, and waiting on the elevated
     # helper's exit code (core/platform/restore_point.rs, module spec 09).

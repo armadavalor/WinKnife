@@ -47,6 +47,8 @@ register_modules! {
     tweaks => tweaks::TweaksModule,
     context_menu => context_menu::ContextMenuModule,
     repair => repair::RepairModule,
+    apps => apps::AppsModule,
+    network => network::NetworkModule,
 }
 
 /// Build the application's module registry.
@@ -132,6 +134,8 @@ mod tests {
             "tweaks",
             "context-menu",
             "repair",
+            "apps",
+            "network",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }

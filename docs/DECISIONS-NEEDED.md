@@ -898,6 +898,14 @@ not ours to take.
 - [ ] 2026-10-25 (phase 7): Cancel kills only the `dism.exe`/`sfc.exe` child; a `DismHost.exe` or TrustedInstaller worker it started may keep running until it finishes on its own. Safest interpretation: no process-tree kill of system services.
 - [ ] 2026-10-25 (phase 7): repair logs (`repair-*.log` in the log folder) are not pruned. They are small; add retention if they pile up.
 
+## Open items raised by the network module (2026-10-25)
+
+- [ ] 2026-10-25 (K-023): no "end this process" action on the Network page. Killing a process by PID is a destructive, hard-to-undo action that bypasses the analyze-first promise; it needs its own decision (confirm, protected-process fence, window of reversibility) before it is built. The page shows PID and exe path so the user can act in Task Manager.
+- [ ] 2026-10-25 (K-023): winsock reset and IP stack reset are not offered. Both need admin, both require a reboot and neither can be undone from WinKnife; K-021 keeps WinKnife unelevated.
+- [ ] 2026-10-25 (K-023): no firewall changes (block a port or program). Would be a persistent system change needing admin and a rollback story; revisit with the admin-tweaks item.
+- [ ] 2026-10-25 (K-023): no network calls of any kind, so remote addresses are shown as raw IPs (no reverse DNS, no geo-IP, no reputation lookup). Revisit only as an explicit opt-in.
+- [ ] 2026-10-25 (K-023): the list is a snapshot on open and on Refresh, not a live monitor; bytes per connection need ETW or admin and are out of scope.
+
 ## Open items raised by the environment-variable editor (2026-10-25, phase 7)
 
 - [ ] 2026-10-25 (phase 7): deleting a user variable is a registry change, not a file deletion, so it goes through C1 like any other write. `tweak_undo.applied_*` is NOT NULL, so a delete stores `REG_NONE` + empty bytes as "absent after" instead of adding a migration — safest interpretation taken: undo of a delete only runs while the value is still absent, then restores the saved value and kind.

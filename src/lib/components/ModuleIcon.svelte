@@ -36,6 +36,8 @@
     hosts: "globe",
     wrench: "wrench",
     menu: "list",
+    apps: "layout-grid",
+    network: "globe",
     env: "list",
   };
 </script>

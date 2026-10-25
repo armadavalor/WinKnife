@@ -50,6 +50,7 @@ use crate::core::quarantine::{
 use crate::core::settings;
 use crate::core::state::{CancelRegistry, ScanResult, ScanStore};
 use crate::core::types::ExecReport;
+use crate::modules::apps::{AppsList, AppsService, SignerInfo};
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, folders, DuplicateProgress, DuplicateScan};
 use crate::modules::empty_folders;
@@ -2394,6 +2395,25 @@ pub fn repair_cancel(service: State<'_, Arc<RepairService>>) -> Result<bool, Api
 }
 
 /* -------------------------------------------------------------------------
+ * Network (C14, K-023): read-only. Flushing DNS reuses `hosts_flush_dns`.
+ * ---------------------------------------------------------------------- */
+
+/// Listening ports and open connections with their owning process.
+///
+/// # Errors
+/// Returns an error when the OS socket tables cannot be read.
+#[tauri::command]
+pub async fn network_list() -> Result<Vec<crate::modules::network::PortRow>, ApiError> {
+    guarded_async("network_list", async {
+        tauri::async_runtime::spawn_blocking(crate::modules::network::list)
+            .await
+            .map_err(|err| CoreError::Network(format!("the request did not finish: {err}")))?
+            .map_err(ApiError::from)
+    })
+    .await
+}
+
+/* -------------------------------------------------------------------------
  * Environment variables
  * ---------------------------------------------------------------------- */
 
@@ -2484,6 +2504,42 @@ pub fn legacy_panels_open(
     id: String,
 ) -> Result<(), ApiError> {
     guarded("legacy_panels_open", || Ok(service.open(&id)?))
+}
+
+/* -------------------------------------------------------------------------
+ * Installed apps (C19)
+ * ---------------------------------------------------------------------- */
+
+/// Installed Win32 programs and Store packages, from the registry only.
+/// Read-only; no signer lookups happen here.
+///
+/// # Errors
+/// Infallible today: unreadable registry locations come back as notes.
+#[tauri::command(async)]
+pub fn apps_list(service: State<'_, Arc<AppsService>>) -> Result<AppsList, ApiError> {
+    guarded("apps_list", || Ok(service.list()))
+}
+
+/// The Authenticode signer of one listed app's exe. Read-only; one file per call.
+///
+/// # Errors
+/// Returns an error for an id that has no resolvable exe in the last list.
+#[tauri::command(async)]
+pub fn apps_signer(
+    service: State<'_, Arc<AppsService>>,
+    id: String,
+) -> Result<SignerInfo, ApiError> {
+    guarded("apps_signer", || Ok(service.signer(&id)?))
+}
+
+/// Open Windows' own Apps settings page. The only way WinKnife helps remove
+/// an app: it never does so itself.
+///
+/// # Errors
+/// Returns an error when the shell could not open the page.
+#[tauri::command]
+pub fn apps_open_settings(service: State<'_, Arc<AppsService>>) -> Result<(), ApiError> {
+    guarded("apps_open_settings", || Ok(service.open_settings()?))
 }
 
 /* -------------------------------------------------------------------------

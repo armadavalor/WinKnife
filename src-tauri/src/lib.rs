@@ -366,6 +366,14 @@ pub fn manage_state<R: tauri::Runtime>(
         core::logging::log_dir(app_data_dir),
     )));
 
+    // Installed apps (C19): registry reads and lazy signer checks; the
+    // launcher only ever opens the Apps settings page.
+    app.manage(Arc::new(modules::apps::AppsService::new(
+        Arc::new(core::platform::SystemRegistry),
+        Arc::new(core::platform::SystemSignatureProbe),
+        Arc::new(core::platform::SystemPanelLauncher),
+    )));
+
     app.manage(commands::Services {
         quarantine,
         brain,
@@ -456,12 +464,16 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::repair_tools,
         commands::repair_run,
         commands::repair_cancel,
+        commands::network_list,
         commands::env_vars_list,
         commands::env_vars_preview,
         commands::env_vars_apply,
         commands::env_vars_undo,
         commands::legacy_panels_list,
         commands::legacy_panels_open,
+        commands::apps_list,
+        commands::apps_signer,
+        commands::apps_open_settings,
         commands::keep_awake_start,
         commands::keep_awake_stop,
         commands::keep_awake_status,
