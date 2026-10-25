@@ -624,12 +624,18 @@ export type TweakRestart = "none" | "explorer" | "reboot";
 /** How far an applied tweak can be taken back. */
 export type TweakUndoability = "reversible" | "reversibleAfterRestart" | "notUndoable";
 
+/** Page section a tweak belongs to. */
+export type TweakCategory = "explorer" | "taskbarStart" | "privacy" | "input" | "appearance";
+
 /** One catalogue tweak with its live value. */
 export interface TweakState {
   id: string;
   /** Plain-language name. */
   name: string;
   reason: string;
+  category: TweakCategory;
+  /** Which Windows versions it does anything on. */
+  appliesTo: string;
   /** Exact registry path, value name included. */
   path: string;
   /** The value now; `null` when it is not set. */
@@ -875,7 +881,12 @@ export interface PurgeReport {
    * across batch boundaries, so a batch can lose part of itself.
    */
   affectedBatches: string[];
+  /** Why each failed id could not be removed. */
+  failureReasons: Record<string, PurgeFailure>;
 }
+
+/** Why a purge could not remove one item. */
+export type PurgeFailure = "locked" | "accessDenied" | "outsideQuarantine" | "other";
 
 /* -------------------------------------------------------------------------
  * modules/shutdown_timer.rs

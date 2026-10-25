@@ -51,6 +51,17 @@ pub enum Undoability {
     NotUndoable,
 }
 
+/// Where a tweak sits on the Tweaks page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TweakCategory {
+    Explorer,
+    TaskbarStart,
+    Privacy,
+    Input,
+    Appearance,
+}
+
 /// One catalogue entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tweak {
@@ -60,6 +71,10 @@ pub struct Tweak {
     pub name: &'static str,
     /// Why someone would want it, shown as the recommendation's reason.
     pub reason: &'static str,
+    /// Page section.
+    pub category: TweakCategory,
+    /// Which Windows versions the setting does anything on.
+    pub applies_to: &'static str,
     /// Always [`Hive::CurrentUser`]; anything else is fenced off.
     pub hive: Hive,
     /// Key under the hive.
@@ -76,51 +91,143 @@ pub struct Tweak {
     pub undo: Undoability,
 }
 
+const EXPLORER_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer";
 const EXPLORER_ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
-const FILE_EXPLORER_DOCS: &str = "https://support.microsoft.com/en-us/windows/file-explorer-in-windows-ef370130-1cca-9dc5-e0df-2f7416fe1cb1";
+const CONTENT_DELIVERY: &str = r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager";
+const PERSONALIZE: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+const PRIVACY_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Privacy";
+const ADVERTISING_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo";
+const LANGUAGE_KEY: &str = r"Control Panel\International\User Profile";
 
-/// The shipped catalogue. Every entry is the same toggle File Explorer's own
-/// Options dialog flips, so the user can also put it back by hand.
+const FILE_EXPLORER_DOCS: &str = "https://support.microsoft.com/en-us/windows/file-explorer-in-windows-ef370130-1cca-9dc5-e0df-2f7416fe1cb1";
+const TASKBAR_DOCS: &str = "https://support.microsoft.com/en-us/windows/customize-the-taskbar-in-windows-0657a50f-0cc7-dbfd-ae6b-05020b195b07";
+const PRIVACY_DOCS: &str = "https://learn.microsoft.com/en-us/windows/privacy/manage-connections-from-windows-operating-system-components-to-microsoft-services";
+const SNAP_DOCS: &str = "https://support.microsoft.com/en-us/windows/snap-your-windows-885a9b1e-a983-a3b1-16cd-c531795e6241";
+const PERSONALIZE_DOCS: &str = "https://support.microsoft.com/en-us/windows/change-desktop-background-and-colors-in-windows-3d5aa4d4-4a87-4fe4-a66f-5b8a1dd8b6bb";
+
+const BOTH: &str = "Windows 10 and 11";
+const WIN11: &str = "Windows 11 only";
+
+use Restart::{Explorer as RestartExplorer, None as NoRestart};
+use TweakCategory::{Appearance, Explorer, Input, Privacy, TaskbarStart};
+
+/// A `REG_DWORD` tweak under `HKCU`; the undo class follows from the restart.
+#[allow(clippy::too_many_arguments)]
+const fn dword(
+    id: &'static str,
+    name: &'static str,
+    category: TweakCategory,
+    applies_to: &'static str,
+    subkey: &'static str,
+    value_name: &'static str,
+    target: u32,
+    restart: Restart,
+    source_url: &'static str,
+    reason: &'static str,
+) -> Tweak {
+    Tweak {
+        id,
+        name,
+        reason,
+        category,
+        applies_to,
+        hive: Hive::CurrentUser,
+        subkey,
+        value_name,
+        target,
+        source_url,
+        restart,
+        undo: match restart {
+            Restart::None => Undoability::Reversible,
+            _ => Undoability::ReversibleAfterRestart,
+        },
+    }
+}
+
+/// The shipped catalogue: per-user `REG_DWORD` values that Windows' own
+/// Settings or Folder Options flip, so each can also be put back by hand. The
+/// first three keep their place (tests index them); the page groups by
+/// category.
 pub const CATALOG: &[Tweak] = &[
-    Tweak {
-        id: "show-file-extensions",
-        name: "Show file name extensions",
-        reason: "Shows the .exe, .pdf or .docx at the end of file names, so a file \
-                 called invoice.pdf.exe cannot pass for a document.",
-        hive: Hive::CurrentUser,
-        subkey: EXPLORER_ADVANCED,
-        value_name: "HideFileExt",
-        target: 0,
-        source_url: "https://support.microsoft.com/en-us/windows/common-file-name-extensions-in-windows-da4a4430-8e76-89c5-59f7-1cdbbc75cb01",
-        restart: Restart::Explorer,
-        undo: Undoability::ReversibleAfterRestart,
-    },
-    Tweak {
-        id: "show-hidden-files",
-        name: "Show hidden files and folders",
-        reason: "Lists files and folders marked hidden, such as AppData, so you can see \
-                 what is taking up space. Windows system files stay hidden.",
-        hive: Hive::CurrentUser,
-        subkey: EXPLORER_ADVANCED,
-        value_name: "Hidden",
-        target: 1,
-        source_url: FILE_EXPLORER_DOCS,
-        restart: Restart::Explorer,
-        undo: Undoability::ReversibleAfterRestart,
-    },
-    Tweak {
-        id: "open-explorer-to-this-pc",
-        name: "Open File Explorer to This PC",
-        reason: "New File Explorer windows start on your drives instead of Home or Quick \
-                 access.",
-        hive: Hive::CurrentUser,
-        subkey: EXPLORER_ADVANCED,
-        value_name: "LaunchTo",
-        target: 1,
-        source_url: FILE_EXPLORER_DOCS,
-        restart: Restart::Explorer,
-        undo: Undoability::ReversibleAfterRestart,
-    },
+    dword("show-file-extensions", "Show file name extensions", Explorer, BOTH,
+        EXPLORER_ADVANCED, "HideFileExt", 0, RestartExplorer,
+        "https://support.microsoft.com/en-us/windows/common-file-name-extensions-in-windows-da4a4430-8e76-89c5-59f7-1cdbbc75cb01",
+        "Shows the .exe, .pdf or .docx at the end of file names, so a file called invoice.pdf.exe cannot pass for a document."),
+    dword("show-hidden-files", "Show hidden files and folders", Explorer, BOTH,
+        EXPLORER_ADVANCED, "Hidden", 1, RestartExplorer, FILE_EXPLORER_DOCS,
+        "Lists files and folders marked hidden, such as AppData, so you can see what is taking up space. Windows system files stay hidden."),
+    dword("open-explorer-to-this-pc", "Open File Explorer to This PC", Explorer, BOTH,
+        EXPLORER_ADVANCED, "LaunchTo", 1, RestartExplorer, FILE_EXPLORER_DOCS,
+        "New File Explorer windows start on your drives instead of Home or Quick access."),
+    dword("explorer-item-checkboxes", "Tick boxes to select items", Explorer, BOTH,
+        EXPLORER_ADVANCED, "AutoCheckSelect", 1, RestartExplorer, FILE_EXPLORER_DOCS,
+        "Adds a checkbox to each file so you can select several without holding Ctrl; handy on touch screens and for people who mis-click."),
+    dword("explorer-hide-recent-files", "Hide recent files in Quick access", Explorer, BOTH,
+        EXPLORER_KEY, "ShowRecent", 0, RestartExplorer, FILE_EXPLORER_DOCS,
+        "Stops File Explorer listing the files you opened last, which others can read over your shoulder. Existing history is not erased."),
+    dword("explorer-hide-frequent-folders", "Hide frequent folders in Quick access", Explorer, BOTH,
+        EXPLORER_KEY, "ShowFrequent", 0, RestartExplorer, FILE_EXPLORER_DOCS,
+        "Stops File Explorer pinning the folders you visit most to Quick access. Existing history is not erased."),
+    dword("explorer-no-sync-notices", "Hide OneDrive and Microsoft 365 notices in Explorer", Explorer, BOTH,
+        EXPLORER_ADVANCED, "ShowSyncProviderNotifications", 0, RestartExplorer, FILE_EXPLORER_DOCS,
+        "Turns off the banners in File Explorer that suggest OneDrive or Microsoft 365. It is the Folder Options box \"Show sync provider notifications\"."),
+    dword("taskbar-hide-task-view", "Hide the Task View button", TaskbarStart, BOTH,
+        EXPLORER_ADVANCED, "ShowTaskViewButton", 0, RestartExplorer, TASKBAR_DOCS,
+        "Removes a button that Win+Tab already opens, giving the taskbar room."),
+    dword("taskbar-hide-widgets", "Hide the Widgets button", TaskbarStart, WIN11,
+        EXPLORER_ADVANCED, "TaskbarDa", 0, RestartExplorer, TASKBAR_DOCS,
+        "Removes the weather and news button from the taskbar. Some recent builds protect this value; if Windows refuses it, WinKnife leaves the old value in place."),
+    dword("taskbar-hide-copilot", "Hide the Copilot button", TaskbarStart, WIN11,
+        EXPLORER_ADVANCED, "ShowCopilotButton", 0, RestartExplorer, TASKBAR_DOCS,
+        "Removes the Copilot button from the taskbar (Windows 11 23H2 and later)."),
+    dword("taskbar-left-align", "Align taskbar icons to the left", TaskbarStart, WIN11,
+        EXPLORER_ADVANCED, "TaskbarAl", 0, RestartExplorer, TASKBAR_DOCS,
+        "Moves the Start button and icons to the left edge, where they were in Windows 10, so the Start button stays put as apps open."),
+    dword("taskbar-clock-seconds", "Show seconds in the taskbar clock", TaskbarStart, BOTH,
+        EXPLORER_ADVANCED, "ShowSecondsInSystemClock", 1, RestartExplorer, TASKBAR_DOCS,
+        "Adds seconds to the clock. It costs a little more battery and CPU than a clock that ticks once a minute."),
+    dword("start-suggestions", "Hide suggested apps in Start", TaskbarStart, BOTH,
+        CONTENT_DELIVERY, "SystemPaneSuggestionsEnabled", 0, NoRestart, PRIVACY_DOCS,
+        "Stops Start from showing app suggestions and promotions. It is Settings > Personalization > Start > Show suggestions."),
+    dword("start-silent-app-installs", "Stop promoted apps installing themselves", TaskbarStart, BOTH,
+        CONTENT_DELIVERY, "SilentInstalledAppsEnabled", 0, NoRestart, PRIVACY_DOCS,
+        "Stops Windows quietly adding promoted apps to Start. Apps already added stay until you remove them."),
+    dword("lockscreen-fun-facts", "Hide lock screen tips and fun facts", Privacy, BOTH,
+        CONTENT_DELIVERY, "RotatingLockScreenOverlayEnabled", 0, NoRestart, PRIVACY_DOCS,
+        "Removes the \"Get fun facts, tips and more\" text over the Spotlight lock screen picture."),
+    dword("tips-notifications", "Turn off \"Get tips\" notifications", Privacy, BOTH,
+        CONTENT_DELIVERY, "SubscribedContent-338389Enabled", 0, NoRestart, PRIVACY_DOCS,
+        "Stops pop-ups with tips and suggestions about Windows. It is Settings > System > Notifications > Get tips and suggestions."),
+    dword("advertising-id", "Turn off the advertising ID", Privacy, BOTH,
+        ADVERTISING_KEY, "Enabled", 0, NoRestart, PRIVACY_DOCS,
+        "Stops apps using one ID to tailor ads to you across apps. You still see ads, just less targeted ones."),
+    dword("tailored-experiences", "Turn off tailored experiences", Privacy, BOTH,
+        PRIVACY_KEY, "TailoredExperiencesWithDiagnosticDataEnabled", 0, NoRestart, PRIVACY_DOCS,
+        "Stops Microsoft using your diagnostic data to pick tips and ads for you. It is Settings > Privacy > Diagnostics & feedback > Tailored experiences."),
+    dword("websites-language-list", "Hide your language list from websites", Privacy, BOTH,
+        LANGUAGE_KEY, "HttpAcceptLanguageOptOut", 1, NoRestart, PRIVACY_DOCS,
+        "Stops websites reading the list of languages you have installed, a detail that helps fingerprint your PC."),
+    dword("snap-assist", "Turn off Snap Assist suggestions", Input, BOTH,
+        EXPLORER_ADVANCED, "SnapAssist", 0, NoRestart, SNAP_DOCS,
+        "After you snap a window to one side, Windows stops filling the other half with thumbnails of your open windows."),
+    dword("snap-layout-flyout", "Turn off the snap layouts pop-up", Input, WIN11,
+        EXPLORER_ADVANCED, "EnableSnapAssistFlyout", 0, NoRestart, SNAP_DOCS,
+        "Stops the layout grid appearing when the pointer rests on a window's maximize button. Win+Z still opens it."),
+    dword("window-shake", "Turn off shake to minimize", Input, BOTH,
+        EXPLORER_ADVANCED, "DisallowShaking", 1, NoRestart, SNAP_DOCS,
+        "Dragging a window back and forth no longer minimizes all the others, which is easy to trigger by accident."),
+    dword("alt-tab-windows-only", "Alt+Tab shows windows only, not Edge tabs", Input, WIN11,
+        EXPLORER_ADVANCED, "MultiTaskingAltTabFilter", 3, NoRestart, SNAP_DOCS,
+        "Alt+Tab lists open windows only, instead of mixing in every Microsoft Edge tab."),
+    dword("dark-mode-apps", "Dark mode for apps", Appearance, BOTH,
+        PERSONALIZE, "AppsUseLightTheme", 0, NoRestart, PERSONALIZE_DOCS,
+        "Apps that follow the system setting switch to their dark look, easier on the eyes at night."),
+    dword("dark-mode-system", "Dark mode for Windows", Appearance, BOTH,
+        PERSONALIZE, "SystemUsesLightTheme", 0, NoRestart, PERSONALIZE_DOCS,
+        "The taskbar, Start and system dialogs switch to their dark look."),
+    dword("disable-transparency", "Turn off transparency effects", Appearance, BOTH,
+        PERSONALIZE, "EnableTransparency", 0, NoRestart, PERSONALIZE_DOCS,
+        "Makes the taskbar and Start solid. A little easier to read, and slightly lighter on weak graphics hardware."),
 ];
 
 /// Path fragments a tweak may never touch (K-018): Windows Update, Defender,
@@ -184,6 +291,9 @@ pub struct TweakState {
     pub id: String,
     pub name: String,
     pub reason: String,
+    pub category: TweakCategory,
+    /// Which Windows versions it does anything on.
+    pub applies_to: String,
     /// Exact registry path, value name included.
     pub path: String,
     /// The value now; `None` when it is not set.
@@ -342,6 +452,8 @@ impl TweakService {
                     id: tweak.id.to_owned(),
                     name: tweak.name.to_owned(),
                     reason: tweak.reason.to_owned(),
+                    category: tweak.category,
+                    applies_to: tweak.applies_to.to_owned(),
                     path: display_path(tweak),
                     current,
                     target: tweak.target,
@@ -585,6 +697,52 @@ mod tests {
             assert_eq!(fence_refusal(tweak), None, "{}", tweak.id);
             assert_ne!(tweak.undo, Undoability::NotUndoable);
         }
+    }
+
+    #[test]
+    fn catalogue_is_well_formed() {
+        let mut ids = std::collections::HashSet::new();
+        let mut paths = std::collections::HashSet::new();
+        for tweak in CATALOG {
+            assert!(ids.insert(tweak.id), "duplicate id {}", tweak.id);
+            assert!(paths.insert(display_path(tweak)), "duplicate value {}", tweak.id);
+            assert_eq!(tweak.hive, Hive::CurrentUser, "{}", tweak.id);
+            assert!(tweak.reason.len() > 20, "{} needs a reason", tweak.id);
+            assert!(!tweak.name.is_empty() && !tweak.applies_to.is_empty(), "{}", tweak.id);
+            assert!(tweak.source_url.starts_with("https://"), "{}", tweak.id);
+            assert!(!tweak.subkey.is_empty() && !tweak.value_name.is_empty(), "{}", tweak.id);
+            assert!(tweak.target <= 3, "{} target looks wrong", tweak.id);
+            let expected = if tweak.restart == Restart::None {
+                Undoability::Reversible
+            } else {
+                Undoability::ReversibleAfterRestart
+            };
+            assert_eq!(tweak.undo, expected, "{}", tweak.id);
+        }
+        assert!(CATALOG.len() >= 15);
+    }
+
+    #[test]
+    fn every_shipped_tweak_round_trips_on_a_test_registry() {
+        let conn = open_in_memory().expect("db");
+        for (n, tweak) in CATALOG.iter().enumerate() {
+            // Alternate between a value that was set and one that was absent.
+            let seeded = n % 2 == 0;
+            let original = RegValue::dword(tweak.value_name, tweak.target ^ 1);
+            let registry = if seeded {
+                MapRegistry::new().with_key(tweak.hive, tweak.subkey, vec![original.clone()])
+            } else {
+                MapRegistry::new()
+            };
+            let (registry, service) = service(registry);
+            service.apply(&conn, tweak.id).expect(tweak.id);
+            let live = registry.value(tweak.hive, tweak.subkey, tweak.value_name).expect("read");
+            assert_eq!(live.and_then(|v| v.as_dword()), Some(tweak.target), "{}", tweak.id);
+            service.undo(&conn, tweak.id).expect(tweak.id);
+            let back = registry.value(tweak.hive, tweak.subkey, tweak.value_name).expect("read");
+            assert_eq!(back, seeded.then_some(original), "{}", tweak.id);
+        }
+        assert_eq!(open_rows(&conn), 0);
     }
 
     #[test]

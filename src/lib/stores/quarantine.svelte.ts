@@ -12,11 +12,11 @@ import {
   quarantineBatchItems,
   quarantineList,
   quarantinePurge,
-  quarantinePurgeItem,
+  quarantinePurgeItems,
   quarantineRestore,
+  quarantineRestoreItem,
   quarantineStats,
 } from "$lib/api";
-import { removalFailure, type RemovalFailure } from "$lib/stores/execNotes";
 import {
   isApiError,
   type QuarantineBatch,
@@ -25,6 +25,7 @@ import {
   type QuarantineStats,
   type RestoreReport,
 } from "$lib/types";
+import { purgeOutcome, type PurgeOutcome } from "$lib/stores/quarantineView";
 
 /** A batch restore under way. */
 export interface RestoreRun {
@@ -88,12 +89,20 @@ class QuarantineStore {
    * exactly the thing an honest tool admits to rather than quietly rounding off.
    */
   lastPurge = $state<PurgeReport | null>(null);
+  /** What the drawer says about the last purge; set even when it removed nothing. */
+  purgeResult = $state<PurgeOutcome | null>(null);
+  /** "Remove for good now" is running. */
+  purging = $state(false);
+  /** Ids of items ticked in the expanded batches. */
+  selected = $state<string[]>([]);
+  /** The ticked items are being restored one by one. */
+  restoringSelected = $state(false);
   /**
-   * A refused item the user tried to remove by hand and could not. It has its
-   * own note: the purge's "retried on the next purge" is false for an item
-   * the automatic purge never touches (round 3).
+   * The last purge was items the user picked (K-020). Its failures get their
+   * own note: "tried again next time" is false for a refused item, which the
+   * automatic purge never touches (round 3).
    */
-  removeFailed = $state<{ path: string; failure: RemovalFailure } | null>(null);
+  purgeByHand = $state(false);
 
   /** Fetch batches and totals. */
   async reload(): Promise<void> {
@@ -125,15 +134,20 @@ class QuarantineStore {
     this.open = false;
     this.lastRestore = null;
     this.lastPurge = null;
-    this.removeFailed = null;
+    this.purgeResult = null;
+    this.purgeByHand = false;
     this.actionError = null;
+    this.selected = [];
   }
 
   /** Load (or drop) the item list of one batch. */
   async toggleBatch(batchId: string): Promise<void> {
     if (this.items[batchId]) {
-      const { [batchId]: _dropped, ...rest } = this.items;
+      const { [batchId]: dropped, ...rest } = this.items;
       this.items = rest;
+      // A hidden item must not be restored by a tick the user can no longer see.
+      const hidden = new Set(dropped.map((item) => item.id));
+      this.selected = this.selected.filter((id) => !hidden.has(id));
       return;
     }
     try {
@@ -190,39 +204,116 @@ class QuarantineStore {
     this.restoreCancelPending = !(await cancelScan(run.batchId));
   }
 
-  /** Run the retention purge and the size cap now. */
+  /**
+   * Run the retention purge and the size cap now. Expanded lists are fetched
+   * again so removed rows leave at once and failed ones stay (2026-10-25).
+   */
   async purge(): Promise<void> {
+    if (this.purging) {
+      return;
+    }
     this.actionError = null;
+    this.purgeResult = null;
+    this.purgeByHand = false;
+    this.purging = true;
     try {
-      this.lastPurge = await quarantinePurge();
+      const report = await quarantinePurge();
+      this.lastPurge = report;
+      await this.refreshExpanded();
       await this.reload();
+      this.purgeResult = purgeOutcome(report, this.batches);
     } catch (error: unknown) {
       this.actionError = message(error);
+    } finally {
+      this.purging = false;
     }
   }
 
-  /**
-   * Permanently remove one item whose encrypted restore was refused, after the
-   * user confirmed it. The automatic purge never removes such an item
-   * (decision b, 2026-10-12).
-   */
-  async purgeItem(item: QuarantineItem): Promise<void> {
+  /** Tick or untick one item. */
+  toggleSelected(itemId: string): void {
+    this.selected = this.selected.includes(itemId)
+      ? this.selected.filter((id) => id !== itemId)
+      : [...this.selected, itemId];
+  }
+
+  /** Tick all of `ids`, or untick them when all are already ticked. */
+  toggleAll(ids: string[]): void {
+    const allTicked = ids.length > 0 && ids.every((id) => this.selected.includes(id));
+    this.selected = allTicked
+      ? this.selected.filter((id) => !ids.includes(id))
+      : [...new Set([...this.selected, ...ids])];
+  }
+
+  /** Put the ticked items back, one at a time, and report like a batch restore. */
+  async restoreSelected(): Promise<void> {
+    const ids = this.selected;
+    if (ids.length === 0 || this.restoringSelected) {
+      return;
+    }
     this.actionError = null;
-    this.removeFailed = null;
-    let failure: RemovalFailure | null;
-    try {
-      const report = await quarantinePurgeItem(item.id);
-      failure = removalFailure(item.id, report);
-    } catch (error: unknown) {
-      failure = removalFailure(item.id, { error });
+    this.restoringSelected = true;
+    const report: RestoreReport = { restored: [], failed: [], cancelled: false };
+    for (const itemId of ids) {
+      try {
+        report.restored.push(await quarantineRestoreItem(itemId));
+      } catch (error: unknown) {
+        report.failed.push({ itemId, error: message(error) });
+      }
     }
-    if (failure) {
-      this.removeFailed = { path: item.quarantinePath, failure };
-    }
+    this.lastRestore = report;
+    this.selected = [];
     try {
-      const remaining = await quarantineBatchItems(item.batchId);
-      this.items = { ...this.items, [item.batchId]: remaining };
+      await this.refreshExpanded();
       await this.reload();
+    } catch (error: unknown) {
+      this.actionError = message(error);
+    } finally {
+      this.restoringSelected = false;
+    }
+  }
+
+  /** Fetch every expanded batch again; batches left empty fold away. */
+  private async refreshExpanded(): Promise<void> {
+    const ids = Object.keys(this.items);
+    const lists = await Promise.all(ids.map((id) => quarantineBatchItems(id)));
+    const kept = ids
+      .map((id, index) => [id, lists[index]] as const)
+      .filter(([, list]) => list.length > 0);
+    this.items = Object.fromEntries(kept);
+    const held = new Set(kept.flatMap(([, list]) => list.map((item) => item.id)));
+    this.selected = this.selected.filter((id) => held.has(id));
+  }
+
+  /**
+   * Permanently remove the given held items after the user confirmed it
+   * (K-020). Locked or refused ones stay listed with their reason.
+   */
+  async purgeItems(ids: string[]): Promise<void> {
+    if (ids.length === 0 || this.purging) {
+      return;
+    }
+    this.actionError = null;
+    this.purgeResult = null;
+    this.purgeByHand = true;
+    this.purging = true;
+    try {
+      const report = await quarantinePurgeItems(ids);
+      this.lastPurge = report;
+      await this.refreshExpanded();
+      await this.reload();
+      this.purgeResult = purgeOutcome(report, this.batches);
+    } catch (error: unknown) {
+      this.actionError = message(error);
+    } finally {
+      this.purging = false;
+    }
+  }
+
+  /** Permanently remove every item of one batch, after confirmation. */
+  async purgeBatch(batchId: string): Promise<void> {
+    try {
+      const items = await quarantineBatchItems(batchId);
+      await this.purgeItems(items.map((item) => item.id));
     } catch (error: unknown) {
       this.actionError = message(error);
     }

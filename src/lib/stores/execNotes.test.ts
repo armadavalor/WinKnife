@@ -15,7 +15,6 @@ import {
   isRestoreRefused,
   itemsToReport,
   refusedHeld,
-  removalFailure,
   itemNote,
   NEEDS_ADMIN_NOTE,
   stopSummary,
@@ -124,37 +123,4 @@ test("the drawer explains refused items whenever any are held", () => {
   assert.equal(refusedHeld({ ...stats, refusedItems: 0, refusedBytes: 0, capBytes: 25 }), false);
   // A backend from before round 3 sends none of the fields.
   assert.equal(refusedHeld(stats), false);
-});
-
-test("removing a refused item by hand reports its own failure", () => {
-  // Round 3: the purge's "retried on the next purge" is false for an item
-  // the automatic purge never touches.
-  assert.equal(removalFailure("a", { failedItems: [] }), null);
-  assert.equal(removalFailure("a", { failedItems: ["b"] }), null);
-  // Only a file that could not be deleted is still held (round 4).
-  assert.deepEqual(removalFailure("a", { failedItems: ["a"] }), { kind: "stuck" });
-});
-
-test("a refused removal does not claim the item is still held", () => {
-  // Round 4: the backend refuses an item that is no longer held, or one that
-  // is not marked; a stale list can ask for either.
-  const gone = { code: "unknown_quarantine_item", message: "unknown quarantine item `a`" };
-  const unmarked = {
-    code: "quarantine_item_not_marked",
-    message: "removed by the retention window",
-  };
-  assert.deepEqual(removalFailure("a", { error: gone }), { kind: "notEligible" });
-  // Issue #21: the "not marked" refusal has its own code and its own message.
-  assert.deepEqual(removalFailure("a", { error: unmarked }), { kind: "notMarked" });
-  // The generic quarantine code is no longer read as a refusal.
-  assert.deepEqual(
-    removalFailure("a", { error: { code: "quarantine", message: "boom" } }),
-    { kind: "error", error: "boom" },
-  );
-  // Anything else is shown as it came.
-  assert.deepEqual(
-    removalFailure("a", { error: { code: "database", message: "disk I/O error" } }),
-    { kind: "error", error: "disk I/O error" },
-  );
-  assert.deepEqual(removalFailure("a", { error: "busy" }), { kind: "error", error: "busy" });
 });

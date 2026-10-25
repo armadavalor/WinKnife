@@ -19,9 +19,11 @@
 
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import ListToolbar from "$lib/components/ListToolbar.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { matchesFilter, sortRows } from "$lib/listTools";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { startupStore } from "$lib/stores/startup.svelte";
   import type { RiskBucket, StartupEntry } from "$lib/types";
@@ -31,6 +33,20 @@
   const store = startupStore;
 
   let pending = $state<StartupEntry | null>(null);
+  let filter = $state("");
+
+  // "size" is not meaningful here, so the sort control only offers name; the
+  // view-only filter never changes what a toggle may do.
+  const shownEntries = $derived(
+    sortRows(
+      store.entries.filter((entry) =>
+        matchesFilter(filter, entry.name, entry.publisher ?? "", entry.command),
+      ),
+      "name",
+      () => 0,
+      (entry) => entry.name,
+    ),
+  );
 
   // Run-once mounting, deliberately not reactive: as an effect this subscribed
   // to the store's own `status` and re-enumerated on every transition.
@@ -148,8 +164,18 @@
       </p>
     {/if}
 
+    <ListToolbar
+      bind:filter
+      shown={shownEntries.length}
+      total={store.entries.length}
+    />
+
+    {#if shownEntries.length === 0}
+      <EmptyState message={t("list.noMatch")} />
+    {/if}
+
     <ul class="flex flex-col gap-2">
-      {#each store.entries as entry (entry.id)}
+      {#each shownEntries as entry (entry.id)}
         {@const rating = store.ratingOf(entry)}
         <li
           class="flex flex-wrap items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-4 {entry.osOwned

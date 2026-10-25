@@ -2518,3 +2518,99 @@ of showing a raw "access denied".
   rights" note.
 - Deferred: "Always start as admin" rejected (DECISIONS-NEEDED); upfront HKLM
   hint on the startup page left to the list-QoL work.
+## 2026-10-25 — Quarantine purge feedback and drawer QoL
+
+**Fixed.** "Remove for good now" looked broken. It runs only the retention
+purge and the size cap, so items still inside their keeping period stay, and
+the drawer said nothing when nothing was due. On top of that,
+`items_in_batch` also listed restored rows, so a batch kept showing items that
+were already gone from quarantine.
+
+- `items_in_batch` filters `restored_at IS NULL`. Test:
+  `a_restored_item_is_not_listed_in_its_batch`.
+- `PurgeReport.failureReasons` gives each failed id a reason: `locked`,
+  `accessDenied`, `outsideQuarantine` or `other`, mapped from the io error.
+  Tests: `a_purge_blocked_by_an_open_file_reports_it_as_locked`, and the climb
+  test now asserts `outsideQuarantine`.
+- Drawer:
+  - the purge asks for confirmation;
+  - the button shows "Removing…" while it runs;
+  - a status line always follows: either what was removed, the reasons for any
+    failures (with an admin hint for access denied), or when the oldest group
+    becomes due.
+  - Expanded lists are fetched again, so purged rows leave at once and failed
+    ones stay with a reason badge.
+- QoL:
+  - a path filter;
+  - per-item checkboxes with select-all-shown;
+  - "Restore selected", which reuses `quarantine_restore_item` one item at a
+    time.
+  - No new deletion path: the purge scope is unchanged.
+- The view logic lives in `src/lib/stores/quarantineView.ts`, with node tests.
+
+**Remove for good, by hand (K-020).** The user decided the deferred point:
+- `Quarantine::purge_items(ids, confirmed)` replaces `purge_item`. It removes
+  any held item through the same `destroy()` root guards, and returns a
+  `PurgeReport` with per-item failure reasons. Without `confirmed` it returns
+  `purge_not_confirmed` and touches nothing. The `quarantine_item_not_marked`
+  check is gone.
+- Command `quarantine_purge_items(itemIds, confirmed)`; the old
+  `quarantine_purge_item` is removed. The probes in `command_wiring` and
+  `panic_and_busy` were updated.
+- Drawer: "Remove {count} for good" for a selection, "Remove for good" per
+  batch, and "Remove" on every item. One dialog names the item count and total
+  size and says it cannot be undone. Items that are locked or refused stay
+  listed with a reason badge, and the summary line counts them.
+- Test `removing_items_for_good_needs_confirmation` replaces the old
+  "unmarked item is refused" test.
+- "Remove for good now" (expired only) already says when nothing is due and
+  until when the oldest group is kept.
+---
+
+## 2026-10-25 — List QoL: shared filter / select-visible toolbar
+
+**Built.** One `ListToolbar.svelte` + pure `listTools.ts` (node:test covered) used by
+Cleaner, Duplicates (files + folder groups), Empty folders and Startup: case-insensitive
+filter, sort (Duplicates, size/name), select all shown / none / invert. Cleaner groups
+collapse (persisted in localStorage); a reason shared by a whole group is shown once.
+
+**Decisions.** Bulk select only touches visible rows that are already selectable: red,
+recycle-bin, keepers, protected folder members and non-quarantine rows are never ticked.
+Filter and sort are view-only. "Select none" now clears only visible rows.
+
+**Deferred.** File unlocker (few rows) untouched; no collapse persistence on Duplicates
+(set ids are per scan).
+
+**Review follow-up.** A filter that hides still-ticked rows now says so ("+N selected, hidden by the
+filter", `hiddenSelectedCount`, unit-tested); selection itself is unchanged. Screenshots of Cleaner
+and Duplicates (toolbar, middle-ellipsis paths with full path in the tooltip) checked in the dev app.
+
+## 2026-10-25 — Tweaks catalogue: 27 documented HKCU settings, grouped page
+
+**Built.** The tweak catalogue grew from the original few to 27 entries, each a
+single `REG_DWORD` under HKCU with a human `reason`, a Microsoft docs or
+settings source URL and an "applies to" note (Windows 10 and 11, or Windows 11
+only). Categories: File Explorer (7), Taskbar & Start (7), Privacy (5),
+Windows & input (4), Appearance (3). `Tweak` gained `category` and
+`applies_to`; `TweakState` carries both to the UI.
+
+The page now groups tweaks under section headers, has a search box (name,
+reason, path), shows a state badge per row (Windows default / Applied by
+WinKnife / Set another way) and the "applies to" line inside the collapsible
+"Why change this?" block next to the source. After an Explorer-restart tweak is
+applied the page shows a notice to sign out or restart Explorer.
+
+**Decisions.** No "Restart Explorer" button: killing explorer.exe closes the
+user's open folder windows, so a notice is the safe option. No engine or fence
+change: the engine's rules (HKCU only, prior value saved first, read-back,
+exact undo) apply unchanged.
+
+**Tests.** `catalogue_is_well_formed` (unique ids and paths, HKCU, reason and
+https source present, valid targets, undo class matches restart class) and
+`every_shipped_tweak_round_trips_on_a_test_registry` (apply, undo, value
+restored, no open undo rows; run once from an absent value and once from the
+opposite value). Live on this machine through the dev app: shake to minimize,
+Snap Assist and clock seconds applied (values 1, 0, 1) and undone (all back to
+absent).
+
+**Deferred.** See DECISIONS-NEEDED, "Open items raised by the tweaks catalogue".

@@ -16,6 +16,7 @@
   import RiskBadge from "$lib/components/RiskBadge.svelte";
   import { formatBytes, truncatePath } from "$lib/format";
   import { t } from "$lib/i18n";
+  import { parseCollapsed, sharedText } from "$lib/listTools";
   import {
     findingMeta,
     type Finding,
@@ -33,6 +34,8 @@
     packName: string;
     rows: Row[];
     bytes: number;
+    /** The reason every row in the group shares, or null when they differ. */
+    reason: string | null;
   }
 
   interface Props {
@@ -73,7 +76,17 @@
    * somebody has asked it to: a scan that found nine hundred temp files opens
    * showing all of them, and the user folds away what they have decided about.
    */
-  let collapsed = $state<Set<string>>(new Set());
+  const STORAGE_KEY = $derived(`winknife.collapsed.cleaner.${risk}`);
+
+  function loadCollapsed(): Set<string> {
+    try {
+      return parseCollapsed(localStorage.getItem(STORAGE_KEY));
+    } catch {
+      return new Set();
+    }
+  }
+
+  let collapsed = $state<Set<string>>(loadCollapsed());
 
   function toggleCollapsed(packId: string): void {
     const next = new Set(collapsed);
@@ -83,6 +96,11 @@
       next.add(packId);
     }
     collapsed = next;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+    } catch {
+      // Remembering the fold is a convenience; a blocked store just forgets it.
+    }
   }
 
   /** Rows whose reason is shown in full; the others show one truncated line. */
@@ -109,14 +127,18 @@
         packName,
         rows: [],
         bytes: 0,
+        reason: null,
       };
       group.rows.push(row);
       group.bytes += row.recommendation.savingsBytes;
       byPack.set(packId, group);
     }
-    return [...byPack.values()].sort((a, b) =>
-      a.packName.localeCompare(b.packName),
-    );
+    const list = [...byPack.values()];
+    for (const group of list) {
+      // One reason shared by every row is said once, under the header.
+      group.reason = sharedText(group.rows.map((r) => r.recommendation.reason));
+    }
+    return list.sort((a, b) => a.packName.localeCompare(b.packName));
   });
 
   function groupState(group: Group): "all" | "some" | "none" {
@@ -186,6 +208,12 @@
           {/if}
         </header>
 
+        {#if open && group.reason && group.rows.length > 1}
+          <p class="border-b border-surface-2 px-4 py-2 text-xs leading-relaxed text-ink-muted">
+            {group.reason}
+          </p>
+        {/if}
+
         <ul
           id="group-{risk}-{group.packId}"
           class="divide-y divide-surface-2"
@@ -222,13 +250,15 @@
                 >
                   {truncatePath(row.finding.path)}
                 </span>
-                <span
-                  class="mt-1 block text-xs leading-relaxed text-ink-muted"
-                  class:truncate={!isOpen}
-                  title={row.recommendation.reason}
-                >
-                  {row.recommendation.reason}
-                </span>
+                {#if !group.reason || group.rows.length === 1}
+                  <span
+                    class="mt-1 block text-xs leading-relaxed text-ink-muted"
+                    class:truncate={!isOpen}
+                    title={row.recommendation.reason}
+                  >
+                    {row.recommendation.reason}
+                  </span>
+                {/if}
               </button>
 
               <span class="shrink-0 text-xs tabular-nums text-ink-faint">

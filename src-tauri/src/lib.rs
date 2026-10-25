@@ -419,7 +419,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::quarantine_restore,
         commands::quarantine_restore_item,
         commands::quarantine_purge,
-        commands::quarantine_purge_item,
+        commands::quarantine_purge_items,
         commands::shutdown_schedule,
         commands::shutdown_cancel,
         commands::shutdown_status,

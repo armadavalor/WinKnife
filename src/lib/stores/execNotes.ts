@@ -4,7 +4,6 @@
  * Kept free of Svelte and `$lib` imports so `node --test` can run it directly.
  */
 import type {
-  ApiError,
   ExecItemResult,
   MoveWarning,
   QuarantineItem,
@@ -100,53 +99,4 @@ export function isRestoreRefused(
  */
 export function refusedHeld(stats: QuarantineStats): boolean {
   return (stats.refusedItems ?? 0) > 0 || (stats.refusedBytes ?? 0) > 0;
-}
-
-/** The item is no longer held (a stale list). */
-const GONE_CODE = "unknown_quarantine_item";
-/** The item is held but its restore was never refused (issue #21). */
-const NOT_MARKED_CODE = "quarantine_item_not_marked";
-
-/**
- * The backend's `{ code, message }` error, or null. A value import of
- * `isApiError` would need a `.ts` path that svelte-check rejects, and this
- * file keeps to type-only imports so `node --test` can run it.
- */
-function asApiError(error: unknown): Pick<ApiError, "code" | "message"> | null {
-  if (typeof error !== "object" || error === null) return null;
-  const { code, message } = error as Record<string, unknown>;
-  return typeof code === "string" && typeof message === "string" ? { code, message } : null;
-}
-
-/**
- * Why removing one refused item by hand did not work, or null when it went.
- *
- * - `stuck`: the backend ran but could not delete the file, so the item is
- *   still held and still marked.
- * - `notEligible`: the backend refused because the item is no longer held
- *   (a stale list); nothing can be said about where it is.
- * - `notMarked`: the item is held, but its restore was never refused, so it
- *   is left to the retention window (dedicated code, issue #21).
- * - `error`: anything else, shown as it came (round 4).
- */
-export type RemovalFailure =
-  | { kind: "stuck" }
-  | { kind: "notEligible" }
-  | { kind: "notMarked" }
-  | { kind: "error"; error: string };
-
-export function removalFailure(
-  itemId: string,
-  result: { failedItems: readonly string[] } | { error: unknown },
-): RemovalFailure | null {
-  if ("error" in result) {
-    const api = asApiError(result.error);
-    if (api) {
-      if (api.code === GONE_CODE) return { kind: "notEligible" };
-      if (api.code === NOT_MARKED_CODE) return { kind: "notMarked" };
-      return { kind: "error", error: api.message };
-    }
-    return { kind: "error", error: String(result.error) };
-  }
-  return result.failedItems.includes(itemId) ? { kind: "stuck" } : null;
 }

@@ -678,7 +678,14 @@ not ours to take.
         until you remove it".
       Scope choice, open for review: `purge_item` refuses an item without
       the marker, so it does not become a second delete button for
-      ordinary held items (those stay with their retention window). The
+      ordinary held items (those stay with their retention window).
+      *(Resolved 2026-10-25, K-020: reversed by the user. Any held item, a
+      selection or a whole batch can now be removed for good through
+      `quarantine_purge_items`, behind the drawer's "cannot be undone"
+      dialog with item count and size; the backend refuses the call
+      without `confirmed: true`. Deletion still goes only through
+      `destroy()`. The marker now only shields items from the automatic
+      purge and the size cap.)* The
       marker is not cleared by a later successful restore; once restored,
       the row is no longer held and the marker has no effect.
 
@@ -781,6 +788,8 @@ not ours to take.
   returns its own code, `quarantine_item_not_marked`, instead of sharing
   `unknown_quarantine_item`; the drawer maps it to its own message ("its
   restore was never refused … stays held until its retention window ends").
+  *(Superseded 2026-10-25, K-020: `quarantine_purge_items` removes any held
+  item after confirmation, so the code and its check are gone.)*
 - [ ] 2026-10-12 (phase 5): the brief asks for EN and TR strings, but the app
   had no Turkish dictionary. A partial `tr` dictionary was added holding the
   phase 5 keys only (missing keys fall back to English), with no locale
@@ -868,3 +877,11 @@ not ours to take.
 
 - [x] 2026-10-25 (K-020): "Always start as admin" is **not offered**. The only ways to start elevated without a UAC prompt each launch are a `requireAdministrator` manifest (every launch elevated, against least privilege, and a per-user unsigned install would show the UAC prompt on every start anyway) or a scheduled task with "run with highest privileges" (the hack the brief excludes; it also leaves a SYSTEM-visible persistence entry). A setting that only adds a UAC prompt to every start brings nothing over the "Restart as admin" button, so the button stays the only path.
 - [ ] 2026-10-25: the startup page knows upfront which rows are HKLM / all-users (they fail without admin) but shows no hint before the action; that page belongs to the list-QoL work running in parallel, so the hint is left for a follow-up. Today such a row fails with the "needs administrator rights" note and the global banner.
+
+## Open items raised by the tweaks catalogue (2026-10-25)
+
+- [ ] 2026-10-25 (tweaks): the engine writes `REG_DWORD` only. Useful per-user settings stored as strings are left out: classic Windows 11 context menu (`CLSID\{86ca1aa0-...}\InprocServer32` default value), mouse acceleration (`MouseSpeed`, `MouseThreshold1/2`), menu show delay (`MenuShowDelay`) and Sticky Keys `Flags`. Adding `REG_SZ` support is an engine change (K-018), not done here.
+- [ ] 2026-10-25 (tweaks): refused by the fence on purpose, so not offered: Bing results in Start search (`Search\BingSearchEnabled`), search box mode (`SearchboxTaskbarMode`) and the `Start_*` values (Start recommendations and similar). The fence blocks any path containing `search` or `start_`; relaxing it needs a decision.
+- [ ] 2026-10-25 (tweaks): the Widgets button tweak (`TaskbarDa`) is protected on some recent Windows 11 builds; the write is rejected or reverted and the read-back check then reports it. Left in because it works on other builds; confirm on current 24H2/25H2.
+- [ ] 2026-10-25 (tweaks): future "admin tweaks" item. Settings that need HKLM or elevation (telemetry level, Windows Update policies, consumer-features policy, Wi-Fi Sense, fast startup, disabling services) are not offered. They would need the elevation helper used for hosts and a per-tweak admin flag.
+- [ ] 2026-10-25 (tweaks): "Restart Explorer" button not added. Restarting explorer.exe closes the user's open folder windows; the page shows a notice instead. Revisit if users ask.
