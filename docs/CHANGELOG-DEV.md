@@ -2496,6 +2496,25 @@ settings save.
   refused by the settings merge. Test: a hand-crafted profile naming a fenced
   or unknown tweak is refused with no registry writes and no undo rows.
 
+---
+
+## 2026-10-25 — List QoL: shared filter / select-visible toolbar
+
+**Built.** One `ListToolbar.svelte` + pure `listTools.ts` (node:test covered) used by
+Cleaner, Duplicates (files + folder groups), Empty folders and Startup: case-insensitive
+filter, sort (Duplicates, size/name), select all shown / none / invert. Cleaner groups
+collapse (persisted in localStorage); a reason shared by a whole group is shown once.
+
+**Decisions.** Bulk select only touches visible rows that are already selectable: red,
+recycle-bin, keepers, protected folder members and non-quarantine rows are never ticked.
+Filter and sort are view-only. "Select none" now clears only visible rows.
+
+**Deferred.** File unlocker (few rows) untouched; no collapse persistence on Duplicates
+(set ids are per scan).
+
+**Review follow-up.** A filter that hides still-ticked rows now says so ("+N selected, hidden by the
+filter", `hiddenSelectedCount`, unit-tested); selection itself is unchanged. Screenshots of Cleaner
+and Duplicates (toolbar, middle-ellipsis paths with full path in the tooltip) checked in the dev app.
 
 ## 2026-10-25 — Tweaks catalogue: 27 documented HKCU settings, grouped page
 
