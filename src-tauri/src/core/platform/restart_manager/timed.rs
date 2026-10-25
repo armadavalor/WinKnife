@@ -184,7 +184,16 @@ mod tests {
 
     #[test]
     fn a_panic_in_the_worker_reaches_the_caller() {
-        let rm = timed(false, true);
+        // A timeout CI cannot hit: a slow panic (backtrace capture) must
+        // still surface as the panic, not as TimedOut.
+        let rm = TimedRestartManager::new(
+            Arc::new(Scripted {
+                stall: false,
+                panic: true,
+            }),
+            STALL,
+            STALL,
+        );
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             rm.locking_processes(&[PathBuf::from("a.txt")])
         }));
