@@ -362,6 +362,21 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "legacy_panels_open",
             args: json!({ "id": "__wiring_probe__" }),
         },
+        // Read-only: enumerates the Uninstall and Appx registry keys.
+        Probe {
+            command: "apps_list",
+            args: json!({}),
+        },
+        // An id nothing listed is refused before any file is opened.
+        Probe {
+            command: "apps_signer",
+            args: json!({ "id": "__wiring_probe__" }),
+        },
+        // The real launcher is disarmed in a test process.
+        Probe {
+            command: "apps_open_settings",
+            args: json!({}),
+        },
         // `manage_state` is asked for a dry run, so the engine holds a
         // recorder: started, observed, stopped, never touching the OS.
         Probe {

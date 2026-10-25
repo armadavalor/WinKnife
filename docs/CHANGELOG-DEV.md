@@ -2648,6 +2648,16 @@ absent).
 
 ---
 
+## 2026-10-25 — C19: installed apps
+
+**Built.** Read-only `apps` module: Win32 programs (three Uninstall hives) and Store packages, with search/filter/sort, lazy Authenticode signer check, "Open in Settings" and "Show install folder". See `docs/phases/PHASE-7-apps.md`.
+
+- **Decision.** Store packages come from the HKCU `AppModel\Repository\Packages` registry keys rather than PowerShell `Get-AppxPackage`: no process spawn, no WinRT, same read-only guarantee. Trade-off: names are often unresolved `@{...}`, so those show the package family.
+- **Decision.** No uninstall action by design; the only way out is Windows Settings.
+- **Deferred.** Per-user Win32 installs outside the Uninstall keys, and Store display names/logos (needs the package manifest).
+
+---
+
 ## 2026-10-25 — Environment variables (C15, K-024)
 
 **Built.** New `env-vars` module and page (`docs/phases/PHASE-7-env-vars.md`).

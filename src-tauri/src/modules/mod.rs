@@ -46,6 +46,7 @@ register_modules! {
     env_vars => env_vars::EnvVarsModule,
     tweaks => tweaks::TweaksModule,
     context_menu => context_menu::ContextMenuModule,
+    apps => apps::AppsModule,
     network => network::NetworkModule,
 }
 
@@ -131,6 +132,7 @@ mod tests {
             "env-vars",
             "tweaks",
             "context-menu",
+            "apps",
             "network",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);

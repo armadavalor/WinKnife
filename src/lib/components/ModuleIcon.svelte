@@ -35,6 +35,7 @@
     restore: "history",
     hosts: "globe",
     menu: "list",
+    apps: "layout-grid",
     network: "globe",
     env: "list",
   };
