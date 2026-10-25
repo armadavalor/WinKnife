@@ -13,6 +13,7 @@
   import KnifeLogo from "$lib/components/KnifeLogo.svelte";
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
   import { t, tModuleName } from "$lib/i18n";
+  import { elevation } from "$lib/stores/elevation.svelte";
   import type { ModuleManifest } from "$lib/types";
 
   interface Props {
@@ -77,6 +78,30 @@
       {/if}
     </div>
   </a>
+
+  {#if elevation.elevated !== null}
+    <div class="flex flex-wrap items-center gap-2 px-1">
+      <span
+        class="rounded-full px-2 py-0.5 text-[0.7rem] font-medium {elevation.elevated
+          ? 'bg-accent-soft text-ink'
+          : 'bg-surface-3 text-ink-muted'}"
+        title={elevation.elevated ? t("elevation.adminHint") : t("elevation.standardHint")}
+        data-testid="elevation-badge"
+      >
+        {elevation.elevated ? t("elevation.admin") : t("elevation.standard")}
+      </span>
+      {#if !elevation.elevated}
+        <button
+          type="button"
+          class="rounded-md px-1.5 py-0.5 text-[0.7rem] text-ink-muted outline-none hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60"
+          disabled={elevation.busy}
+          onclick={() => void elevation.restart(page.url.pathname)}
+        >
+          {elevation.busy ? t("elevation.restarting") : t("elevation.restart")}
+        </button>
+      {/if}
+    </div>
+  {/if}
 
   <ul class="flex flex-col gap-1">
     <li>

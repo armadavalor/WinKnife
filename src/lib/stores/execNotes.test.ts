@@ -16,6 +16,7 @@ import {
   itemsToReport,
   refusedHeld,
   itemNote,
+  NEEDS_ADMIN_NOTE,
   stopSummary,
   warningsNote,
   warningsOf,
@@ -86,6 +87,10 @@ test("a single result's note names what went wrong", () => {
     "protected",
   );
   assert.equal(itemNote(item("f", { status: "failed", error: "busy" })), "busy");
+  assert.equal(
+    itemNote(item("f", { status: "failed", error: "access is denied", needsAdmin: true })),
+    NEEDS_ADMIN_NOTE,
+  );
   assert.equal(
     itemNote(item("a", { status: "succeeded" }, [LEFT])),
     `${LEFT.path}: ${LEFT.reason}`,

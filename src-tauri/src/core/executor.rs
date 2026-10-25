@@ -308,7 +308,7 @@ pub fn execute(
                 reason = reason.as_str(),
                 "item skipped"
             ),
-            ExecOutcome::Failed { error } => tracing::warn!(
+            ExecOutcome::Failed { error, .. } => tracing::warn!(
                 batch = %batch,
                 path = %unit.finding.path.display(),
                 error = error.as_str(),
@@ -354,11 +354,11 @@ fn apply_one(
     state: &mut BatchState,
 ) -> (ExecOutcome, u64) {
     let skipped = |reason: String| (ExecOutcome::Skipped { reason }, 0);
-    let failed = |error: String| (ExecOutcome::Failed { error }, 0);
+    let failed = |err: &crate::core::error::CoreError| (ExecOutcome::failed(err), 0);
 
     // 1. The recommendation still has to be internally valid.
     if let Err(err) = unit.recommendation.validate() {
-        return failed(err.to_string());
+        return failed(&err);
     }
 
     // Non-mutating actions are no-ops by definition; report them honestly
@@ -470,7 +470,7 @@ fn apply_one(
                 .saturating_sub(taken.left_behind_bytes);
             (ExecOutcome::Succeeded, reclaimed)
         }
-        Err(err) => failed(err.to_string()),
+        Err(err) => failed(&err),
     }
 }
 
@@ -744,12 +744,7 @@ fn disable_startup_entry(
             state.warnings = warnings;
             (ExecOutcome::Succeeded, 0)
         }
-        Err(err) => (
-            ExecOutcome::Failed {
-                error: err.to_string(),
-            },
-            0,
-        ),
+        Err(err) => (ExecOutcome::failed(&err), 0),
     }
 }
 
@@ -774,12 +769,7 @@ fn apply_tweak(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> (ExecOutcome, 
 
     match with_db(env.db, |conn| env.tweaks.apply(conn, tweak_id)) {
         Ok(()) => (ExecOutcome::Succeeded, 0),
-        Err(err) => (
-            ExecOutcome::Failed {
-                error: err.to_string(),
-            },
-            0,
-        ),
+        Err(err) => (ExecOutcome::failed(&err), 0),
     }
 }
 
@@ -882,12 +872,7 @@ fn empty_recycle_bin(
                 .unwrap_or(0);
             (ExecOutcome::Succeeded, before.saturating_sub(after))
         }
-        Err(err) => (
-            ExecOutcome::Failed {
-                error: err.to_string(),
-            },
-            0,
-        ),
+        Err(err) => (ExecOutcome::failed(&err), 0),
     }
 }
 
@@ -2681,7 +2666,7 @@ mod tests {
         .expect("execute");
 
         match outcome_for(&report, &plain) {
-            ExecOutcome::Failed { error } => assert!(
+            ExecOutcome::Failed { error, .. } => assert!(
                 error.contains("re-verify"),
                 "the failure must name the missing guarantee: `{error}`"
             ),

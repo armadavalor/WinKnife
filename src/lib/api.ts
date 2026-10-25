@@ -6,7 +6,7 @@
  * means a renamed command or event breaks the build once, here, instead of
  * silently at runtime in five routes.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -58,7 +58,59 @@ import type {
   ContextMenuScanResult,
   UpdateStatus,
   UnlockerReport,
+  RelaunchOutcome,
 } from "$lib/types";
+import { isApiError } from "$lib/types";
+
+/* -------------------------------------------------------------------------
+ * Administrator rights (K-021)
+ * ---------------------------------------------------------------------- */
+
+const needsAdminHandlers = new Set<() => void>();
+
+/** Called whenever a command fails for lack of administrator rights. */
+export function onNeedsAdmin(handler: () => void): () => void {
+  needsAdminHandlers.add(handler);
+  return () => needsAdminHandlers.delete(handler);
+}
+
+function reportsNeedsAdmin(result: unknown): boolean {
+  const items = (result as { items?: unknown } | null)?.items;
+  return (
+    Array.isArray(items) &&
+    items.some(
+      (item: ExecReport["items"][number]) =>
+        item?.outcome?.status === "failed" && item.outcome.needsAdmin === true,
+    )
+  );
+}
+
+/** Every command goes through here so a needs-admin failure reaches the banner. */
+async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    const result = await tauriInvoke<T>(command, args);
+    if (reportsNeedsAdmin(result)) needsAdminHandlers.forEach((handler) => handler());
+    return result;
+  } catch (error: unknown) {
+    if (isApiError(error) && error.code === "needs_admin") {
+      needsAdminHandlers.forEach((handler) => handler());
+    }
+    throw error;
+  }
+}
+
+/** Whether WinKnife runs with administrator rights. */
+export function elevationStatus(): Promise<boolean> {
+  return invoke<boolean>("elevation_status");
+}
+
+/**
+ * Restart through the UAC prompt, reopening `module` (null = dashboard). On
+ * `started` this window closes; on `declined` nothing changed.
+ */
+export function restartAsAdmin(module: string | null): Promise<RelaunchOutcome> {
+  return invoke<RelaunchOutcome>("restart_as_admin", { module });
+}
 
 /** Event names, mirroring the constants in `core/events.rs` and `lib.rs`. */
 export const EVENTS = {

@@ -169,6 +169,16 @@ pub enum CoreError {
     /// The hosts file editor (module C4).
     #[error("hosts file: {0}")]
     Hosts(String),
+
+    /// Windows refused the change because WinKnife runs without administrator
+    /// rights (K-021). The UI offers "Restart as administrator" for this code.
+    #[error("this needs administrator rights: {0}")]
+    NeedsAdmin(String),
+
+    /// A test build asked to start an elevated copy of itself; refused by the
+    /// same guard as the other real-OS effects.
+    #[error("starting an elevated copy is disabled in this build")]
+    ElevationBlocked,
 }
 
 impl CoreError {
@@ -176,6 +186,7 @@ impl CoreError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Db(_) => "db",
+            Self::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => "needs_admin",
             Self::Io(_) => "io",
             Self::Serde(_) => "serde",
             Self::UnknownModule(_) => "unknown_module",
@@ -207,6 +218,8 @@ impl CoreError {
             Self::SchemaTooNew { .. } => "schema_too_new",
             Self::Busy(_) => "busy",
             Self::Hosts(_) => "hosts",
+            Self::NeedsAdmin(_) => "needs_admin",
+            Self::ElevationBlocked => "elevation_blocked",
         }
     }
 }
@@ -279,6 +292,17 @@ mod tests {
             CoreError::Busy(crate::core::busy::Operation::Purge).code(),
             "busy"
         );
+    }
+
+    #[test]
+    fn access_denied_maps_to_needs_admin() {
+        assert_eq!(CoreError::NeedsAdmin("HKLM".into()).code(), "needs_admin");
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let api: ApiError = CoreError::Io(denied).into();
+        assert_eq!(api.code, "needs_admin");
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(CoreError::Io(missing).code(), "io");
+        assert_eq!(CoreError::ElevationBlocked.code(), "elevation_blocked");
     }
 
     #[test]

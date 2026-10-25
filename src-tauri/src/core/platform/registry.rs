@@ -356,7 +356,9 @@ mod sys {
     use crate::core::error::{CoreError, Result};
     use std::os::windows::ffi::OsStrExt;
     use windows::core::{PCWSTR, PWSTR};
-    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS};
+    use windows::Win32::Foundation::{
+        ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS, WIN32_ERROR,
+    };
     use windows::Win32::System::Registry::{
         RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW,
         RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ,
@@ -420,6 +422,15 @@ mod sys {
     }
 
     /// Open `subkey` for writing, creating it when absent.
+    /// A refused write: "access denied" is the missing-admin case (K-021).
+    fn write_failure(status: WIN32_ERROR, message: String) -> CoreError {
+        if status == ERROR_ACCESS_DENIED {
+            CoreError::NeedsAdmin(message)
+        } else {
+            CoreError::Registry(message)
+        }
+    }
+
     fn open_write(hive: Hive, subkey: &str) -> Result<Key> {
         let path = wide(subkey);
         let mut handle = HKEY::default();
@@ -439,12 +450,15 @@ mod sys {
             )
         };
         if status != ERROR_SUCCESS {
-            return Err(CoreError::Registry(format!(
-                "cannot open `{}\\{subkey}` for writing: {} \
+            return Err(write_failure(
+                status,
+                format!(
+                    "cannot open `{}\\{subkey}` for writing: {} \
                  (writing under HKLM needs an elevated process)",
-                hive.short_name(),
-                status.0
-            )));
+                    hive.short_name(),
+                    status.0
+                ),
+            ));
         }
         Ok(Key(handle))
     }
@@ -647,12 +661,15 @@ mod sys {
             )
         };
         if status != ERROR_SUCCESS {
-            return Err(CoreError::Registry(format!(
-                "cannot write `{}\\{subkey}\\{}`: {}",
-                hive.short_name(),
-                value.name,
-                status.0
-            )));
+            return Err(write_failure(
+                status,
+                format!(
+                    "cannot write `{}\\{subkey}\\{}`: {}",
+                    hive.short_name(),
+                    value.name,
+                    status.0
+                ),
+            ));
         }
         Ok(())
     }
@@ -676,22 +693,28 @@ mod sys {
             return Ok(());
         }
         if status != ERROR_SUCCESS {
-            return Err(CoreError::Registry(format!(
-                "cannot open `{}\\{subkey}` for writing: {}",
-                hive.short_name(),
-                status.0
-            )));
+            return Err(write_failure(
+                status,
+                format!(
+                    "cannot open `{}\\{subkey}` for writing: {}",
+                    hive.short_name(),
+                    status.0
+                ),
+            ));
         }
         let key = Key(handle);
         let name_wide = wide(name);
         // SAFETY: `name_wide` is NUL-terminated and the key is open for writing.
         let status = unsafe { RegDeleteValueW(key.0, PCWSTR(name_wide.as_ptr())) };
         if status != ERROR_SUCCESS && status != ERROR_FILE_NOT_FOUND {
-            return Err(CoreError::Registry(format!(
-                "cannot remove `{}\\{subkey}\\{name}`: {}",
-                hive.short_name(),
-                status.0
-            )));
+            return Err(write_failure(
+                status,
+                format!(
+                    "cannot remove `{}\\{subkey}\\{name}`: {}",
+                    hive.short_name(),
+                    status.0
+                ),
+            ));
         }
         Ok(())
     }

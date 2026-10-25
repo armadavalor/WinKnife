@@ -2501,6 +2501,45 @@ pub async fn unlocker_request_close(
     .await
 }
 
+// ---- Elevation (K-021) -----------------------------------------------------
+
+/// Whether this WinKnife runs as administrator. Read-only.
+///
+/// # Errors
+/// Never in practice; the signature matches every other command.
+#[tauri::command]
+pub fn elevation_status() -> Result<bool, ApiError> {
+    guarded("elevation_status", || {
+        Ok(crate::core::platform::is_elevated())
+    })
+}
+
+/// Start WinKnife again as administrator, on the page `module`, after the
+/// user clicked "Restart as administrator". The UAC prompt is Windows' own;
+/// when it is accepted this copy exits so the elevated one can take over.
+///
+/// # Errors
+/// Returns an error when this build may not reach the OS or WinKnife's exe
+/// cannot be located.
+#[tauri::command]
+pub fn restart_as_admin<R: Runtime>(
+    app: AppHandle<R>,
+    module: Option<String>,
+) -> Result<crate::core::platform::RelaunchOutcome, ApiError> {
+    guarded("restart_as_admin", || {
+        let parameters = crate::core::platform::relaunch_parameters(
+            module.as_deref(),
+            crate::is_dry_run(std::env::args()),
+            std::process::id(),
+        );
+        let outcome = crate::core::platform::relaunch_elevated(&parameters)?;
+        if outcome == crate::core::platform::RelaunchOutcome::Started {
+            app.exit(0);
+        }
+        Ok(outcome)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

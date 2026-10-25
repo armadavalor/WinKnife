@@ -361,6 +361,16 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "unlocker_request_close",
             args: json!({ "pid": 0, "startTime": "0" }),
         },
+        // Read-only: asks Windows about this process's own token.
+        Probe {
+            command: "elevation_status",
+            args: json!({}),
+        },
+        // Refused: real OS effects are not armed, so no UAC prompt appears.
+        Probe {
+            command: "restart_as_admin",
+            args: json!({ "module": "startup" }),
+        },
     ]
 }
 

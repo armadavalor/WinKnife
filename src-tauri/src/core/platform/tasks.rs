@@ -168,6 +168,7 @@ mod sys {
     use super::LogonTask;
     use crate::core::error::{CoreError, Result};
     use windows::core::{Interface, BSTR};
+    use windows::Win32::Foundation::E_ACCESSDENIED;
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_MULTITHREADED,
@@ -397,10 +398,15 @@ mod sys {
         // SAFETY: setting a property on a live registered task. This is the only
         // mutation this module performs, and there is no delete anywhere in it.
         unsafe { task.SetEnabled(enabled.into()) }.map_err(|err| {
-            CoreError::TaskScheduler(format!(
+            let message = format!(
                 "could not change `{task_path}` (a task under \\Microsoft\\Windows \
                  needs an elevated process): {err}"
-            ))
+            );
+            if err.code() == E_ACCESSDENIED {
+                CoreError::NeedsAdmin(message)
+            } else {
+                CoreError::TaskScheduler(message)
+            }
         })?;
         Ok(())
     }
