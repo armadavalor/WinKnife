@@ -36,6 +36,7 @@
     hosts: "globe",
     wrench: "wrench",
     menu: "list",
+    env: "list",
   };
 </script>
 

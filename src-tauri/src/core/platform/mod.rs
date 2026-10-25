@@ -46,7 +46,7 @@ pub use elevation::{
     is_elevated, previous_instance, relaunch_elevated, relaunch_parameters, wait_for_exit,
     RelaunchOutcome, AFTER_ELEVATION_FLAG,
 };
-pub use env::{EnvResolver, MapEnv, SystemEnv};
+pub use env::{broadcast_environment_change, EnvResolver, MapEnv, SystemEnv};
 pub use execution_state::{AwakeRequest, ExecutionState, RecordedCall, RecordingExecutionState};
 pub use explorer::reveal_in_explorer;
 pub use file_id::{file_identity, try_file_identity, FileId};

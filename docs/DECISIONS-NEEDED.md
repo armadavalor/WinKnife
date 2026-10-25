@@ -897,3 +897,9 @@ not ours to take.
 - [ ] 2026-10-25 (phase 7): verdicts are parsed from English output. On non-English Windows the parser falls back to exit codes (DISM: 0 = finished, 3010 = restart needed, 0x800F081F = repair source missing, other non-zero = failed); sfc's exit codes are undocumented, so a non-English sfc run reports "finished, see log". Localised patterns could be added per language later.
 - [ ] 2026-10-25 (phase 7): Cancel kills only the `dism.exe`/`sfc.exe` child; a `DismHost.exe` or TrustedInstaller worker it started may keep running until it finishes on its own. Safest interpretation: no process-tree kill of system services.
 - [ ] 2026-10-25 (phase 7): repair logs (`repair-*.log` in the log folder) are not pruned. They are small; add retention if they pile up.
+
+## Open items raised by the environment-variable editor (2026-10-25, phase 7)
+
+- [ ] 2026-10-25 (phase 7): deleting a user variable is a registry change, not a file deletion, so it goes through C1 like any other write. `tweak_undo.applied_*` is NOT NULL, so a delete stores `REG_NONE` + empty bytes as "absent after" instead of adding a migration — safest interpretation taken: undo of a delete only runs while the value is still absent, then restores the saved value and kind.
+- [ ] 2026-10-25 (phase 7): undo is one step, like C1 (a newer change supersedes the older row). Multi-step history was not asked for — left out.
+- [ ] 2026-10-25 (phase 7): env changes bypass the executor/`TweakRouter` (no scan, no recommendations); the page calls `env_vars_apply` / `env_vars_undo` directly, like the hosts editor. Revisit if C7 drift check should cover `env:` rows.

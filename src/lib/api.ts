@@ -20,6 +20,9 @@ import type {
   DashboardSummary,
   DriveInfo,
   DuplicateScanResult,
+  EnvChange,
+  EnvListing,
+  EnvPreview,
   ProfilePreview,
   EmptyFolderScanResult,
   ExecProgress,
@@ -546,6 +549,30 @@ export function repairRun(tool: RepairTool): Promise<RepairOutcome> {
 /** Stop the running tool. Resolves with whether one was running. */
 export function repairCancel(): Promise<boolean> {
   return invoke<boolean>("repair_cancel");
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — environment variables (C15, K-024)
+ * ---------------------------------------------------------------------- */
+
+/** User and system variables, PATH-like ones split and flagged. Read-only. */
+export function envVarsList(): Promise<EnvListing> {
+  return invoke<EnvListing>("env_vars_list");
+}
+
+/** Validate a change and diff it. Writes nothing. */
+export function envVarsPreview(change: EnvChange): Promise<EnvPreview> {
+  return invoke<EnvPreview>("env_vars_preview", { change });
+}
+
+/** Write a user variable (or delete it), recording the prior value for undo. */
+export function envVarsApply(change: EnvChange): Promise<void> {
+  return invoke<void>("env_vars_apply", { change });
+}
+
+/** Put back what the last change to `name` replaced. */
+export function envVarsUndo(name: string): Promise<void> {
+  return invoke<void>("env_vars_undo", { name });
 }
 
 /* -------------------------------------------------------------------------

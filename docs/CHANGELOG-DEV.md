@@ -2643,3 +2643,16 @@ absent).
 **Built.** New `repair` module: SFC and DISM (CheckHealth, ScanHealth, RestoreHealth, AnalyzeComponentStore) on click, exact command shown, live output over `repair:output`, one-line verdict, full log under `log_dir` with "Open log". `SystemRepairRunner` (CREATE_NO_WINDOW, UTF-16/OEM decoding, cancel kills the child) or `FakeRepairRunner` when real OS effects are not armed.
 **Decisions.** K-023. RestoreHealth and sfc confirm first; unelevated runs return `needs_admin`. See `docs/phases/PHASE-7-repair.md`.
 **Deferred.** StartComponentCleanup; verdict parsing is English-only with exit-code fallback; repair logs are not pruned (DECISIONS-NEEDED).
+
+---
+
+## 2026-10-25 — Environment variables (C15, K-024)
+
+**Built.** New `env-vars` module and page (`docs/phases/PHASE-7-env-vars.md`).
+- Lists user variables (`HKCU\Environment`) and system variables (HKLM Session Manager, read-only, never written). A user value that is not `REG_SZ`/`REG_EXPAND_SZ` is read-only with a reason.
+- PATH-like values (containing `;`) split into entries, each flagged with a reason: empty, duplicate (case-insensitive, trailing `\` ignored), missing directory (after `%VAR%` expansion), unknown `%VAR%`. The editor edits them as rows (reorder, add, remove).
+- Every change is previewed first (before/after kind + per-entry diff), then written through the C1 `tweak_undo` table with id `env:<NAME>`: prior value or "absent" recorded, exact kind written, read back (mismatch restores the prior), delete stored as the `REG_NONE` sentinel. Undo refuses after an outside change. `WM_SETTINGCHANGE "Environment"` broadcast via `SendMessageTimeoutW(SMTO_ABORTIFHUNG, 1000 ms)`, only when real OS effects are armed.
+- Refused before any registry call: system scope, empty name / `=` in name / over-long name or value, stale `expected`, add over an existing name.
+- Tests against `MapRegistry` + in-memory DB: split/join round-trip, all four flags, validation, create/modify/delete → undo (kind kept), HKLM refusal, stale and outside-change refusals.
+
+**Deferred.** See DECISIONS-NEEDED, "Open items raised by the environment-variable editor".

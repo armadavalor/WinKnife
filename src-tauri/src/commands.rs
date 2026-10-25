@@ -53,6 +53,7 @@ use crate::core::types::ExecReport;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, folders, DuplicateProgress, DuplicateScan};
 use crate::modules::empty_folders;
+use crate::modules::env_vars::{EnvChange, EnvListing, EnvPreview, EnvVarService};
 use crate::modules::hosts::{HostsBackup, HostsDocument, HostsPreview, HostsService, SaveOutcome};
 use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
 use crate::modules::legacy_panels::{LegacyPanelsService, PanelInfo};
@@ -2390,6 +2391,69 @@ pub fn repair_run<R: Runtime>(
 #[tauri::command]
 pub fn repair_cancel(service: State<'_, Arc<RepairService>>) -> Result<bool, ApiError> {
     guarded("repair_cancel", || Ok(service.cancel()))
+}
+
+/* -------------------------------------------------------------------------
+ * Environment variables
+ * ---------------------------------------------------------------------- */
+
+/// User and system variables, PATH-like ones split and flagged, plus the
+/// changes that can be undone. Read-only (K-024).
+///
+/// # Errors
+/// Returns an error when the registry or the database cannot be read.
+#[tauri::command(async)]
+pub fn env_vars_list(
+    service: State<'_, Arc<EnvVarService>>,
+    db: State<'_, Arc<Database>>,
+) -> Result<EnvListing, ApiError> {
+    guarded("env_vars_list", || {
+        let exists = |path: &std::path::Path| path.exists();
+        Ok(db.with(|conn| service.list(conn, &crate::core::platform::SystemEnv, &exists))?)
+    })
+}
+
+/// Old -> new for one change. Writes nothing.
+///
+/// # Errors
+/// Returns the same refusals as [`env_vars_apply`].
+#[tauri::command(async)]
+pub fn env_vars_preview(
+    service: State<'_, Arc<EnvVarService>>,
+    change: EnvChange,
+) -> Result<EnvPreview, ApiError> {
+    guarded("env_vars_preview", || Ok(service.preview(&change)?))
+}
+
+/// Record the old value in `tweak_undo`, write the user variable, read it back.
+///
+/// # Errors
+/// Returns an error for a system variable, an invalid name or value, a value
+/// that changed since it was read, or a failed write.
+#[tauri::command(async)]
+pub fn env_vars_apply(
+    service: State<'_, Arc<EnvVarService>>,
+    db: State<'_, Arc<Database>>,
+    change: EnvChange,
+) -> Result<(), ApiError> {
+    guarded("env_vars_apply", || {
+        Ok(db.with(|conn| service.apply(conn, &change))?)
+    })
+}
+
+/// Put back what the last change of `name` replaced.
+///
+/// # Errors
+/// Returns an error when there is nothing to undo or the value changed since.
+#[tauri::command(async)]
+pub fn env_vars_undo(
+    service: State<'_, Arc<EnvVarService>>,
+    db: State<'_, Arc<Database>>,
+    name: String,
+) -> Result<(), ApiError> {
+    guarded("env_vars_undo", || {
+        Ok(db.with(|conn| service.undo(conn, &name))?)
+    })
 }
 
 /* -------------------------------------------------------------------------
