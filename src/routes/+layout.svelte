@@ -25,9 +25,13 @@
   import { visibleModules } from "$lib/hiddenModules";
   import { motion } from "$lib/stores/motion.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
+  import { locale } from "$lib/stores/locale.svelte";
   import { theme } from "$lib/stores/theme.svelte";
 
   let { children } = $props();
+
+  // Before the first render, so the shell never flashes in the wrong language.
+  locale.init();
 
   // Mounting is a one-shot, so it is not an effect: an effect subscribes to
   // whatever its body reads, and a store that reports its own progress would
@@ -75,6 +79,7 @@
   });
 </script>
 
+{#key locale.current}
 <a
   href="#main"
   class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-10 focus:rounded-lg focus:bg-surface-3 focus:px-3 focus:py-2 focus:text-sm"
@@ -151,3 +156,4 @@
 </div>
 
 <QuarantineDrawer />
+{/key}

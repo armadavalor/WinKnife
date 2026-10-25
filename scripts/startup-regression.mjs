@@ -21,11 +21,12 @@ globalThis.__startupApi = {
 const moduleUrl = source => 'data:text/javascript,' + encodeURIComponent(source);
 const api = moduleUrl('export const {startupScan,startupEnable,execute}=globalThis.__startupApi;');
 const types = moduleUrl('export const isApiError = e => e && typeof e.message === "string";');
+const i18n = moduleUrl('export const t = key => key;');
 let source = ts.transpileModule(
   readFileSync(new URL('../src/lib/stores/startup.svelte.ts', import.meta.url), 'utf8'),
   { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext } },
 ).outputText;
-source = source.replaceAll('"$lib/api"', JSON.stringify(api)).replaceAll('"$lib/types"', JSON.stringify(types));
+source = source.replaceAll('"$lib/api"', JSON.stringify(api)).replaceAll('"$lib/types"', JSON.stringify(types)).replaceAll('"$lib/i18n"', JSON.stringify(i18n));
 // The store's one sibling import is pure TypeScript, which node loads as is.
 const execNotes = new URL('../src/lib/stores/execNotes.ts', import.meta.url).href;
 source = source.replaceAll('"./execNotes"', JSON.stringify(execNotes));

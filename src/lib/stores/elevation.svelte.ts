@@ -5,6 +5,7 @@
  * UAC prompt. A "No" there leaves this window running with a notice.
  */
 import { elevationStatus, onNeedsAdmin, restartAsAdmin } from "$lib/api";
+import { t } from "$lib/i18n";
 import { isApiError } from "$lib/types";
 
 export type ElevationNotice = "declined" | "failed" | null;
@@ -57,7 +58,7 @@ class ElevationStore {
       if (outcome.status === "declined") this.notice = "declined";
       if (outcome.status === "failed") {
         this.notice = "failed";
-        this.error = `Windows error ${outcome.code}`;
+        this.error = t("elevation.windowsError", { code: String(outcome.code) });
       }
     } catch (error: unknown) {
       this.notice = "failed";

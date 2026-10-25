@@ -35,12 +35,13 @@ const emit = (module, scanId, itemsScanned = 0) =>
 const moduleUrl = source => 'data:text/javascript,' + encodeURIComponent(source);
 const api = moduleUrl(`export const {${Object.keys(globalThis.__scanApi).join(',')}}=globalThis.__scanApi;`);
 const types = moduleUrl('export const isApiError = e => e && typeof e.message === "string";');
+const i18n = moduleUrl('export const t = key => key;');
 function compileStore(file, siblings = {}) {
   let source = ts.transpileModule(
     readFileSync(new URL(`../src/lib/stores/${file}`, import.meta.url), 'utf8'),
     { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext } },
   ).outputText;
-  source = source.replaceAll('"$lib/api"', JSON.stringify(api)).replaceAll('"$lib/types"', JSON.stringify(types));
+  source = source.replaceAll('"$lib/api"', JSON.stringify(api)).replaceAll('"$lib/types"', JSON.stringify(types)).replaceAll('"$lib/i18n"', JSON.stringify(i18n));
   for (const [spec, url] of Object.entries(siblings)) source = source.replaceAll(JSON.stringify(spec), JSON.stringify(url));
   let code = compileModule(source, { filename: file.replace(/\.ts$/, '.js'), generate: 'client' }).js.code;
   code = code.replace(/from ['"](svelte[^'"]*)['"]/g, (_, spec) => 'from ' + JSON.stringify(pathToFileURL(require.resolve(spec)).href));

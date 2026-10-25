@@ -7,6 +7,7 @@
  * write, so there is no recommendation to re-verify.
  */
 import { execute, tweaksScan, tweaksUndo } from "$lib/api";
+import { t } from "$lib/i18n";
 import { isApiError, type Recommendation, type TweakState, type TweaksScanResult } from "$lib/types";
 
 import { itemNote } from "./execNotes";
@@ -91,7 +92,7 @@ class TweaksStore {
     if (this.busy !== null || this.status === "loading") return;
     const recommendation = this.byTweak.get(tweak.id);
     if (this.scanId === null || !recommendation) {
-      this.error = "This setting can no longer be changed; refresh the list.";
+      this.error = t("exec.settingStale");
       return;
     }
     this.busy = tweak.id;
@@ -99,7 +100,7 @@ class TweaksStore {
     try {
       const report = await execute(this.scanId, [recommendation.id], false);
       const item = report.items[0];
-      this.lastReport = item ? itemNote(item) : null;
+      this.lastReport = item ? itemNote(item, t("exec.needsAdmin")) : null;
       await this.#doReload();
     } catch (error: unknown) {
       this.error = message(error);

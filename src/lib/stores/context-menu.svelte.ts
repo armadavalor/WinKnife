@@ -6,6 +6,7 @@
  * tweak undo does: it puts back what was recorded before the write.
  */
 import { contextMenuScan, contextMenuUndo, execute } from "$lib/api";
+import { t } from "$lib/i18n";
 import {
   isApiError,
   type ContextMenuEntry,
@@ -99,7 +100,7 @@ class ContextMenuStore {
     if (this.busy !== null || this.status === "loading") return;
     const recommendation = this.byEntry.get(entry.id);
     if (this.scanId === null || !recommendation) {
-      this.error = "This entry can no longer be changed; refresh the list.";
+      this.error = t("exec.entryStale");
       return;
     }
     this.busy = entry.id;
@@ -107,7 +108,7 @@ class ContextMenuStore {
     try {
       const report = await execute(this.scanId, [recommendation.id], false);
       const item = report.items[0];
-      this.lastReport = item ? itemNote(item) : null;
+      this.lastReport = item ? itemNote(item, t("exec.needsAdmin")) : null;
       await this.#doReload();
     } catch (error: unknown) {
       this.error = message(error);

@@ -19,7 +19,7 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - v0.3.0 sürüm sayfası canlıda görsel doğrulanmadı.
 
 ## Açık sorular
-- TR arayüz: ilk sürüm EN+TR çıkacak (kullanıcı 2026-10-25); dil seçici + tam TR çevirisi için oturum önerildi, henüz başlamadı.
+- TR arayüz (K-022): dil seçici + tam TR çevirisi PR olarak hazır; Rust kaynaklı gerekçe/hata metinleri hâlâ İngilizce (DECISIONS-NEEDED).
 - Rust crate'leri 2.12'ye çekmek windows 0.62 + wry 0.57 getiriyor; npm + crate birlikte yükseltilmeli.
 
 ## Sıradaki adım

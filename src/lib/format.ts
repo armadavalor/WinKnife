@@ -8,8 +8,17 @@
 
 const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
+/** The UI language, read off <html lang> (set by the locale store); undefined = system. */
+function activeLang(): string | undefined {
+  return typeof document === "undefined" ? undefined : document.documentElement.lang || undefined;
+}
+
+function isTurkish(lang: string | undefined): boolean {
+  return lang?.toLowerCase().startsWith("tr") ?? false;
+}
+
 /** Human-readable size. Binary units, because that is what Explorer shows. */
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number, locale = activeLang()): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return "0 B";
   }
@@ -20,48 +29,58 @@ export function formatBytes(bytes: number): string {
     unit += 1;
   }
   const decimals = unit === 0 ? 0 : value < 10 ? 1 : 0;
-  return `${value.toFixed(decimals)} ${BYTE_UNITS[unit]}`;
+  const text = value.toLocaleString(locale, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return `${text} ${BYTE_UNITS[unit]}`;
 }
 
 /** `2h 05m 30s`, matching the tray tooltip in `modules/shutdown_timer.rs`. */
-export function formatRemaining(totalSecs: number): string {
+export function formatRemaining(totalSecs: number, locale = activeLang()): string {
   const total = Math.max(0, Math.floor(totalSecs));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = total % 60;
   const pad = (n: number) => String(n).padStart(2, "0");
 
+  const [h, m, s] = isTurkish(locale) ? ["sa", "dk", "sn"] : ["h", "m", "s"];
+
   if (hours > 0) {
-    return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+    return `${hours}${h} ${pad(minutes)}${m} ${pad(seconds)}${s}`;
   }
   if (minutes > 0) {
-    return `${minutes}m ${pad(seconds)}s`;
+    return `${minutes}${m} ${pad(seconds)}${s}`;
   }
-  return `${seconds}s`;
+  return `${seconds}${s}`;
 }
 
 /**
  * A count with digit grouping (`2,530,292`), in the system locale like
  * {@link formatDateTime}. Only for counts: ids and codes stay ungrouped.
  */
-export function formatCount(count: number, locale?: string): string {
+export function formatCount(count: number, locale = activeLang()): string {
   return count.toLocaleString(locale);
 }
 
 /** Local date and time, for "will run at" and "kept until". */
-export function formatDateTime(rfc3339: string): string {
+export function formatDateTime(rfc3339: string, locale = activeLang()): string {
   const date = new Date(rfc3339);
   if (Number.isNaN(date.getTime())) {
     return rfc3339;
   }
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   });
 }
 
 /** Rough age, e.g. `3 days`. Used for the "kept until" countdown. */
-export function formatRelativeDays(rfc3339: string, from = new Date()): string {
+export function formatRelativeDays(
+  rfc3339: string,
+  from = new Date(),
+  locale = activeLang(),
+): string {
   const date = new Date(rfc3339);
   if (Number.isNaN(date.getTime())) {
     return rfc3339;
@@ -69,6 +88,9 @@ export function formatRelativeDays(rfc3339: string, from = new Date()): string {
   const days = Math.round(
     (date.getTime() - from.getTime()) / (24 * 60 * 60 * 1000),
   );
+  if (isTurkish(locale)) {
+    return days <= 0 ? "bugün" : `${days} gün`;
+  }
   if (days <= 0) {
     return "today";
   }
