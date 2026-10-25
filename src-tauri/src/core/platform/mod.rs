@@ -27,6 +27,7 @@ pub(crate) mod guard;
 pub(crate) mod hosts;
 pub(crate) mod lock;
 pub(crate) mod message;
+pub(crate) mod network;
 pub(crate) mod panels;
 pub(crate) mod pinned;
 pub(crate) mod power;
@@ -57,6 +58,7 @@ pub use hosts::{
 };
 pub use lock::{AlwaysUnlocked, LockProbe, LockState, SystemLockProbe};
 pub use message::show_fatal_error;
+pub use network::{read_sockets, Protocol, RawSocket, TcpState};
 pub use panels::{FakePanelLauncher, PanelLaunch, PanelLauncher, SystemPanelLauncher};
 pub use power::{DryRunPower, PowerAction, PowerController, PowerEvent};
 pub use process::{CachedProcessProbe, ProcessProbe, StubProcessProbe, SystemProcessProbe};

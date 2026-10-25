@@ -434,6 +434,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::hosts_restore,
         commands::hosts_reveal_backup,
         commands::hosts_flush_dns,
+        commands::network_list,
         commands::legacy_panels_list,
         commands::legacy_panels_open,
         commands::keep_awake_start,

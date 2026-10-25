@@ -2352,6 +2352,25 @@ pub async fn hosts_flush_dns() -> Result<String, ApiError> {
 }
 
 /* -------------------------------------------------------------------------
+ * Network (C14, K-023): read-only. Flushing DNS reuses `hosts_flush_dns`.
+ * ---------------------------------------------------------------------- */
+
+/// Listening ports and open connections with their owning process.
+///
+/// # Errors
+/// Returns an error when the OS socket tables cannot be read.
+#[tauri::command]
+pub async fn network_list() -> Result<Vec<crate::modules::network::PortRow>, ApiError> {
+    guarded_async("network_list", async {
+        tauri::async_runtime::spawn_blocking(crate::modules::network::list)
+            .await
+            .map_err(|err| CoreError::Network(format!("the request did not finish: {err}")))?
+            .map_err(ApiError::from)
+    })
+    .await
+}
+
+/* -------------------------------------------------------------------------
  * Legacy panels
  * ---------------------------------------------------------------------- */
 

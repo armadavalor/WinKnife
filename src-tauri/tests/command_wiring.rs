@@ -325,6 +325,11 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "hosts_flush_dns",
             args: json!({}),
         },
+        // Read-only: lists the machine's sockets.
+        Probe {
+            command: "network_list",
+            args: json!({}),
+        },
         // Read-only: checks which System32 files exist.
         Probe {
             command: "legacy_panels_list",
