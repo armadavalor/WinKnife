@@ -422,7 +422,7 @@ mod sys {
     }
 
     /// Open `subkey` for writing, creating it when absent.
-    /// A refused write: "access denied" is the missing-admin case (K-020).
+    /// A refused write: "access denied" is the missing-admin case (K-021).
     fn write_failure(status: WIN32_ERROR, message: String) -> CoreError {
         if status == ERROR_ACCESS_DENIED {
             CoreError::NeedsAdmin(message)

@@ -135,7 +135,7 @@ export type ExecOutcome =
   | {
       status: "failed";
       error: string;
-      /** Windows refused for lack of administrator rights (K-020). */
+      /** Windows refused for lack of administrator rights (K-021). */
       needsAdmin?: boolean;
     };
 

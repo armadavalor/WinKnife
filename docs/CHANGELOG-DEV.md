@@ -2496,7 +2496,7 @@ settings save.
   refused by the settings merge. Test: a hand-crafted profile naming a fenced
   or unknown tweak is refused with no registry writes and no undo rows.
 
-## 2026-10-25 — Admin elevation on request (K-020)
+## 2026-10-25 — Admin elevation on request (K-021)
 
 **Built.** WinKnife can tell whether it runs elevated and restart itself as
 administrator on a click; actions that fail for lack of rights say so instead

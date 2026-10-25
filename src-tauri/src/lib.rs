@@ -503,7 +503,7 @@ pub fn run() {
     };
     let dry_run = is_dry_run(std::env::args());
     // An elevated restart waits for the copy that asked for it, or the
-    // single-instance plugin below would hand its argv back and exit (K-020).
+    // single-instance plugin below would hand its argv back and exit (K-021).
     if let Some(pid) = core::platform::previous_instance(std::env::args()) {
         core::platform::wait_for_exit(pid);
     }

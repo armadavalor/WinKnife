@@ -2501,7 +2501,7 @@ pub async fn unlocker_request_close(
     .await
 }
 
-// ---- Elevation (K-020) -----------------------------------------------------
+// ---- Elevation (K-021) -----------------------------------------------------
 
 /// Whether this WinKnife runs as administrator. Read-only.
 ///

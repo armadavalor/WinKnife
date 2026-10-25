@@ -57,7 +57,7 @@ export function stopSummary(
   return { moved, left };
 }
 
-/** Shown instead of the raw "access denied" (K-020); the banner offers the restart. */
+/** Shown instead of the raw "access denied" (K-021); the banner offers the restart. */
 export const NEEDS_ADMIN_NOTE =
   "This needs administrator rights — use Restart as admin in the sidebar.";
 

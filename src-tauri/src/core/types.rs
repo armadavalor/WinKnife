@@ -422,7 +422,7 @@ pub enum ExecOutcome {
     Failed {
         /// The error, already flattened to a string for the UI.
         error: String,
-        /// Windows refused for lack of administrator rights (K-020); the
+        /// Windows refused for lack of administrator rights (K-021); the
         /// report offers "Restart as administrator".
         #[serde(
             default,

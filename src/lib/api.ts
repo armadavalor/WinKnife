@@ -63,7 +63,7 @@ import type {
 import { isApiError } from "$lib/types";
 
 /* -------------------------------------------------------------------------
- * Administrator rights (K-020)
+ * Administrator rights (K-021)
  * ---------------------------------------------------------------------- */
 
 const needsAdminHandlers = new Set<() => void>();

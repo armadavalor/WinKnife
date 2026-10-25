@@ -171,7 +171,7 @@ pub enum CoreError {
     Hosts(String),
 
     /// Windows refused the change because WinKnife runs without administrator
-    /// rights (K-020). The UI offers "Restart as administrator" for this code.
+    /// rights (K-021). The UI offers "Restart as administrator" for this code.
     #[error("this needs administrator rights: {0}")]
     NeedsAdmin(String),
 

@@ -875,7 +875,7 @@ not ours to take.
 
 ## Open items raised by admin elevation (2026-10-25)
 
-- [x] 2026-10-25 (K-020): "Always start as admin" is **not offered**. The only ways to start elevated without a UAC prompt each launch are a `requireAdministrator` manifest (every launch elevated, against least privilege, and a per-user unsigned install would show the UAC prompt on every start anyway) or a scheduled task with "run with highest privileges" (the hack the brief excludes; it also leaves a SYSTEM-visible persistence entry). A setting that only adds a UAC prompt to every start brings nothing over the "Restart as admin" button, so the button stays the only path.
+- [x] 2026-10-25 (K-021): "Always start as admin" is **not offered**. The only ways to start elevated without a UAC prompt each launch are a `requireAdministrator` manifest (every launch elevated, against least privilege, and a per-user unsigned install would show the UAC prompt on every start anyway) or a scheduled task with "run with highest privileges" (the hack the brief excludes; it also leaves a SYSTEM-visible persistence entry). A setting that only adds a UAC prompt to every start brings nothing over the "Restart as admin" button, so the button stays the only path.
 - [ ] 2026-10-25: the startup page knows upfront which rows are HKLM / all-users (they fail without admin) but shows no hint before the action; that page belongs to the list-QoL work running in parallel, so the hint is left for a follow-up. Today such a row fails with the "needs administrator rights" note and the global banner.
 
 ## Open items raised by the tweaks catalogue (2026-10-25)

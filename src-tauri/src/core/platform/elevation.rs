@@ -4,7 +4,7 @@
 //! manifest). A few actions need more: HKLM startup entries, the all-users
 //! Startup folder, tasks owned by Windows or by other accounts. Those fail with
 //! "access denied", and the page offers a restart through the UAC prompt —
-//! only on a click, never at startup (K-020).
+//! only on a click, never at startup (K-021).
 //!
 //! # The single-instance plugin
 //!

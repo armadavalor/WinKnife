@@ -1,5 +1,5 @@
 /**
- * Whether WinKnife runs as administrator, and restarting it as one (K-020).
+ * Whether WinKnife runs as administrator, and restarting it as one (K-021).
  *
  * Never elevates by itself: the restart happens only on a click, through the
  * UAC prompt. A "No" there leaves this window running with a notice.
