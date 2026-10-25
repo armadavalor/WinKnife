@@ -2066,23 +2066,25 @@ pub fn quarantine_purge<R: Runtime>(
     })
 }
 
-/// Remove one item whose encrypted restore was refused, at the user's
-/// explicit request from the drawer. The automatic purge never removes such
-/// an item (decision b, 2026-10-12).
+/// Remove held items for good (one, a selection or a batch) after the
+/// drawer's "cannot be undone" dialog (K-020).
 ///
 /// # Errors
-/// Returns [`CoreError::UnknownQuarantineItem`] for an id that is not held,
-/// and [`CoreError::Quarantine`] for an item whose restore was never refused.
+/// Returns [`CoreError::PurgeNotConfirmed`] without `confirmed`, and
+/// [`CoreError::UnknownQuarantineItem`] for an id that is not held.
 #[tauri::command(async)]
-pub fn quarantine_purge_item<R: Runtime>(
+pub fn quarantine_purge_items<R: Runtime>(
     app: AppHandle<R>,
-    item_id: Uuid,
+    item_ids: Vec<Uuid>,
+    confirmed: bool,
     services: State<'_, Services>,
     db: State<'_, Arc<Database>>,
 ) -> Result<PurgeReport, ApiError> {
-    guarded("quarantine_purge_item", || {
+    guarded("quarantine_purge_items", || {
         let _busy = services.quarantine.begin(Operation::Purge)?;
-        let report = services.quarantine.purge_item(&**db, item_id)?;
+        let report = services
+            .quarantine
+            .purge_items(&**db, &item_ids, confirmed)?;
         notify_quarantine_changed(&app, &services, &db, None);
         Ok(report)
     })

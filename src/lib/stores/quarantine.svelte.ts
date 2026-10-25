@@ -12,12 +12,11 @@ import {
   quarantineBatchItems,
   quarantineList,
   quarantinePurge,
-  quarantinePurgeItem,
+  quarantinePurgeItems,
   quarantineRestore,
   quarantineRestoreItem,
   quarantineStats,
 } from "$lib/api";
-import { removalFailure, type RemovalFailure } from "$lib/stores/execNotes";
 import {
   isApiError,
   type QuarantineBatch,
@@ -99,11 +98,11 @@ class QuarantineStore {
   /** The ticked items are being restored one by one. */
   restoringSelected = $state(false);
   /**
-   * A refused item the user tried to remove by hand and could not. It has its
-   * own note: the purge's "retried on the next purge" is false for an item
-   * the automatic purge never touches (round 3).
+   * The last purge was items the user picked (K-020). Its failures get their
+   * own note: "tried again next time" is false for a refused item, which the
+   * automatic purge never touches (round 3).
    */
-  removeFailed = $state<{ path: string; failure: RemovalFailure } | null>(null);
+  purgeByHand = $state(false);
 
   /** Fetch batches and totals. */
   async reload(): Promise<void> {
@@ -136,7 +135,7 @@ class QuarantineStore {
     this.lastRestore = null;
     this.lastPurge = null;
     this.purgeResult = null;
-    this.removeFailed = null;
+    this.purgeByHand = false;
     this.actionError = null;
     this.selected = [];
   }
@@ -215,6 +214,7 @@ class QuarantineStore {
     }
     this.actionError = null;
     this.purgeResult = null;
+    this.purgeByHand = false;
     this.purging = true;
     try {
       const report = await quarantinePurge();
@@ -285,27 +285,35 @@ class QuarantineStore {
   }
 
   /**
-   * Permanently remove one item whose encrypted restore was refused, after the
-   * user confirmed it. The automatic purge never removes such an item
-   * (decision b, 2026-10-12).
+   * Permanently remove the given held items after the user confirmed it
+   * (K-020). Locked or refused ones stay listed with their reason.
    */
-  async purgeItem(item: QuarantineItem): Promise<void> {
+  async purgeItems(ids: string[]): Promise<void> {
+    if (ids.length === 0 || this.purging) {
+      return;
+    }
     this.actionError = null;
-    this.removeFailed = null;
-    let failure: RemovalFailure | null;
+    this.purgeResult = null;
+    this.purgeByHand = true;
+    this.purging = true;
     try {
-      const report = await quarantinePurgeItem(item.id);
-      failure = removalFailure(item.id, report);
-    } catch (error: unknown) {
-      failure = removalFailure(item.id, { error });
-    }
-    if (failure) {
-      this.removeFailed = { path: item.quarantinePath, failure };
-    }
-    try {
-      const remaining = await quarantineBatchItems(item.batchId);
-      this.items = { ...this.items, [item.batchId]: remaining };
+      const report = await quarantinePurgeItems(ids);
+      this.lastPurge = report;
+      await this.refreshExpanded();
       await this.reload();
+      this.purgeResult = purgeOutcome(report, this.batches);
+    } catch (error: unknown) {
+      this.actionError = message(error);
+    } finally {
+      this.purging = false;
+    }
+  }
+
+  /** Permanently remove every item of one batch, after confirmation. */
+  async purgeBatch(batchId: string): Promise<void> {
+    try {
+      const items = await quarantineBatchItems(batchId);
+      await this.purgeItems(items.map((item) => item.id));
     } catch (error: unknown) {
       this.actionError = message(error);
     }

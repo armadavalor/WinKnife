@@ -2526,5 +2526,20 @@ were already gone from quarantine.
   - No new deletion path: the purge scope is unchanged.
 - The view logic lives in `src/lib/stores/quarantineView.ts`, with node tests.
 
-**Deferred.** Removing selected items for good before their keeping period
-ends would be a new deletion path; it is left for an explicit decision.
+**Remove for good, by hand (K-020).** The user decided the deferred point:
+- `Quarantine::purge_items(ids, confirmed)` replaces `purge_item`. It removes
+  any held item through the same `destroy()` root guards, and returns a
+  `PurgeReport` with per-item failure reasons. Without `confirmed` it returns
+  `purge_not_confirmed` and touches nothing. The `quarantine_item_not_marked`
+  check is gone.
+- Command `quarantine_purge_items(itemIds, confirmed)`; the old
+  `quarantine_purge_item` is removed. The probes in `command_wiring` and
+  `panic_and_busy` were updated.
+- Drawer: "Remove {count} for good" for a selection, "Remove for good" per
+  batch, and "Remove" on every item. One dialog names the item count and total
+  size and says it cannot be undone. Items that are locked or refused stay
+  listed with a reason badge, and the summary line counts them.
+- Test `removing_items_for_good_needs_confirmation` replaces the old
+  "unmarked item is refused" test.
+- "Remove for good now" (expired only) already says when nothing is due and
+  until when the oldest group is kept.

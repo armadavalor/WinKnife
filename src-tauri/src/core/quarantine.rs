@@ -734,26 +734,38 @@ impl Quarantine {
         Ok(report)
     }
 
-    /// Remove one item whose restore was refused for EFS, because the user
-    /// asked to. The automatic purge never removes such an item (decision b,
-    /// 2026-10-12), so this is the only way it leaves the quarantine short of
-    /// a successful restore. Any other item is refused: it is left to its
-    /// retention window, and this does not become a second delete button.
+    /// Remove held items for good because the user asked to: one item, a
+    /// selection or a whole batch (K-020). `confirmed` is set only by the
+    /// drawer's "cannot be undone" dialog; without it nothing is touched. The
+    /// removal goes through [`Self::destroy`] and its root guards like every
+    /// other purge, and an item that cannot go stays held with its reason.
     ///
     /// # Errors
-    /// Returns [`CoreError::UnknownQuarantineItem`] when the id is not held,
-    /// and [`CoreError::QuarantineItemNotMarked`] when its restore was never
-    /// refused.
-    pub fn purge_item(&self, db: &dyn DbAccess, item_id: Uuid) -> Result<PurgeReport> {
-        let item = with_db(db, |conn| self.find_item(conn, item_id))?
-            .filter(QuarantineItem::is_held)
-            .ok_or_else(|| CoreError::UnknownQuarantineItem(item_id.to_string()))?;
-        if item.restore_refused_at.is_none() {
-            return Err(CoreError::QuarantineItemNotMarked(
-                item.original_path.display().to_string(),
-            ));
+    /// Returns [`CoreError::PurgeNotConfirmed`] without the flag, and
+    /// [`CoreError::UnknownQuarantineItem`] when any id is not held; in both
+    /// cases nothing is removed.
+    pub fn purge_items(
+        &self,
+        db: &dyn DbAccess,
+        item_ids: &[Uuid],
+        confirmed: bool,
+    ) -> Result<PurgeReport> {
+        if !confirmed {
+            return Err(CoreError::PurgeNotConfirmed);
         }
-        self.destroy(db, &[item], "removed by the user after a refused restore")
+        // A repeated id would be destroyed once and then reported as failed.
+        let unique: std::collections::BTreeSet<Uuid> = item_ids.iter().copied().collect();
+        let items = with_db(db, |conn| {
+            unique
+                .iter()
+                .map(|&id| {
+                    self.find_item(conn, id)?
+                        .filter(QuarantineItem::is_held)
+                        .ok_or_else(|| CoreError::UnknownQuarantineItem(id.to_string()))
+                })
+                .collect::<Result<Vec<_>>>()
+        })?;
+        self.destroy(db, &items, "removed for good by the user")
     }
 
     /// Put back to held every row marked restored whose quarantine copy is
@@ -4783,7 +4795,7 @@ mod tests {
 
         let err = h
             .quarantine
-            .purge_item(&h.conn, item.id)
+            .purge_items(&h.conn, &[item.id], true)
             .expect_err("a restored item is not held");
 
         assert!(
@@ -4886,7 +4898,10 @@ mod tests {
         let item = h.quarantine.take(&h.conn, batch, &source).expect("take");
         mark_refused(&h, item.id);
 
-        let report = h.quarantine.purge_item(&h.conn, item.id).expect("remove");
+        let report = h
+            .quarantine
+            .purge_items(&h.conn, &[item.id], true)
+            .expect("remove");
 
         assert_eq!(report.purged_items, 1);
         assert_eq!(report.freed_bytes, 4);
@@ -4915,7 +4930,10 @@ mod tests {
             .open(&item.quarantine_path)
             .expect("hold the file open");
 
-        let report = h.quarantine.purge_item(&h.conn, item.id).expect("purge");
+        let report = h
+            .quarantine
+            .purge_items(&h.conn, &[item.id], true)
+            .expect("purge");
 
         assert_eq!(report.purged_items, 0);
         assert_eq!(report.failed_items, vec![item.id.to_string()]);
@@ -4923,7 +4941,11 @@ mod tests {
             report.failure_reasons.get(&item.id.to_string()),
             Some(&PurgeFailure::Locked)
         );
-        assert!(h.quarantine.find_item(&h.conn, item.id).expect("ledger").is_some());
+        assert!(h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("ledger")
+            .is_some());
     }
 
     /// The drawer lists a batch through `items_in_batch`; a row already put
@@ -4940,7 +4962,9 @@ mod tests {
             .quarantine
             .take(&h.conn, batch, &write(&h.work, "back.bin", b"back"))
             .expect("take");
-        h.quarantine.restore_item(&h.conn, back.id).expect("restore");
+        h.quarantine
+            .restore_item(&h.conn, back.id)
+            .expect("restore");
 
         let listed = h.quarantine.items_in_batch(&h.conn, batch).expect("list");
 
@@ -4948,10 +4972,11 @@ mod tests {
         assert_eq!(ids, vec![kept.id]);
     }
 
-    /// `purge_item` exists for the items the automatic purge will not touch;
-    /// it refuses anything else rather than becoming a second delete button.
+    /// K-020: any held item can be removed for good, but only behind the
+    /// drawer's "cannot be undone" confirmation; an unknown id in the list
+    /// refuses the whole call before anything is touched.
     #[test]
-    fn removing_an_item_by_hand_is_only_for_refused_restores() {
+    fn removing_items_for_good_needs_confirmation() {
         let h = harness(RetentionPolicy::default());
         let batch = h.quarantine.start_batch();
         let source = write(&h.work, "plain.bin", b"plain");
@@ -4959,20 +4984,31 @@ mod tests {
 
         let err = h
             .quarantine
-            .purge_item(&h.conn, item.id)
-            .expect_err("an unmarked item is left to the retention window");
-        assert!(
-            matches!(err, CoreError::QuarantineItemNotMarked(_)),
-            "got {err}"
-        );
-        assert_eq!(err.code(), "quarantine_item_not_marked");
+            .purge_items(&h.conn, &[item.id], false)
+            .expect_err("no confirmation");
+        assert!(matches!(err, CoreError::PurgeNotConfirmed), "got {err}");
+        assert_eq!(err.code(), "purge_not_confirmed");
         assert!(item.quarantine_path.exists());
 
-        let unknown = h
+        let mixed = h
             .quarantine
-            .purge_item(&h.conn, Uuid::new_v4())
+            .purge_items(&h.conn, &[item.id, Uuid::new_v4()], true)
             .expect_err("an unknown id");
-        assert!(matches!(unknown, CoreError::UnknownQuarantineItem(_)));
+        assert!(matches!(mixed, CoreError::UnknownQuarantineItem(_)));
+        assert!(item.quarantine_path.exists(), "nothing removed on refusal");
+
+        let report = h
+            .quarantine
+            .purge_items(&h.conn, &[item.id, item.id], true)
+            .expect("confirmed");
+        assert_eq!(report.purged_items, 1);
+        assert!(report.failed_items.is_empty());
+        assert!(!item.quarantine_path.exists());
+        assert!(h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("ledger")
+            .is_none());
     }
 
     /// M6: a cross-volume copy used to arrive with today's timestamps, so a

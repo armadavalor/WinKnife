@@ -18,8 +18,18 @@
 
   const store = quarantineStore;
 
-  /** The item the user asked to remove, waiting for confirmation. */
-  let pendingRemoval = $state<QuarantineItem | null>(null);
+  /**
+   * Items the user asked to remove for good, waiting for confirmation (K-020).
+   * `item` is set when it is a single item, so the dialog can name it (and,
+   * when its restore was refused, say how to keep it instead).
+   */
+  let pendingPurge = $state<{
+    ids: string[];
+    count: number;
+    bytes: number;
+    batchId?: string;
+    item?: QuarantineItem;
+  } | null>(null);
   /** "Remove for good now" was pressed and waits for confirmation. */
   let confirmPurge = $state(false);
   /** Path filter for the expanded item lists. */
@@ -40,11 +50,27 @@
     await store.purge();
   }
 
+  function askPurgeSelected(): void {
+    const ids = store.selected;
+    const picked = Object.values(store.items)
+      .flat()
+      .filter((item) => ids.includes(item.id));
+    const bytes = picked.reduce((sum, item) => sum + item.sizeBytes, 0);
+    pendingPurge = { ids, count: picked.length, bytes };
+  }
+
+  function askPurgeItem(item: QuarantineItem): void {
+    pendingPurge = { ids: [item.id], count: 1, bytes: item.sizeBytes, item };
+  }
+
   async function confirmRemoval(): Promise<void> {
-    const item = pendingRemoval;
-    pendingRemoval = null;
-    if (item) {
-      await store.purgeItem(item);
+    const pending = pendingPurge;
+    pendingPurge = null;
+    if (!pending) return;
+    if (pending.batchId) {
+      await store.purgeBatch(pending.batchId);
+    } else {
+      await store.purgeItems(pending.ids);
     }
   }
 </script>
@@ -128,6 +154,14 @@
                 ? t("quarantine.restoring")
                 : t("quarantine.restoreSelected", { count: store.selected.length })}
             </button>
+            <button
+              type="button"
+              class="rounded-lg px-2.5 py-1 text-xs text-risk-danger transition-colors hover:bg-surface-2 disabled:opacity-50"
+              disabled={busy}
+              onclick={askPurgeSelected}
+            >
+              {t("quarantine.removeSelected", { count: store.selected.length })}
+            </button>
           {/if}
         </div>
       </div>
@@ -163,25 +197,6 @@
       </p>
     {/if}
 
-    {#if store.removeFailed}
-      <p
-        class="select-text break-words border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-risk-danger"
-      >
-        {#if store.removeFailed.failure.kind === "stuck"}
-          {t("quarantine.removeFailed", { path: store.removeFailed.path })}
-        {:else if store.removeFailed.failure.kind === "notEligible"}
-          {t("quarantine.removeRefused", { path: store.removeFailed.path })}
-        {:else if store.removeFailed.failure.kind === "notMarked"}
-          {t("quarantine.removeNotMarked", { path: store.removeFailed.path })}
-        {:else}
-          {t("quarantine.removeError", {
-            path: store.removeFailed.path,
-            error: store.removeFailed.failure.error,
-          })}
-        {/if}
-      </p>
-    {/if}
-
     {#if store.actionError}
       <p
         role="alert"
@@ -210,7 +225,7 @@
           {/if}
           {#if result.failures.length > 0}
             <p class="mt-1 text-risk-danger">
-              {t("quarantine.purgeFailed", {
+              {t(store.purgeByHand ? "quarantine.purgeItemsFailed" : "quarantine.purgeFailed", {
                 count: result.failures.reduce((sum, f) => sum + f.count, 0),
               })}
             </p>
@@ -279,6 +294,20 @@
                       ? t("quarantine.hideItems")
                       : t("quarantine.showItems")}
                   </button>
+                  <button
+                    type="button"
+                    class="rounded-lg px-2.5 py-1 text-xs text-risk-danger transition-colors hover:bg-surface-2 disabled:opacity-50"
+                    disabled={busy}
+                    onclick={() =>
+                      (pendingPurge = {
+                        ids: [],
+                        count: batch.itemCount,
+                        bytes: batch.sizeBytes,
+                        batchId: batch.batchId,
+                      })}
+                  >
+                    {t("quarantine.removeBatch")}
+                  </button>
                 </div>
               </div>
               {#if store.restoring?.batchId === batch.batchId}
@@ -326,19 +355,20 @@
                           </span>
                         {/if}
                       </p>
+                      <div class="mt-1 flex items-center gap-2">
+                        <p class="flex-1 text-[0.7rem] text-risk-review">
+                          {#if isRestoreRefused(item)}{t("quarantine.restoreRefused")}{/if}
+                        </p>
+                        <button
+                          type="button"
+                          class="rounded-lg px-2 py-0.5 text-[0.7rem] text-risk-danger transition-colors hover:bg-surface-2 disabled:opacity-50"
+                          disabled={busy}
+                          onclick={() => askPurgeItem(item)}
+                        >
+                          {t("quarantine.removeItem")}
+                        </button>
+                      </div>
                       {#if isRestoreRefused(item)}
-                        <div class="mt-1 flex items-center gap-2">
-                          <p class="flex-1 text-[0.7rem] text-risk-review">
-                            {t("quarantine.restoreRefused")}
-                          </p>
-                          <button
-                            type="button"
-                            class="rounded-lg px-2 py-0.5 text-[0.7rem] text-risk-danger transition-colors hover:bg-surface-2"
-                            onclick={() => (pendingRemoval = item)}
-                          >
-                            {t("quarantine.removeItem")}
-                          </button>
-                        </div>
                         <p
                           class="mt-0.5 select-text break-all font-mono text-[0.7rem] text-ink-faint"
                         >
@@ -403,15 +433,18 @@
 />
 
 <ConfirmDialog
-  open={pendingRemoval !== null}
-  title={t("quarantine.removeTitle")}
-  message={t("quarantine.removeBody", {
-    path: truncatePath(pendingRemoval?.originalPath ?? "", 48),
+  open={pendingPurge !== null}
+  title={t("quarantine.purgeItemsTitle")}
+  message={t("quarantine.purgeItemsBody", {
+    count: pendingPurge?.count ?? 0,
+    size: formatBytes(pendingPurge?.bytes ?? 0),
   })}
-  note={t("quarantine.removeNote")}
-  detail={pendingRemoval?.quarantinePath}
-  warning={t("quarantine.removeWarning")}
+  note={pendingPurge?.item && isRestoreRefused(pendingPurge.item)
+    ? t("quarantine.removeNote")
+    : t("quarantine.purgeItemsNote")}
+  detail={pendingPurge?.item?.originalPath}
+  warning={t("quarantine.purgeItemsWarning")}
   confirmLabel={t("quarantine.removeAction")}
   onconfirm={confirmRemoval}
-  oncancel={() => (pendingRemoval = null)}
+  oncancel={() => (pendingPurge = null)}
 />
