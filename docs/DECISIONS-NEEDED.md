@@ -898,3 +898,9 @@ not ours to take.
 - [ ] 2026-10-25 (K-023): no firewall changes (block a port or program). Would be a persistent system change needing admin and a rollback story; revisit with the admin-tweaks item.
 - [ ] 2026-10-25 (K-023): no network calls of any kind, so remote addresses are shown as raw IPs (no reverse DNS, no geo-IP, no reputation lookup). Revisit only as an explicit opt-in.
 - [ ] 2026-10-25 (K-023): the list is a snapshot on open and on Refresh, not a live monitor; bytes per connection need ETW or admin and are out of scope.
+
+## Open items raised by the environment-variable editor (2026-10-25, phase 7)
+
+- [ ] 2026-10-25 (phase 7): deleting a user variable is a registry change, not a file deletion, so it goes through C1 like any other write. `tweak_undo.applied_*` is NOT NULL, so a delete stores `REG_NONE` + empty bytes as "absent after" instead of adding a migration — safest interpretation taken: undo of a delete only runs while the value is still absent, then restores the saved value and kind.
+- [ ] 2026-10-25 (phase 7): undo is one step, like C1 (a newer change supersedes the older row). Multi-step history was not asked for — left out.
+- [ ] 2026-10-25 (phase 7): env changes bypass the executor/`TweakRouter` (no scan, no recommendations); the page calls `env_vars_apply` / `env_vars_undo` directly, like the hosts editor. Revisit if C7 drift check should cover `env:` rows.
