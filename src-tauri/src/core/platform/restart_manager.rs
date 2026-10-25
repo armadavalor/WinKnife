@@ -28,6 +28,9 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+mod timed;
+pub use timed::{TimedRestartManager, CLOSE_TIMEOUT, QUERY_TIMEOUT};
+
 /// Files handed to one `RmRegisterResources` call.
 pub const REGISTER_BATCH: usize = 500;
 
@@ -237,6 +240,14 @@ pub enum RmError {
     /// No Restart Manager on this platform.
     #[error("the Restart Manager is only available on Windows")]
     Unsupported,
+    /// Windows did not answer within the bounded wait (issue #41).
+    #[error("Windows did not answer within {seconds} seconds ({call}); it may still finish later, try again")]
+    TimedOut {
+        /// The API that was waited on.
+        call: &'static str,
+        /// How long the caller waited.
+        seconds: u64,
+    },
 }
 
 /// One `RmGetList` round.
@@ -427,9 +438,14 @@ impl<A: RmApi> RestartManager for RmSessions<A> {
 /// The Restart Manager that talks to Windows.
 ///
 /// Queries work in any build; the polite close refuses unless the composition
-/// root armed real OS effects.
+/// root armed real OS effects. Both give up after a bounded wait
+/// ([`QUERY_TIMEOUT`], [`CLOSE_TIMEOUT`]).
 pub fn real_restart_manager() -> Arc<dyn RestartManager> {
-    Arc::new(RmSessions::new(SystemRmApi))
+    Arc::new(TimedRestartManager::new(
+        Arc::new(RmSessions::new(SystemRmApi)),
+        QUERY_TIMEOUT,
+        CLOSE_TIMEOUT,
+    ))
 }
 
 /// The real `rstrtmgr.dll` calls.

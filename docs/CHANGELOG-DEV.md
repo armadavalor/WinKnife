@@ -2668,3 +2668,21 @@ absent).
 - Tests against `MapRegistry` + in-memory DB: split/join round-trip, all four flags, validation, create/modify/delete → undo (kind kept), HKLM refusal, stale and outside-change refusals.
 
 **Deferred.** See DECISIONS-NEEDED, "Open items raised by the environment-variable editor".
+
+## 2026-10-25 — Cancel and timeouts for long operations (#41)
+
+- **A7, A9, A10** were already fixed by #62 (`full_hash_cancellable`, the
+  empty-folders Stop before the first progress event, the atomic treemap cache
+  save). Each was checked against the code; no change here.
+- **A8.** Folder duplicates now count members that could not be hashed in
+  full (locked, unreadable) into `unreadable`, so the UI warning shows them
+  instead of the folder quietly losing a file. Test holds a no-share handle.
+- **A11.** `RestorePointService::create` resets its busy flag through a drop
+  guard, so a panic mid-request no longer leaves the service stuck at "busy".
+  The bounded wait was already there (`HELPER_TIMEOUT`, 5 minutes).
+- **A12/A13.** `TimedRestartManager` wraps the real Restart Manager: the
+  "who uses this file" query gives up after `QUERY_TIMEOUT` (30 s) and the
+  polite close after `CLOSE_TIMEOUT` (60 s), with a new `RmError::TimedOut`
+  that the unlocker already shows as a failure message. The close stays the
+  same polite request; nothing is forced. Shortcut: a timed-out call keeps its
+  worker thread until Windows answers.

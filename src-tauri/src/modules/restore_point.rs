@@ -201,6 +201,15 @@ pub fn launch_mode(args: impl IntoIterator<Item = String>) -> LaunchMode {
     }
 }
 
+/// Clears the busy flag when dropped, so a panic cannot wedge the service.
+struct BusyReset<'a>(&'a AtomicBool);
+
+impl Drop for BusyReset<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// The app side of the module: status, create, open settings.
 pub struct RestorePointService {
     platform: Arc<dyn RestorePointPlatform>,
@@ -229,16 +238,17 @@ impl RestorePointService {
     ///
     /// # Errors
     /// Returns an error while another request is still running (one UAC prompt
-    /// at a time), or when this build may not reach the OS.
+    /// at a time), or when this build may not reach the OS. The busy flag is
+    /// cleared on every exit, a panic included.
     pub fn create(&self, description: &str) -> Result<CreateOutcome> {
         if self.busy.swap(true, Ordering::SeqCst) {
             return Err(CoreError::RestorePoint(
                 "a restore point is already being created".to_owned(),
             ));
         }
+        let _reset = BusyReset(&self.busy);
         let description = sanitize_description(description);
         let run = self.platform.run_helper(&description);
-        self.busy.store(false, Ordering::SeqCst);
         let outcome = outcome_from_run(run?);
         tracing::info!(?outcome, "restore point request finished");
         Ok(outcome)
@@ -470,6 +480,29 @@ mod tests {
             fake.descriptions(),
             vec!["ab".to_owned(), DEFAULT_DESCRIPTION.to_owned()]
         );
+    }
+
+    /// A helper that panics, standing in for any bug below `create`.
+    struct PanickingPlatform;
+
+    impl RestorePointPlatform for PanickingPlatform {
+        fn run_helper(&self, _description: &str) -> Result<HelperRun> {
+            panic!("helper blew up");
+        }
+        fn open_protection_settings(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_panic_mid_request_does_not_leave_the_service_busy() {
+        let service = RestorePointService::new(Arc::new(PanickingPlatform), Arc::new(MapRegistry::new()));
+        let first = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| service.create("x")));
+        assert!(first.is_err(), "the fake must panic");
+
+        let second = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| service.create("x")));
+        // Panicking again (not "already being created") proves the flag was reset.
+        assert!(second.is_err(), "a stuck busy flag would return an error instead");
     }
 
     #[test]

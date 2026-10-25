@@ -163,12 +163,13 @@ pub fn scan_folders(
     }
 
     let candidates = size_candidates(&tree, min_size);
-    let Some(hashes) = hash_files(&candidates, ctx, progress) else {
+    let Some((hashes, unhashable)) = hash_files(&candidates, ctx, progress) else {
         return FolderScan {
             cancelled: true,
             ..output
         };
     };
+    output.unreadable += unhashable;
     let groups = content_groups(&candidates, &hashes, ignored);
     output.findings = emit_findings(&groups, &tree, &hashes);
     output
@@ -295,12 +296,13 @@ fn size_candidates(tree: &Tree, min_size: u64) -> Vec<(PathBuf, Vec<Entry>)> {
         .collect()
 }
 
-/// Full hash of every candidate file once. `None` when cancelled.
+/// Full hash of every candidate file once, plus how many could not be read.
+/// `None` when cancelled.
 fn hash_files(
     candidates: &[(PathBuf, Vec<Entry>)],
     ctx: &DuplicateContext<'_>,
     progress: Option<ProgressSink<'_>>,
-) -> Option<HashMap<PathBuf, String>> {
+) -> Option<(HashMap<PathBuf, String>, u64)> {
     let paths: Vec<&PathBuf> = candidates
         .iter()
         .flat_map(|(_, entries)| entries.iter().map(|e| &e.path))
@@ -309,6 +311,7 @@ fn hash_files(
         .collect();
     let total = paths.len() as u64;
     let done = AtomicU64::new(0);
+    let unreadable = AtomicU64::new(0);
     let is_cancelled = || ctx.cancel.is_cancelled();
 
     let hashes: HashMap<PathBuf, String> = paths
@@ -317,7 +320,19 @@ fn hash_files(
             if is_cancelled() {
                 return None;
             }
-            let hash = full_hash_cancellable(path, &is_cancelled).ok()?;
+            let hash = match full_hash_cancellable(path, &is_cancelled) {
+                Ok(hash) => hash,
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => return None,
+                Err(err) => {
+                    unreadable.fetch_add(1, Ordering::Relaxed);
+                    tracing::debug!(
+                        path = %path.display(),
+                        error = %err,
+                        "folder member skipped: could not be read in full"
+                    );
+                    return None;
+                }
+            };
             let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(report) = progress {
                 report(&DuplicateProgress {
@@ -331,7 +346,7 @@ fn hash_files(
         })
         .collect();
 
-    (!ctx.cancel.is_cancelled()).then_some(hashes)
+    (!ctx.cancel.is_cancelled()).then(|| (hashes, unreadable.load(Ordering::Relaxed)))
 }
 
 /// Group id -> member folders, outermost duplicates only, ignored groups out.
@@ -834,6 +849,25 @@ mod tests {
 
         // Only the identical `sub` folders are left as a group.
         assert!(folders_of(&found).iter().all(|p| p.ends_with("sub")));
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_hashed_is_counted_as_unreadable() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().expect("tempdir");
+        album(&dir.path().join("One"), b"bbbb-photo");
+        album(&dir.path().join("Two"), b"bbbb-photo");
+        // Exclusive handle: the walk still lists it, the hash open fails.
+        let _hold = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(dir.path().join("Two").join("a.jpg"))
+            .expect("hold");
+
+        let found = scan(dir.path());
+
+        assert_eq!(found.unreadable, 1, "{found:?}");
+        assert!(!found.cancelled);
     }
 
     #[test]
