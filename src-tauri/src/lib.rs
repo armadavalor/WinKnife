@@ -340,6 +340,12 @@ pub fn manage_state<R: tauri::Runtime>(
         app_data_dir.to_path_buf(),
     )));
 
+    // Environment variables (K-024): user ones through C1 `tweak_undo`, system
+    // ones read-only; `SystemRegistry` refuses writes until OS effects are armed.
+    app.manage(Arc::new(modules::env_vars::EnvVarService::new(Arc::new(
+        core::platform::SystemRegistry,
+    ))));
+
     // Legacy panels: only opens Windows' own windows, gated like Explorer
     // (module spec 10).
     app.manage(Arc::new(modules::legacy_panels::LegacyPanelsService::new(
@@ -434,6 +440,10 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::hosts_restore,
         commands::hosts_reveal_backup,
         commands::hosts_flush_dns,
+        commands::env_vars_list,
+        commands::env_vars_preview,
+        commands::env_vars_apply,
+        commands::env_vars_undo,
         commands::legacy_panels_list,
         commands::legacy_panels_open,
         commands::keep_awake_start,

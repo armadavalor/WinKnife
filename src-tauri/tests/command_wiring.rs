@@ -325,6 +325,27 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "hosts_flush_dns",
             args: json!({}),
         },
+        // Read-only: HKCU and HKLM environment values are only read.
+        Probe {
+            command: "env_vars_list",
+            args: json!({}),
+        },
+        // A system-scope change is refused before any registry call.
+        Probe {
+            command: "env_vars_preview",
+            args: json!({ "change": { "name": "__WIRING_PROBE__", "scope": "system",
+                "new": { "value": "x", "expand": false }, "expected": null } }),
+        },
+        Probe {
+            command: "env_vars_apply",
+            args: json!({ "change": { "name": "__WIRING_PROBE__", "scope": "system",
+                "new": { "value": "x", "expand": false }, "expected": null } }),
+        },
+        // No undo record exists for it, so `undo` refuses before the registry.
+        Probe {
+            command: "env_vars_undo",
+            args: json!({ "name": "__WIRING_PROBE__" }),
+        },
         // Read-only: checks which System32 files exist.
         Probe {
             command: "legacy_panels_list",
