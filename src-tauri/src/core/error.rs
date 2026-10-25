@@ -174,6 +174,10 @@ pub enum CoreError {
     #[error("hosts file: {0}")]
     Hosts(String),
 
+    /// Reading the socket tables failed (module C14).
+    #[error("network: {0}")]
+    Network(String),
+
     /// Windows refused the change because WinKnife runs without administrator
     /// rights (K-021). The UI offers "Restart as administrator" for this code.
     #[error("this needs administrator rights: {0}")]
@@ -223,6 +227,7 @@ impl CoreError {
             Self::SchemaTooNew { .. } => "schema_too_new",
             Self::Busy(_) => "busy",
             Self::Hosts(_) => "hosts",
+            Self::Network(_) => "network",
             Self::NeedsAdmin(_) => "needs_admin",
             Self::ElevationBlocked => "elevation_blocked",
         }

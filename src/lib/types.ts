@@ -1163,3 +1163,94 @@ export interface SignerInfo {
   state: "signed" | "unsigned" | "unknown";
   publisher: string | null;
 }
+
+/* -------------------------------------------------------------------------
+ * modules/network.rs
+ * ---------------------------------------------------------------------- */
+
+/** Where a socket can be reached from. */
+export type NetworkReach = "allInterfaces" | "localOnly" | "oneInterface";
+
+/** One line on the Network page (`network_list`). */
+export interface PortRow {
+  protocol: "TCP" | "UDP";
+  kind: "listening" | "connection";
+  /** `LISTEN`, `ESTABLISHED`; null for UDP. */
+  state: string | null;
+  localAddress: string;
+  localPort: number;
+  remoteAddress: string | null;
+  remotePort: number | null;
+  reach: NetworkReach;
+  pid: number;
+  processName: string;
+  exePath: string | null;
+  reason: string;
+}
+
+/* -------------------------------------------------------------------------
+ * Environment variables (C15, K-024) — mirrors modules/env_vars.rs
+ * ---------------------------------------------------------------------- */
+
+/** `user`: HKCU, editable. `system`: HKLM, always read-only. */
+export type EnvScope = "user" | "system";
+
+/** A value and its kind: `expand` true = REG_EXPAND_SZ, false = REG_SZ. */
+export interface EnvValue {
+  value: string;
+  expand: boolean;
+}
+
+export type EnvFlagKind = "empty" | "duplicate" | "missing" | "unresolved";
+
+export interface EnvEntryFlag {
+  kind: EnvFlagKind;
+  reason: string;
+}
+
+/** One `;`-separated entry of a list value such as PATH. */
+export interface EnvPathEntry {
+  text: string;
+  /** After `%VAR%` expansion, when it differs from `text`. */
+  expanded: string | null;
+  flags: EnvEntryFlag[];
+}
+
+export interface EnvVar {
+  name: string;
+  value: string;
+  expand: boolean;
+  scope: EnvScope;
+  editable: boolean;
+  readOnlyReason: string | null;
+  isList: boolean;
+  entries: EnvPathEntry[];
+}
+
+/** A change WinKnife made that `env_vars_undo` can still put back. */
+export interface EnvUndoEntry {
+  name: string;
+  deleted: boolean;
+}
+
+/** `env_vars_list`. Read-only. */
+export interface EnvListing {
+  user: EnvVar[];
+  system: EnvVar[];
+  undo: EnvUndoEntry[];
+}
+
+/** `new: null` deletes; `expected` is what the user was shown (null when adding). */
+export interface EnvChange {
+  name: string;
+  scope: EnvScope;
+  new: EnvValue | null;
+  expected: EnvValue | null;
+}
+
+/** `env_vars_preview`: what would change. Writes nothing. */
+export interface EnvPreview {
+  before: EnvValue | null;
+  after: EnvValue | null;
+  diff: HostsDiffLine[];
+}

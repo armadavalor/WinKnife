@@ -43,9 +43,11 @@ register_modules! {
     file_unlocker => file_unlocker::FileUnlockerModule,
     legacy_panels => legacy_panels::LegacyPanelsModule,
     hosts => hosts::HostsModule,
+    env_vars => env_vars::EnvVarsModule,
     tweaks => tweaks::TweaksModule,
     context_menu => context_menu::ContextMenuModule,
     apps => apps::AppsModule,
+    network => network::NetworkModule,
 }
 
 /// Build the application's module registry.
@@ -127,9 +129,11 @@ mod tests {
             "file-unlocker",
             "legacy-panels",
             "hosts",
+            "env-vars",
             "tweaks",
             "context-menu",
             "apps",
+            "network",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }
