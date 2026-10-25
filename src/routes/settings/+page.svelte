@@ -28,6 +28,14 @@
   import { settingsStore } from "$lib/stores/settings.svelte";
   import { GLOW_VARIANTS } from "$lib/glow";
   import { glow } from "$lib/stores/glow.svelte";
+  import { locale } from "$lib/stores/locale.svelte";
+  import type { Locale } from "$lib/localePref";
+
+  // Each language is named in itself, so it stays readable from the wrong one.
+  const LANGUAGE_CHOICES: { id: Locale; label: string }[] = [
+    { id: "en", label: "English" },
+    { id: "tr", label: "Türkçe" },
+  ];
   import { motion } from "$lib/stores/motion.svelte";
   import { THEMES, theme } from "$lib/stores/theme.svelte";
   import { isApiError, type AppSettings, type ProfilePreview } from "$lib/types";
@@ -273,6 +281,29 @@
             onclick={() => glow.set(id)}
           >
             {t(`settings.glow.${id}` as TranslationKey)}
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-surface-2 pt-4">
+      <div class="min-w-0">
+        <p class="text-sm text-ink">{t("settings.languageLabel")}</p>
+        <p class="text-xs text-ink-faint">{t("settings.languageHint")}</p>
+      </div>
+      <div class="flex shrink-0 gap-1" role="radiogroup" aria-label={t("settings.languageLabel")}>
+        {#each LANGUAGE_CHOICES as choice (choice.id)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={locale.current === choice.id}
+            lang={choice.id}
+            class="rounded-lg px-3 py-1 text-xs font-medium transition-colors {locale.current === choice.id
+              ? 'bg-accent-soft text-ink'
+              : 'border border-surface-3 text-ink-muted hover:bg-surface-2'}"
+            onclick={() => locale.set(choice.id)}
+          >
+            {choice.label}
           </button>
         {/each}
       </div>

@@ -8,6 +8,7 @@
  * putting something back the way it was found.
  */
 import { execute, startupEnable, startupScan } from "$lib/api";
+import { t } from "$lib/i18n";
 import {
   isApiError,
   type Recommendation,
@@ -123,7 +124,7 @@ class StartupStore {
     if (this.busy !== null || this.status === "loading") return;
     const recommendation = this.byEntry.get(entry.id);
     if (this.scanId === null || !recommendation) {
-      this.error = "This entry can no longer be changed; refresh the list.";
+      this.error = t("exec.entryStale");
       return;
     }
     this.busy = entry.id;
@@ -134,7 +135,7 @@ class StartupStore {
       // A skip carries the reason Rust refused; showing it beats a silent
       // toggle that springs back. A move that happened but left something
       // undone says so too (adversarial review follow-up A).
-      this.lastReport = item ? itemNote(item) : null;
+      this.lastReport = item ? itemNote(item, t("exec.needsAdmin")) : null;
       await this.#doReload();
     } catch (error: unknown) {
       this.error = message(error);

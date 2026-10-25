@@ -23,6 +23,7 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import InfoTip from "$lib/components/InfoTip.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
+  import { formatCount } from "$lib/format";
   import { t, tDynamic, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import type { CloseOutcome, LockRow, UnlockerReport } from "$lib/types";
@@ -233,7 +234,7 @@
 
     {#if report.capped}
       <p class="rounded-lg border border-risk-warning/40 p-3 text-xs leading-relaxed text-risk-warning">
-        {t("unlocker.capNote", { cap: report.cap.toLocaleString() })}
+        {t("unlocker.capNote", { cap: formatCount(report.cap) })}
       </p>
     {/if}
     {#if report.unreadable > 0}

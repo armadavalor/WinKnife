@@ -20,6 +20,7 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import LoadingNote from "$lib/components/LoadingNote.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
+  import { formatDateTime } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import {
@@ -197,7 +198,7 @@
   }
 
   function formatDate(iso: string): string {
-    return new Date(iso).toLocaleString();
+    return formatDateTime(iso);
   }
 </script>
 

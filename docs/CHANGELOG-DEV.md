@@ -2614,3 +2614,13 @@ Snap Assist and clock seconds applied (values 1, 0, 1) and undone (all back to
 absent).
 
 **Deferred.** See DECISIONS-NEEDED, "Open items raised by the tweaks catalogue".
+
+## 2026-10-25 — UI language: English + Türkçe (K-022)
+
+**Built.** Settings → Language (English / Türkçe). Choice kept in localStorage `winknife.locale`; with no choice the default is Turkish when `navigator.language` starts with `tr`, else English. Switching applies live: a reactive `locale` store, `<html lang>` updated, and the layout re-renders under `{#key locale.current}` (`t()` itself stays a plain lookup, no i18n library).
+- `i18n.ts`: full TR dictionary for every key (terms: Karantina, Temizleyici, Yinelenenler, Boş klasörler, Başlangıç, İnce ayarlar, Disk haritası, Kapatma zamanlayıcısı, Bağlam menüsü, Hosts düzenleyici; "sen" register). Module names/descriptions for the sidebar moved from hardcoded to `module.<id>.*` keys.
+- Store-side hardcoded errors/notes (`execNotes`, startup, context-menu, tweaks, elevation) now go through `t()`.
+- `format.ts`: bytes, counts, remaining time, dates and relative days follow the active language.
+- `i18n-parity.test.ts`: EN/TR key parity and `{placeholder}` parity; `localePref.test.ts`, `format.test.ts` extended.
+
+**Deferred.** Rust-generated reasons/errors stay English (see DECISIONS-NEEDED, 2026-10-25 K-022).

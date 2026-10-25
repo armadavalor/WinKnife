@@ -57,15 +57,18 @@ export function stopSummary(
   return { moved, left };
 }
 
-/** Shown instead of the raw "access denied" (K-021); the banner offers the restart. */
+/** English default for `itemNote`; the stores pass the translated text (K-021). */
 export const NEEDS_ADMIN_NOTE =
   "This needs administrator rights — use Restart as admin in the sidebar.";
 
 /** One line for a single result, or null when there is nothing to say. */
-export function itemNote(item: ExecItemResult): string | null {
+export function itemNote(
+  item: ExecItemResult,
+  needsAdminNote: string = NEEDS_ADMIN_NOTE,
+): string | null {
   if (item.outcome.status === "skipped") return item.outcome.reason;
   if (item.outcome.status === "failed") {
-    return item.outcome.needsAdmin ? NEEDS_ADMIN_NOTE : item.outcome.error;
+    return item.outcome.needsAdmin ? needsAdminNote : item.outcome.error;
   }
   return warningsNote(warningsOf(item));
 }
