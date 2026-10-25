@@ -2495,3 +2495,36 @@ settings save.
   known and inside the fence; unknown pack ids and invalid retention are
   refused by the settings merge. Test: a hand-crafted profile naming a fenced
   or unknown tweak is refused with no registry writes and no undo rows.
+
+## 2026-10-25 — Quarantine purge feedback and drawer QoL
+
+**Fixed.** "Remove for good now" looked broken. It runs only the retention
+purge and the size cap, so items still inside their keeping period stay, and
+the drawer said nothing when nothing was due. On top of that,
+`items_in_batch` also listed restored rows, so a batch kept showing items that
+were already gone from quarantine.
+
+- `items_in_batch` filters `restored_at IS NULL`. Test:
+  `a_restored_item_is_not_listed_in_its_batch`.
+- `PurgeReport.failureReasons` gives each failed id a reason: `locked`,
+  `accessDenied`, `outsideQuarantine` or `other`, mapped from the io error.
+  Tests: `a_purge_blocked_by_an_open_file_reports_it_as_locked`, and the climb
+  test now asserts `outsideQuarantine`.
+- Drawer:
+  - the purge asks for confirmation;
+  - the button shows "Removing…" while it runs;
+  - a status line always follows: either what was removed, the reasons for any
+    failures (with an admin hint for access denied), or when the oldest group
+    becomes due.
+  - Expanded lists are fetched again, so purged rows leave at once and failed
+    ones stay with a reason badge.
+- QoL:
+  - a path filter;
+  - per-item checkboxes with select-all-shown;
+  - "Restore selected", which reuses `quarantine_restore_item` one item at a
+    time.
+  - No new deletion path: the purge scope is unchanged.
+- The view logic lives in `src/lib/stores/quarantineView.ts`, with node tests.
+
+**Deferred.** Removing selected items for good before their keeping period
+ends would be a new deletion path; it is left for an explicit decision.

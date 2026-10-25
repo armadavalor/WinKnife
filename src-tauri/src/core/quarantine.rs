@@ -20,6 +20,7 @@
 //! verification removes only what the move created and leaves the original
 //! untouched.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -263,12 +264,47 @@ pub struct PurgeReport {
     /// So eviction stays item-level and the report names the batches it
     /// touched, for the drawer to show (security review M5).
     pub affected_batches: Vec<String>,
+    /// Why each of `failed_items` stayed, keyed by item id, so the drawer can
+    /// say "in use" or "access denied" instead of a bare count.
+    #[serde(default)]
+    pub failure_reasons: BTreeMap<String, PurgeFailure>,
+}
+
+/// Why one item could not be purged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PurgeFailure {
+    /// Another program has the file open (sharing or lock violation).
+    Locked,
+    /// Windows refused access; running as administrator may help.
+    AccessDenied,
+    /// The ledger row points outside the quarantine root; never touched.
+    OutsideQuarantine,
+    /// Anything else; the log has the detail.
+    Other,
+}
+
+impl PurgeFailure {
+    fn from_io(err: &std::io::Error) -> Self {
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        const ERROR_LOCK_VIOLATION: i32 = 33;
+        match err.raw_os_error() {
+            Some(ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION) => Self::Locked,
+            _ if err.kind() == std::io::ErrorKind::PermissionDenied => Self::AccessDenied,
+            _ => Self::Other,
+        }
+    }
 }
 
 impl PurgeReport {
     /// Whether anything at all happened.
     pub fn is_empty(&self) -> bool {
         self.purged_items == 0 && self.failed_items.is_empty()
+    }
+
+    fn failed(&mut self, item: Uuid, why: PurgeFailure) {
+        self.failed_items.push(item.to_string());
+        self.failure_reasons.insert(item.to_string(), why);
     }
 
     /// Record that `batch` lost an item.
@@ -283,6 +319,7 @@ impl PurgeReport {
         self.purged_items += other.purged_items;
         self.freed_bytes += other.freed_bytes;
         self.failed_items.extend(other.failed_items);
+        self.failure_reasons.extend(other.failure_reasons);
         for batch in other.affected_batches {
             if !self.affected_batches.contains(&batch) {
                 self.affected_batches.push(batch);
@@ -894,7 +931,8 @@ impl Quarantine {
         Ok(items)
     }
 
-    /// Items of one batch, restored ones included, oldest first.
+    /// Items of one batch still held, oldest first. Restored rows are the
+    /// drawer's history, not its contents, so they stay out (2026-10-25).
     ///
     /// # Errors
     /// Returns an error if the ledger cannot be read.
@@ -903,7 +941,7 @@ impl Quarantine {
             "SELECT id, batch_id, original_path, quarantine_path, size_bytes,
                     quarantined_at, purge_after, restored_at, restore_refused_at
              FROM quarantine
-             WHERE batch_id = ?1
+             WHERE batch_id = ?1 AND restored_at IS NULL
              ORDER BY quarantined_at ASC",
         )?;
         let (items, _) = collect_items(stmt.query_map([batch.to_string()], row_to_item)?)?;
@@ -1033,7 +1071,7 @@ impl Quarantine {
                     path = %item.quarantine_path.display(),
                     "refusing to purge a path that climbs with `..`"
                 );
-                report.failed_items.push(item.id.to_string());
+                report.failed(item.id, PurgeFailure::OutsideQuarantine);
                 continue;
             }
             if !path_compare::is_inside(&self.root, &item.quarantine_path) {
@@ -1043,7 +1081,7 @@ impl Quarantine {
                     root = %self.root.display(),
                     "refusing to purge a path outside the quarantine root"
                 );
-                report.failed_items.push(item.id.to_string());
+                report.failed(item.id, PurgeFailure::OutsideQuarantine);
                 continue;
             }
 
@@ -1076,7 +1114,7 @@ impl Quarantine {
                 }
                 Err(err) => {
                     tracing::warn!(item = %item.id, error = %err, "purge failed, keeping the row");
-                    report.failed_items.push(item.id.to_string());
+                    report.failed(item.id, PurgeFailure::from_io(&err));
                 }
             }
         }
@@ -3342,6 +3380,10 @@ mod tests {
 
         assert_eq!(report.purged_items, 0, "nothing outside may be destroyed");
         assert_eq!(report.failed_items, vec![item.id.to_string()]);
+        assert_eq!(
+            report.failure_reasons.get(&item.id.to_string()),
+            Some(&PurgeFailure::OutsideQuarantine)
+        );
         assert!(outside.exists(), "the user's file must survive");
         assert_eq!(fs::read(&outside).expect("read"), b"do not touch");
         assert!(
@@ -4116,6 +4158,7 @@ mod tests {
             freed_bytes: 2,
             failed_items: Vec::new(),
             affected_batches: vec![Uuid::nil().to_string()],
+            failure_reasons: BTreeMap::new(),
         })
         .expect("serialize");
         assert!(json.get("affectedBatches").is_some(), "got {json}");
@@ -4853,6 +4896,56 @@ mod tests {
             .find_item(&h.conn, item.id)
             .expect("ledger")
             .is_none());
+    }
+
+    /// A purge that cannot remove a file says why, so the drawer can tell
+    /// "in use" apart from anything else (2026-10-25).
+    #[cfg(windows)]
+    #[test]
+    fn a_purge_blocked_by_an_open_file_reports_it_as_locked() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let h = harness(RetentionPolicy::default());
+        let batch = h.quarantine.start_batch();
+        let source = write(&h.work, "busy.bin", b"busy");
+        let item = h.quarantine.take(&h.conn, batch, &source).expect("take");
+        mark_refused(&h, item.id);
+        let _open = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&item.quarantine_path)
+            .expect("hold the file open");
+
+        let report = h.quarantine.purge_item(&h.conn, item.id).expect("purge");
+
+        assert_eq!(report.purged_items, 0);
+        assert_eq!(report.failed_items, vec![item.id.to_string()]);
+        assert_eq!(
+            report.failure_reasons.get(&item.id.to_string()),
+            Some(&PurgeFailure::Locked)
+        );
+        assert!(h.quarantine.find_item(&h.conn, item.id).expect("ledger").is_some());
+    }
+
+    /// The drawer lists a batch through `items_in_batch`; a row already put
+    /// back must not show up there as if it were still held (2026-10-25).
+    #[test]
+    fn a_restored_item_is_not_listed_in_its_batch() {
+        let h = harness(RetentionPolicy::default());
+        let batch = h.quarantine.start_batch();
+        let kept = h
+            .quarantine
+            .take(&h.conn, batch, &write(&h.work, "kept.bin", b"kept"))
+            .expect("take");
+        let back = h
+            .quarantine
+            .take(&h.conn, batch, &write(&h.work, "back.bin", b"back"))
+            .expect("take");
+        h.quarantine.restore_item(&h.conn, back.id).expect("restore");
+
+        let listed = h.quarantine.items_in_batch(&h.conn, batch).expect("list");
+
+        let ids: Vec<_> = listed.iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec![kept.id]);
     }
 
     /// `purge_item` exists for the items the automatic purge will not touch;

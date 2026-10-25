@@ -13,12 +13,32 @@
   import { t } from "$lib/i18n";
   import { isRestoreRefused, refusedHeld, warningsOf } from "$lib/stores/execNotes";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
+  import { filterItems } from "$lib/stores/quarantineView";
   import type { QuarantineItem } from "$lib/types";
 
   const store = quarantineStore;
 
   /** The item the user asked to remove, waiting for confirmation. */
   let pendingRemoval = $state<QuarantineItem | null>(null);
+  /** "Remove for good now" was pressed and waits for confirmation. */
+  let confirmPurge = $state(false);
+  /** Path filter for the expanded item lists. */
+  let query = $state("");
+
+  const anyExpanded = $derived(Object.keys(store.items).length > 0);
+  /** Ids of the items the filter leaves showing, across expanded batches. */
+  const shownIds = $derived(
+    Object.values(store.items).flatMap((list) => filterItems(list, query).map((item) => item.id)),
+  );
+  const allShownTicked = $derived(
+    shownIds.length > 0 && shownIds.every((id) => store.selected.includes(id)),
+  );
+  const busy = $derived(store.purging || store.restoringSelected || store.restoring !== null);
+
+  async function runPurge(): Promise<void> {
+    confirmPurge = false;
+    await store.purge();
+  }
 
   async function confirmRemoval(): Promise<void> {
     const item = pendingRemoval;
@@ -62,11 +82,56 @@
       <button
         type="button"
         class="btn-secondary px-2.5! py-1! text-xs!"
-        onclick={() => store.purge()}
+        disabled={busy}
+        aria-busy={store.purging}
+        onclick={() => (confirmPurge = true)}
       >
-        {t("quarantine.purgeNow")}
+        {store.purging ? t("quarantine.purging") : t("quarantine.purgeNow")}
       </button>
     </div>
+
+    {#if anyExpanded}
+      <div class="flex flex-col gap-2 border-b border-surface-2 px-5 py-3">
+        <input
+          type="search"
+          class="w-full rounded-lg border border-surface-2 bg-surface-0 px-2.5 py-1 text-xs"
+          placeholder={t("quarantine.filter")}
+          aria-label={t("quarantine.filter")}
+          bind:value={query}
+        />
+        <div class="flex items-center gap-2 text-xs">
+          <label class="flex flex-1 items-center gap-2 text-ink-muted">
+            <input
+              type="checkbox"
+              checked={allShownTicked}
+              disabled={shownIds.length === 0}
+              onchange={() => store.toggleAll(shownIds)}
+            />
+            {t("quarantine.selectAll")}
+          </label>
+          {#if store.selected.length > 0}
+            <button
+              type="button"
+              class="btn-ghost px-2! py-1! text-xs!"
+              onclick={() => (store.selected = [])}
+            >
+              {t("quarantine.clearSelection")}
+            </button>
+            <button
+              type="button"
+              class="btn-primary px-2.5! py-1! text-xs!"
+              disabled={busy}
+              aria-busy={store.restoringSelected}
+              onclick={() => store.restoreSelected()}
+            >
+              {store.restoringSelected
+                ? t("quarantine.restoring")
+                : t("quarantine.restoreSelected", { count: store.selected.length })}
+            </button>
+          {/if}
+        </div>
+      </div>
+    {/if}
 
     <!--
       Architect addition B: two things the ledger has always known and never
@@ -126,23 +191,37 @@
       </p>
     {/if}
 
-    {#if store.lastPurge && store.lastPurge.affectedBatches.length > 0}
-      <p
+    {#if store.purgeResult}
+      {@const result = store.purgeResult}
+      <div
+        role="status"
         class="border-b border-surface-2 bg-surface-2/60 px-5 py-3 text-xs leading-relaxed text-ink-muted"
       >
-        {t("quarantine.purged", {
-          count: store.lastPurge.purgedItems,
-          size: formatBytes(store.lastPurge.freedBytes),
-        })}
-        {t("quarantine.affectedBatches", {
-          count: store.lastPurge.affectedBatches.length,
-        })}
-        {#if store.lastPurge.failedItems.length > 0}
-          {t("quarantine.purgeFailed", {
-            count: store.lastPurge.failedItems.length,
-          })}
+        {#if result.kind === "nothingDue"}
+          {result.nextDue
+            ? t("quarantine.purgeNothingDue", { when: formatDateTime(result.nextDue) })
+            : t("quarantine.purgeNothingHeld")}
+        {:else}
+          {#if result.count > 0}
+            <p class="text-ink">
+              {t("quarantine.purged", { count: result.count, size: formatBytes(result.bytes) })}
+              {t("quarantine.affectedBatches", { count: result.batches })}
+            </p>
+          {/if}
+          {#if result.failures.length > 0}
+            <p class="mt-1 text-risk-danger">
+              {t("quarantine.purgeFailed", {
+                count: result.failures.reduce((sum, f) => sum + f.count, 0),
+              })}
+            </p>
+            {#each result.failures as failure (failure.reason)}
+              <p class="mt-0.5 text-risk-danger">
+                {t(`quarantine.purgeReason.${failure.reason}`, { count: failure.count })}
+              </p>
+            {/each}
+          {/if}
         {/if}
-      </p>
+      </div>
     {/if}
 
     <div class="flex-1 overflow-y-auto px-5 py-4">
@@ -222,8 +301,17 @@
 
               {#if store.items[batch.batchId]}
                 <ul class="border-t border-surface-2 px-4 py-2">
-                  {#each store.items[batch.batchId] as item (item.id)}
-                    <li class="py-1.5">
+                  {#each filterItems(store.items[batch.batchId], query) as item (item.id)}
+                    {@const failedWhy = store.lastPurge?.failureReasons?.[item.id]}
+                    <li class="flex gap-2 py-1.5">
+                      <input
+                        type="checkbox"
+                        class="mt-0.5 shrink-0"
+                        aria-label={t("quarantine.selectItem", { path: item.originalPath })}
+                        checked={store.selected.includes(item.id)}
+                        onchange={() => store.toggleSelected(item.id)}
+                      />
+                      <div class="min-w-0 flex-1">
                       <p
                         class="truncate font-mono text-[0.7rem] text-ink-muted"
                         title={item.originalPath}
@@ -232,6 +320,11 @@
                       </p>
                       <p class="text-[0.7rem] text-ink-faint">
                         {formatBytes(item.sizeBytes)}
+                        {#if failedWhy}
+                          <span class="ml-1 rounded bg-risk-danger/15 px-1.5 py-px text-risk-danger">
+                            {t(`quarantine.failedBadge.${failedWhy}`)}
+                          </span>
+                        {/if}
                       </p>
                       {#if isRestoreRefused(item)}
                         <div class="mt-1 flex items-center gap-2">
@@ -252,7 +345,10 @@
                           {t("quarantine.heldAt")}: {item.quarantinePath}
                         </p>
                       {/if}
+                      </div>
                     </li>
+                  {:else}
+                    <li class="py-1.5 text-[0.7rem] text-ink-faint">{t("quarantine.noMatch")}</li>
                   {/each}
                 </ul>
               {/if}
@@ -295,6 +391,16 @@
     </div>
   </aside>
 {/if}
+
+<ConfirmDialog
+  open={confirmPurge}
+  title={t("quarantine.purgeTitle")}
+  message={t("quarantine.purgeBody")}
+  warning={t("quarantine.purgeWarning")}
+  confirmLabel={t("quarantine.purgeNow")}
+  onconfirm={runPurge}
+  oncancel={() => (confirmPurge = false)}
+/>
 
 <ConfirmDialog
   open={pendingRemoval !== null}
