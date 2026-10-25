@@ -46,6 +46,7 @@ register_modules! {
     env_vars => env_vars::EnvVarsModule,
     tweaks => tweaks::TweaksModule,
     context_menu => context_menu::ContextMenuModule,
+    repair => repair::RepairModule,
     apps => apps::AppsModule,
     network => network::NetworkModule,
 }
@@ -132,6 +133,7 @@ mod tests {
             "env-vars",
             "tweaks",
             "context-menu",
+            "repair",
             "apps",
             "network",
         ] {

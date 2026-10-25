@@ -34,6 +34,7 @@
     panels: "app-window",
     restore: "history",
     hosts: "globe",
+    wrench: "wrench",
     menu: "list",
     apps: "layout-grid",
     network: "globe",

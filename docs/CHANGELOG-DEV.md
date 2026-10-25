@@ -2646,6 +2646,12 @@ absent).
 **Decisions.** No new strings, no backend change. See `docs/phases/PHASE-7-a11y.md`.
 **Deferred.** Graphite `ink-muted` on `accent-soft` (3.88:1, hover/active only).
 
+## 2026-10-25 — Phase 7: repair kit (C6)
+
+**Built.** New `repair` module: SFC and DISM (CheckHealth, ScanHealth, RestoreHealth, AnalyzeComponentStore) on click, exact command shown, live output over `repair:output`, one-line verdict, full log under `log_dir` with "Open log". `SystemRepairRunner` (CREATE_NO_WINDOW, UTF-16/OEM decoding, cancel kills the child) or `FakeRepairRunner` when real OS effects are not armed.
+**Decisions.** K-025. RestoreHealth and sfc confirm first; unelevated runs return `needs_admin`. See `docs/phases/PHASE-7-repair.md`.
+**Deferred.** StartComponentCleanup; verdict parsing is English-only with exit-code fallback; repair logs are not pruned (DECISIONS-NEEDED).
+
 ---
 
 ## 2026-10-25 — C19: installed apps
