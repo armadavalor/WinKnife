@@ -107,10 +107,11 @@ mod sys {
     use std::time::Duration;
     use windows::core::{w, HSTRING, PCWSTR};
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::Security::{
+        GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    };
     use windows::Win32::System::Threading::{
-        GetCurrentProcess, OpenProcess, OpenProcessToken, WaitForSingleObject,
-        PROCESS_SYNCHRONIZE,
+        GetCurrentProcess, OpenProcess, OpenProcessToken, WaitForSingleObject, PROCESS_SYNCHRONIZE,
     };
     use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW};
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -157,7 +158,11 @@ mod sys {
             Ok(()) => Ok(RelaunchOutcome::Started),
             Err(err) => {
                 let hr = err.code().0 as u32;
-                let code = if hr & 0xFFFF_0000 == 0x8007_0000 { hr & 0xFFFF } else { hr };
+                let code = if hr & 0xFFFF_0000 == 0x8007_0000 {
+                    hr & 0xFFFF
+                } else {
+                    hr
+                };
                 Ok(if code == WIN32_CANCELLED {
                     RelaunchOutcome::Declined
                 } else {
@@ -217,10 +222,7 @@ mod tests {
             relaunch_parameters(Some("startup"), true, 4242),
             "--module startup --dry-run --after-elevation 4242"
         );
-        assert_eq!(
-            relaunch_parameters(None, false, 7),
-            "--after-elevation 7"
-        );
+        assert_eq!(relaunch_parameters(None, false, 7), "--after-elevation 7");
     }
 
     #[test]
@@ -245,14 +247,20 @@ mod tests {
             .chain(line.split(' ').map(str::to_owned))
             .collect();
         assert_eq!(previous_instance(argv.clone()), Some(99));
-        assert_eq!(crate::parse_launch_args(argv.clone()).module.as_deref(), Some("hosts"));
+        assert_eq!(
+            crate::parse_launch_args(argv.clone()).module.as_deref(),
+            Some("hosts")
+        );
         assert!(crate::is_dry_run(argv));
     }
 
     #[test]
     fn a_missing_or_garbled_pid_means_no_wait() {
         assert_eq!(previous_instance(args(&["app.exe"])), None);
-        assert_eq!(previous_instance(args(&["app.exe", AFTER_ELEVATION_FLAG])), None);
+        assert_eq!(
+            previous_instance(args(&["app.exe", AFTER_ELEVATION_FLAG])),
+            None
+        );
         assert_eq!(
             previous_instance(args(&["app.exe", AFTER_ELEVATION_FLAG, "abc"])),
             None

@@ -450,12 +450,15 @@ mod sys {
             )
         };
         if status != ERROR_SUCCESS {
-            return Err(write_failure(status, format!(
-                "cannot open `{}\\{subkey}` for writing: {} \
+            return Err(write_failure(
+                status,
+                format!(
+                    "cannot open `{}\\{subkey}` for writing: {} \
                  (writing under HKLM needs an elevated process)",
-                hive.short_name(),
-                status.0
-            )));
+                    hive.short_name(),
+                    status.0
+                ),
+            ));
         }
         Ok(Key(handle))
     }
@@ -658,12 +661,15 @@ mod sys {
             )
         };
         if status != ERROR_SUCCESS {
-            return Err(write_failure(status, format!(
-                "cannot write `{}\\{subkey}\\{}`: {}",
-                hive.short_name(),
-                value.name,
-                status.0
-            )));
+            return Err(write_failure(
+                status,
+                format!(
+                    "cannot write `{}\\{subkey}\\{}`: {}",
+                    hive.short_name(),
+                    value.name,
+                    status.0
+                ),
+            ));
         }
         Ok(())
     }
@@ -687,22 +693,28 @@ mod sys {
             return Ok(());
         }
         if status != ERROR_SUCCESS {
-            return Err(write_failure(status, format!(
-                "cannot open `{}\\{subkey}` for writing: {}",
-                hive.short_name(),
-                status.0
-            )));
+            return Err(write_failure(
+                status,
+                format!(
+                    "cannot open `{}\\{subkey}` for writing: {}",
+                    hive.short_name(),
+                    status.0
+                ),
+            ));
         }
         let key = Key(handle);
         let name_wide = wide(name);
         // SAFETY: `name_wide` is NUL-terminated and the key is open for writing.
         let status = unsafe { RegDeleteValueW(key.0, PCWSTR(name_wide.as_ptr())) };
         if status != ERROR_SUCCESS && status != ERROR_FILE_NOT_FOUND {
-            return Err(write_failure(status, format!(
-                "cannot remove `{}\\{subkey}\\{name}`: {}",
-                hive.short_name(),
-                status.0
-            )));
+            return Err(write_failure(
+                status,
+                format!(
+                    "cannot remove `{}\\{subkey}\\{name}`: {}",
+                    hive.short_name(),
+                    status.0
+                ),
+            ));
         }
         Ok(())
     }

@@ -424,7 +424,11 @@ pub enum ExecOutcome {
         error: String,
         /// Windows refused for lack of administrator rights (K-020); the
         /// report offers "Restart as administrator".
-        #[serde(default, rename = "needsAdmin", skip_serializing_if = "std::ops::Not::not")]
+        #[serde(
+            default,
+            rename = "needsAdmin",
+            skip_serializing_if = "std::ops::Not::not"
+        )]
         needs_admin: bool,
     },
 }
@@ -774,7 +778,10 @@ mod tests {
         let denied = CoreError::NeedsAdmin(r"HKLM\...\Run".into());
         assert!(matches!(
             ExecOutcome::failed(&denied),
-            ExecOutcome::Failed { needs_admin: true, .. }
+            ExecOutcome::Failed {
+                needs_admin: true,
+                ..
+            }
         ));
         let json = serde_json::to_string(&ExecOutcome::failed(&denied)).expect("serialize");
         assert!(json.contains(r#""needsAdmin":true"#), "got {json}");
@@ -784,7 +791,13 @@ mod tests {
         // Rows recorded before the flag existed still read back.
         let old: ExecOutcome =
             serde_json::from_str(r#"{"status":"failed","error":"x"}"#).expect("old row");
-        assert!(matches!(old, ExecOutcome::Failed { needs_admin: false, .. }));
+        assert!(matches!(
+            old,
+            ExecOutcome::Failed {
+                needs_admin: false,
+                ..
+            }
+        ));
     }
 
     #[test]
