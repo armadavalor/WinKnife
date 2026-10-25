@@ -440,6 +440,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::hosts_restore,
         commands::hosts_reveal_backup,
         commands::hosts_flush_dns,
+        commands::network_list,
         commands::env_vars_list,
         commands::env_vars_preview,
         commands::env_vars_apply,

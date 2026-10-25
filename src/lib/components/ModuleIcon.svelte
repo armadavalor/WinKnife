@@ -35,6 +35,7 @@
     restore: "history",
     hosts: "globe",
     menu: "list",
+    network: "globe",
     env: "list",
   };
 </script>

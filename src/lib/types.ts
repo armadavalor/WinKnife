@@ -1135,6 +1135,30 @@ export interface CloseReport {
 }
 
 /* -------------------------------------------------------------------------
+ * modules/network.rs
+ * ---------------------------------------------------------------------- */
+
+/** Where a socket can be reached from. */
+export type NetworkReach = "allInterfaces" | "localOnly" | "oneInterface";
+
+/** One line on the Network page (`network_list`). */
+export interface PortRow {
+  protocol: "TCP" | "UDP";
+  kind: "listening" | "connection";
+  /** `LISTEN`, `ESTABLISHED`; null for UDP. */
+  state: string | null;
+  localAddress: string;
+  localPort: number;
+  remoteAddress: string | null;
+  remotePort: number | null;
+  reach: NetworkReach;
+  pid: number;
+  processName: string;
+  exePath: string | null;
+  reason: string;
+}
+
+/* -------------------------------------------------------------------------
  * Environment variables (C15, K-024) — mirrors modules/env_vars.rs
  * ---------------------------------------------------------------------- */
 

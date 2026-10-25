@@ -325,6 +325,11 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "hosts_flush_dns",
             args: json!({}),
         },
+        // Read-only: lists the machine's sockets.
+        Probe {
+            command: "network_list",
+            args: json!({}),
+        },
         // Read-only: HKCU and HKLM environment values are only read.
         Probe {
             command: "env_vars_list",

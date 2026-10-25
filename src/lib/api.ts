@@ -31,6 +31,7 @@ import type {
   KeepRule,
   HostsBackup,
   HostsDocument,
+  PortRow,
   HostsPreview,
   HostsSaveOutcome,
   ModuleManifest,
@@ -525,6 +526,11 @@ export function hostsRevealBackup(name: string): Promise<void> {
 /** Run `ipconfig /flushdns`. Only on a button click; returns its output. */
 export function hostsFlushDns(): Promise<string> {
   return invoke<string>("hosts_flush_dns");
+}
+
+/** Listening ports and open connections with their owning process. Read-only. */
+export function networkList(): Promise<PortRow[]> {
+  return invoke<PortRow[]>("network_list");
 }
 
 /* -------------------------------------------------------------------------

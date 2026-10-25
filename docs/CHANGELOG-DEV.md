@@ -2630,6 +2630,14 @@ absent).
 - Version 0.4.0 in package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json and the demo/install-smoke workflow defaults; CHANGELOG `[Unreleased]` cut to `[0.4.0]` and filled in for everything merged since v0.3.0 (#61–#92).
 - README: thirteen tools, Tweaks / Context menu / Hosts File rows, EN+TR noted. First release with the build attestation step (C9).
 
+## 2026-10-25 — Network module
+
+**Built.** `network` module (C14, K-023, `docs/phases/PHASE-7-network.md`): read-only list of listening TCP (v4/v6), bound UDP and established TCP connections with PID, process name, exe path, reach (all interfaces / this PC only / one interface) and a plain-language reason per row. New platform seam `core/platform/network.rs` (`GetExtendedTcpTable` / `GetExtendedUdpTable`), command `network_list`, `src/routes/network` page with filter, kind filter, refresh and copy-row. The only action is "Flush DNS cache", reusing `hosts_flush_dns` behind a confirm. EN + TR strings for everything.
+
+**Decisions.** Read-only; no process kill, winsock/IP reset, firewall change or outbound lookup this round. The snapshot is taken on open and on Refresh, not live.
+
+**Deferred.** See DECISIONS-NEEDED "network module".
+
 ---
 
 ## 2026-10-25 — Phase 7: accessibility pass (C8)
