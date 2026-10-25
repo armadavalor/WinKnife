@@ -690,6 +690,19 @@ const en = {
     "WinKnife only reads these values and never changes them. Policies are often set by an employer or another tool.",
   "tweaks.updateClear": "Nothing WinKnife checks for is holding Windows Update back.",
   "tweaks.updateUnread": "Could not read",
+  "tweaks.search": "Search settings",
+  "tweaks.noMatch": "No setting matches “{query}”.",
+  "tweaks.category.explorer": "File Explorer",
+  "tweaks.category.taskbarStart": "Taskbar & Start",
+  "tweaks.category.privacy": "Privacy",
+  "tweaks.category.input": "Windows & input",
+  "tweaks.category.appearance": "Appearance",
+  "tweaks.state.default": "Windows default",
+  "tweaks.state.applied": "Applied by WinKnife",
+  "tweaks.state.differs": "Set another way",
+  "tweaks.appliesTo": "Applies to",
+  "tweaks.explorerNote":
+    "Some changes show only after File Explorer restarts. Sign out and back in, or restart Explorer from Task Manager.",
   "module.duplicates.description":
     "Find files that are exact copies of each other, pick which one to keep, and tidy the rest away.",
   "module.startup.description":
