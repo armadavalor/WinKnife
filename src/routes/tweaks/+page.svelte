@@ -16,7 +16,13 @@
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { tweaksUpdateStatus } from "$lib/api";
   import { tweaksStore } from "$lib/stores/tweaks.svelte";
-  import { isApiError, type TweakRestart, type TweakState, type UpdateStatus } from "$lib/types";
+  import {
+    isApiError,
+    type TweakCategory,
+    type TweakRestart,
+    type TweakState,
+    type UpdateStatus,
+  } from "$lib/types";
 
   const MODULE_ID = "tweaks";
   const manifest = $derived(moduleStore.find(MODULE_ID));
@@ -51,6 +57,31 @@
     explorer: t("tweaks.restartExplorer"),
     reboot: t("tweaks.restartReboot"),
   };
+
+  const CATEGORY_ORDER: TweakCategory[] = ["explorer", "taskbarStart", "privacy", "input", "appearance"];
+  let query = $state("");
+
+  const groups = $derived.by(() => {
+    const needle = query.trim().toLowerCase();
+    const shown = store.tweaks.filter(
+      (tw) =>
+        !needle ||
+        `${tw.name} ${tw.reason} ${tw.path}`.toLowerCase().includes(needle),
+    );
+    return CATEGORY_ORDER.map((category) => ({
+      category,
+      items: shown.filter((tw) => tw.category === category),
+    })).filter((group) => group.items.length > 0);
+  });
+
+  const explorerNote = $derived(
+    store.tweaks.some((tw) => tw.applied && tw.restart === "explorer"),
+  );
+
+  function stateOf(tweak: TweakState): "applied" | "differs" | "default" {
+    if (tweak.applied) return "applied";
+    return !tweak.error && !store.recommendationOf(tweak) ? "differs" : "default";
+  }
 
   function valueText(value: number | null): string {
     return value === null ? t("tweaks.notSet") : String(value);
@@ -96,7 +127,14 @@
   {:else if store.tweaks.length === 0}
     <EmptyState message={t("tweaks.empty")} />
   {:else}
-    <div>
+    <div class="flex flex-wrap items-center gap-3">
+      <input
+        type="search"
+        class="min-w-0 flex-1 rounded-lg border border-surface-3 bg-surface-1 px-3 py-1.5 text-sm"
+        placeholder={t("tweaks.search")}
+        aria-label={t("tweaks.search")}
+        bind:value={query}
+      />
       <button
         type="button"
         class="btn-outline px-2.5! py-1! text-xs!"
@@ -107,15 +145,34 @@
       </button>
     </div>
 
+    {#if explorerNote}
+      <p class="rounded-xl bg-surface-2/60 p-3 text-xs text-ink-muted">{t("tweaks.explorerNote")}</p>
+    {/if}
+
+    {#if groups.length === 0}
+      <EmptyState message={t("tweaks.noMatch", { query })} />
+    {/if}
+
+    {#each groups as group (group.category)}
+    <section class="flex flex-col gap-2">
+    <h2 class="text-sm font-semibold text-ink-muted">{t(`tweaks.category.${group.category}`)}</h2>
     <ul class="flex flex-col gap-2">
-      {#each store.tweaks as tweak (tweak.id)}
+      {#each group.items as tweak (tweak.id)}
         {@const recommendation = store.recommendationOf(tweak)}
+        {@const state = stateOf(tweak)}
         <li class="flex flex-wrap items-start gap-4 rounded-xl border border-surface-2 bg-surface-1 p-4">
           <div class="min-w-0 flex-1">
             <p class="flex flex-wrap items-center gap-2">
               <span class="font-medium">{tweak.name}</span>
               <span class="rounded-md bg-surface-2 px-1.5 py-0.5 text-[0.65rem] text-ink-faint">
                 {restartLabel[tweak.restart]}
+              </span>
+              <span
+                class="rounded-md px-1.5 py-0.5 text-[0.65rem] {state === 'applied'
+                  ? 'bg-accent/15 text-accent'
+                  : 'bg-surface-2 text-ink-faint'}"
+              >
+                {t(`tweaks.state.${state}`)}
               </span>
             </p>
             <p class="mt-1 select-text break-all font-mono text-[0.7rem] text-ink-faint">
@@ -137,6 +194,9 @@
               </summary>
               <p class="mt-1 text-xs leading-relaxed text-ink-muted">{tweak.reason}</p>
               <!-- No opener plugin: the link is selectable text, never a navigation. -->
+              <p class="mt-1 text-xs text-ink-faint">
+                {t("tweaks.appliesTo")}: {tweak.appliesTo}
+              </p>
               <p class="mt-1 text-xs text-ink-faint">
                 {t("tweaks.source")}
                 <span class="select-text break-all font-mono">{tweak.sourceUrl}</span>
@@ -179,6 +239,8 @@
         </li>
       {/each}
     </ul>
+    </section>
+    {/each}
 
     <section class="rounded-xl border border-surface-2 bg-surface-1 p-4">
       <h2 class="text-sm font-medium">{t("tweaks.updateTitle")}</h2>
