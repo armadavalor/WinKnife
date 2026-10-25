@@ -872,3 +872,12 @@ not ours to take.
 - [ ] 2026-10-24 (C2): HKLM (machine-wide) entries are shown but never written: the row says "needs admin; not changed". Disabling them would need elevation through the hosts-style `runas` helper; not done without a decision.
 - [ ] 2026-10-24 (C2): a per-user handler whose CLSID is also registered machine-wide is left alone, because blocking the CLSID would also hide the machine-wide entry. Left to the admin.
 - [ ] 2026-10-24 (C2): `LegacyDisable` on HKCU verbs and the HKCU `Shell Extensions\Blocked` list are documented Explorer mechanisms, but whether the Windows 11 compact menu (and Explorer without a restart) honours them has not been checked by hand. Manual check wanted before the feature is announced.
+
+
+## Open items raised by the tweaks catalogue (2026-10-25)
+
+- [ ] 2026-10-25 (tweaks): the engine writes `REG_DWORD` only. Useful per-user settings stored as strings are left out: classic Windows 11 context menu (`CLSID\{86ca1aa0-...}\InprocServer32` default value), mouse acceleration (`MouseSpeed`, `MouseThreshold1/2`), menu show delay (`MenuShowDelay`) and Sticky Keys `Flags`. Adding `REG_SZ` support is an engine change (K-018), not done here.
+- [ ] 2026-10-25 (tweaks): refused by the fence on purpose, so not offered: Bing results in Start search (`Search\BingSearchEnabled`), search box mode (`SearchboxTaskbarMode`) and the `Start_*` values (Start recommendations and similar). The fence blocks any path containing `search` or `start_`; relaxing it needs a decision.
+- [ ] 2026-10-25 (tweaks): the Widgets button tweak (`TaskbarDa`) is protected on some recent Windows 11 builds; the write is rejected or reverted and the read-back check then reports it. Left in because it works on other builds; confirm on current 24H2/25H2.
+- [ ] 2026-10-25 (tweaks): future "admin tweaks" item. Settings that need HKLM or elevation (telemetry level, Windows Update policies, consumer-features policy, Wi-Fi Sense, fast startup, disabling services) are not offered. They would need the elevation helper used for hosts and a per-tweak admin flag.
+- [ ] 2026-10-25 (tweaks): "Restart Explorer" button not added. Restarting explorer.exe closes the user's open folder windows; the page shows a notice instead. Revisit if users ask.

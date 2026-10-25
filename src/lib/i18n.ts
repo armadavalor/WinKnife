@@ -723,6 +723,19 @@ const en = {
     "WinKnife only reads these values and never changes them. Policies are often set by an employer or another tool.",
   "tweaks.updateClear": "Nothing WinKnife checks for is holding Windows Update back.",
   "tweaks.updateUnread": "Could not read",
+  "tweaks.search": "Search settings",
+  "tweaks.noMatch": "No setting matches “{query}”.",
+  "tweaks.category.explorer": "File Explorer",
+  "tweaks.category.taskbarStart": "Taskbar & Start",
+  "tweaks.category.privacy": "Privacy",
+  "tweaks.category.input": "Windows & input",
+  "tweaks.category.appearance": "Appearance",
+  "tweaks.state.default": "Windows default",
+  "tweaks.state.applied": "Applied by WinKnife",
+  "tweaks.state.differs": "Set another way",
+  "tweaks.appliesTo": "Applies to",
+  "tweaks.explorerNote":
+    "Some changes show only after File Explorer restarts. Sign out and back in, or restart Explorer from Task Manager.",
   "module.duplicates.description":
     "Find files that are exact copies of each other, pick which one to keep, and tidy the rest away.",
   "module.startup.description":
@@ -745,6 +758,16 @@ const en = {
   "about.never.service": "Runs no background service. When the window closes, WinKnife stops.",
   "about.never.delete": "Never deletes your files outright. Cleanup moves them to quarantine, where you can restore them; they are purged only when the retention age or size limit you set is reached. The one exception is emptying the Windows recycle bin: that is permanent, needs its own confirmation, and starts unticked.",
   "about.verify": "How to verify a download: see \"Verify this download\" in the README on GitHub.",
+  "list.filter": "Filter by name or path…",
+  "list.sort": "Sort",
+  "list.sortSize": "Largest first",
+  "list.sortName": "Name A–Z",
+  "list.selectAll": "Select all shown",
+  "list.selectNone": "Select none",
+  "list.invert": "Invert",
+  "list.shown": "{shown} of {total} shown",
+  "list.noMatch": "Nothing matches the filter.",
+  "list.hiddenSelected": "+{count} selected, hidden by the filter",
 } as const;
 
 /** Turkish overrides. Missing keys fall back to English. */
@@ -1041,6 +1064,16 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "about.never.service": "Arka planda hizmet çalıştırmaz. Pencere kapanınca WinKnife durur.",
   "about.never.delete": "Dosyalarını doğrudan silmez. Temizlik onları geri yükleyebileceğin karantinaya taşır; yalnız belirlediğin saklama süresi veya boyut sınırı dolunca temizlenir. Tek istisna Windows geri dönüşüm kutusunu boşaltmak: kalıcıdır, ayrı onay ister ve tiksiz başlar.",
   "about.verify": "İndirmeyi doğrulamak için GitHub'daki README'de \"Verify this download\" bölümüne bak.",
+  "list.filter": "Ada veya yola göre süz…",
+  "list.sort": "Sırala",
+  "list.sortSize": "Önce en büyük",
+  "list.sortName": "Ad A–Z",
+  "list.selectAll": "Görünenlerin hepsini seç",
+  "list.selectNone": "Seçimi kaldır",
+  "list.invert": "Tersine çevir",
+  "list.shown": "{total} içinden {shown} gösteriliyor",
+  "list.noMatch": "Süzgece uyan bir şey yok.",
+  "list.hiddenSelected": "+{count} seçili satır süzgeç yüzünden gizli",
 };
 
 /** Every key the dictionary knows. */
