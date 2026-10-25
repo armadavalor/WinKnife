@@ -6,9 +6,38 @@ live in [docs/CHANGELOG-DEV.md](docs/CHANGELOG-DEV.md).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-25
+
 ### Added
+- **Turkish interface** — choose English or Türkçe in Settings; it applies at
+  once and follows the Windows language on first launch. Reasons and errors
+  produced by the scan engine are still English.
+- **Tweaks** — 27 reversible Windows settings (current user only), grouped and
+  searchable. The old value is saved before each change and Undo puts it back;
+  a changed-behind-your-back setting is flagged with Reapply.
+- **Context menu** — lists right-click menu entries with their owner and
+  publisher; entries can be disabled for the current user and re-enabled.
+- **Hosts editor** — view and edit the hosts file with a backup before saving.
+- **Duplicate folders** — folders with identical contents are grouped, with a
+  keep rule per group; at least one copy always stays.
+- **Settings profile** — export and import your settings as JSON; import shows
+  the differences first.
+- **Long lists** — search, filter, select all/none/invert and collapsible
+  groups on Cleaner, Duplicates, Empty Folders and Startup.
+- **Quarantine** — permanently remove single items, a selection or a batch
+  after confirmation; locked items stay with the reason.
+- **Restart as administrator** — offered when an action is denied for lack of
+  rights; only runs when you click it.
+- **Startup** — each entry shows its rating and the reason for it.
 - **Settings** — untick a tool to take it out of the sidebar; it stays on the
-  dashboard and still opens from there.
+  dashboard and still opens from there. An About card lists what WinKnife never
+  does.
+
+### Changed
+- New knife logo and background glow; animations can be switched off.
+- Restores interrupted by a crash are repaired at next launch.
+- Release builds carry a GitHub build attestation; see "Verify this download"
+  in the README.
 
 ## [0.3.0] — 2026-10-19
 
@@ -75,6 +104,7 @@ First public release. (0.1.0 was never tagged; its contents ship here.)
 - Content security policy for the app window; unused opener plugin removed.
 - Log folder keeps only the newest 14 daily files.
 
-[Unreleased]: https://github.com/armadavalor/WinKnife/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/armadavalor/WinKnife/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/armadavalor/WinKnife/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/armadavalor/WinKnife/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/armadavalor/WinKnife/releases/tag/v0.2.0
