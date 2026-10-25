@@ -1,4 +1,4 @@
-<!-- devir: 2026-10-24 | yazan: claude | commit: ea912c4 -->
+<!-- devir: 2026-10-25 | yazan: claude | commit: 3e2f659 -->
 # Devir notu
 <!-- /devir üzerine yazar; elle düzeltirsen "yazan: kullanıcı" yap. ≤40 satır. Geçmiş git log'da, kararlar KARARLAR.md'de. -->
 
@@ -12,13 +12,14 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - Toplu temizlik/geri yükleme yavaş (CI'da 5000 dosya: temizlik 58 s, geri yükleme 47 s; lokal ~1 ms/öğe). Kök neden: öğe başı fsync'li ledger commit'i + taşıma. Batch ertelendi (çökme penceresi büyür); `synchronous` değişikliği kullanıcıya sorulmadan yapılmaz. Dal `perf/bulk-clean-restore` (PR #56 kapalı).
 - main branch protection açık; merge yetkisi ajanda (K-015).
 - 0.3.0 sonrası main'de (sürümsüz, masaüstüne kurulu): bıçak logosu + arka plan ışığı (#65, #66), QA/QC ilk tur (#67), yarıda ölen geri yüklemenin açılışta onarımı (A9, K-017), A14/A15/A19 UI e2e testleri + uzun yolda dosya adı artık kırpılmıyor (#70). Ayarlar'dan araç gizleme: kenar çubuğu gizlenen aracı göstermez, pano/rota/`--module` açmaya devam eder (#72, issue #8; tercih localStorage `winknife.hiddenModules`). Başlangıç sayfası her kapatılabilir girişte Rust puanını renkli etiketle ve "Bu değerlendirme neden?" gerekçesiyle gösterir; korumalı yol gerekçesi temizleyici diliyle değil yerin adıyla (#75, issue #4). C9 kaynak doğrulama: README "Verify this download", release.yml build attestation (`attest-build-provenance`, yalnız bir sonraki tag'li sürümden itibaren; henüz denenmedi), `docs/ANTIVIRUS-FALSE-POSITIVE.md`, Ayarlar'da "About WinKnife / What WinKnife never does" kartı. C1 geri alınabilir ayar motoru (#79, K-018, `docs/phases/PHASE-6-tweaks.md`): yalnız HKCU, yazmadan önce eski değer (ya da "yoktu") SQLite'a, yazınca geri okuma, Undo eski değeri koyar; yeni "Tweaks" sayfası yol/eski/yeni/kaynak gösterir. C3 yinelenen klasörler (#78): aynı dosya kümesine sahip klasörler grup olur; grup başına tutma kuralı (en eski/en yeni/tercih), tutulmayan kopyalar karantinaya önseçili, korumalı üye asla seçilmez; "Bu grubu yok say" settings tablosunda (`duplicates.ignoredFolderGroups`, migration yok). Her kopyanın gitmesi kodda imkânsız (`keep_at_least_one` + executor kapı 4, testli). C4 hosts düzenleyici (#80, 448d736). C7 sapma kontrolü (#83, ea912c4): uygulanan ayar sonradan değişirse gerekçeli uyarı + Yeniden uygula (C1 yolu); Windows Update engel durumu salt okunur. C10 ayar profili dışa/içe aktarma (#83): sürümlü JSON sınırda doğrulanır, içe aktarma önce fark gösterir, tweak'ler C1 yolundan (fence korunur). C2 bağlam menüsü temizleyici (#84, 87da120): `shell` fiilleri + `shellex\ContextMenuHandlers` (6 kapsam, HKCU+HKLM), gerekçe sahibi CLSID → InprocServer32 → dosya → imzacı zinciriyle adlandırır, imzacısız = "needs review"; Disable C1 hattından (`context-menu:` önekli tweak id, `TweakRouter`), yalnız HKCU (`LegacyDisable` / `Shell Extensions\Blocked`); HKLM yalnız listelenir, hiç yazılmaz. Explorer/Win11 yeni menünün HKCU bloğuna uyması elle denenmedi (DECISIONS-NEEDED). C1, C2, C3, C4, C7, C10 main'de ve masaüstüne kurulu.
+- 2026-10-25 (3e2f659, masaüstüne kurulu): uzun listelerde ara/süz/tümünü seç/hiçbirini/tersine, katlanır gruplar, süzgecin gizlediği seçili satır uyarısı (#87, `ListToolbar`, `listTools.ts`). Karantinada elle kalıcı kaldırma: tek/seçim/grup, onay penceresi, kilitli öğe gerekçesiyle kalır; geri yüklenenler listeden düşer (#88, K-020). 27 HKCU tweak, gruplu + aranır (#89; admin tweak'leri DECISIONS-NEEDED). Yönetici olarak yeniden başlat: yalnız tıklamayla `runas`, erişim reddi `needs_admin` → düğme (#90, K-021).
 
 ## Yarım kalan
 - Demo GIF (senaryo `docs/DEMO-SCRIPT.md`): kullanıcının gerçek makinesinde çekilmez, gerçek klasör adları görünür.
 - v0.3.0 sürüm sayfası canlıda görsel doğrulanmadı.
 
 ## Açık sorular
-- TR arayüz: 117/352 anahtar, dil seçici yok (DECISIONS-NEEDED).
+- TR arayüz: ilk sürüm EN+TR çıkacak (kullanıcı 2026-10-25); dil seçici + tam TR çevirisi için oturum önerildi, henüz başlamadı.
 - Rust crate'leri 2.12'ye çekmek windows 0.62 + wry 0.57 getiriyor; npm + crate birlikte yükseltilmeli.
 
 ## Sıradaki adım
@@ -34,5 +35,5 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - `src-tauri/target-review/` (eski derleme önbelleği) ve `chatgpt Pocketknife addon.txt` kullanıcının; dokunma.
 - Repo PUBLIC: Armada'nın otomatik "Son oturum" bloğu (`oto:başla` işaretli) kullanıcı isteklerini DEVIR'e yazar; commit'e girmeden sil.
 - e2e `duplicates: Stop cancels the scan` flake'inin kökü bulundu ve düzeltildi (2026-10-20, QA/QC): kökte uygun aday yokken backend progress olayı yollamıyor, UI ertelenen Stop'u gönderemiyordu (docs/QA-CHECKLIST.md B3, B8).
-- e2e'de `quarantine_batch_items` kısmen geri yüklenmiş batch'te geri yüklenen satırları da döner (`restoredAt` dolu); tutulanı sayarken filtrele. e2e işi ~26 dk, sınır 60 dk.
+- `quarantine_batch_items` artık geri yüklenen satırları dönmez (#88). e2e işi ~26 dk, sınır 60 dk.
 - winget kurulumu CI'da SmartScreen'de takılır (imzasız installer); CI yalnız `winget validate` yapar.
