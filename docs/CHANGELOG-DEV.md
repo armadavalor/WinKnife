@@ -2515,3 +2515,33 @@ Filter and sort are view-only. "Select none" now clears only visible rows.
 **Review follow-up.** A filter that hides still-ticked rows now says so ("+N selected, hidden by the
 filter", `hiddenSelectedCount`, unit-tested); selection itself is unchanged. Screenshots of Cleaner
 and Duplicates (toolbar, middle-ellipsis paths with full path in the tooltip) checked in the dev app.
+
+## 2026-10-25 — Tweaks catalogue: 27 documented HKCU settings, grouped page
+
+**Built.** The tweak catalogue grew from the original few to 27 entries, each a
+single `REG_DWORD` under HKCU with a human `reason`, a Microsoft docs or
+settings source URL and an "applies to" note (Windows 10 and 11, or Windows 11
+only). Categories: File Explorer (7), Taskbar & Start (7), Privacy (5),
+Windows & input (4), Appearance (3). `Tweak` gained `category` and
+`applies_to`; `TweakState` carries both to the UI.
+
+The page now groups tweaks under section headers, has a search box (name,
+reason, path), shows a state badge per row (Windows default / Applied by
+WinKnife / Set another way) and the "applies to" line inside the collapsible
+"Why change this?" block next to the source. After an Explorer-restart tweak is
+applied the page shows a notice to sign out or restart Explorer.
+
+**Decisions.** No "Restart Explorer" button: killing explorer.exe closes the
+user's open folder windows, so a notice is the safe option. No engine or fence
+change: the engine's rules (HKCU only, prior value saved first, read-back,
+exact undo) apply unchanged.
+
+**Tests.** `catalogue_is_well_formed` (unique ids and paths, HKCU, reason and
+https source present, valid targets, undo class matches restart class) and
+`every_shipped_tweak_round_trips_on_a_test_registry` (apply, undo, value
+restored, no open undo rows; run once from an absent value and once from the
+opposite value). Live on this machine through the dev app: shake to minimize,
+Snap Assist and clock seconds applied (values 1, 0, 1) and undone (all back to
+absent).
+
+**Deferred.** See DECISIONS-NEEDED, "Open items raised by the tweaks catalogue".
