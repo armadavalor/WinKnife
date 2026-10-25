@@ -15,9 +15,19 @@
   import ExecutingPanel from "$lib/components/ExecutingPanel.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import ListToolbar from "$lib/components/ListToolbar.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import {
+    deselectVisible,
+    invertVisible,
+    matchesFilter,
+    selectVisible,
+    sharedText,
+    sortRows,
+    type SortKey,
+  } from "$lib/listTools";
   import { duplicatesStore } from "$lib/stores/duplicates.svelte";
   import { itemsToReport, stopSummary, warningsOf } from "$lib/stores/execNotes";
   import { moduleStore } from "$lib/stores/modules.svelte";
@@ -54,7 +64,53 @@
     store.pinnedRoot = page.url.searchParams.get("root");
   });
 
-  const sets = $derived(store.sets);
+  let filter = $state("");
+  let sort = $state<SortKey>("size");
+
+  // The store applies the class and size filters; the text filter and the sort
+  // are view-only and never change what a bulk action may select.
+  const sets = $derived(
+    sortRows(
+      store.sets.filter((set) =>
+        set.copies.some((copy) => matchesFilter(filter, copy.path)),
+      ),
+      sort,
+      (set) => set.wastedBytes,
+      (set) => set.copies[0]?.path ?? "",
+    ),
+  );
+  const folderGroups = $derived(
+    store.folderGroups.filter((group) =>
+      group.members.some((member) => matchesFilter(filter, member.path)),
+    ),
+  );
+  // Keepers, protected folders and non-quarantine rows are listed but never
+  // selectable, so select-all and invert cannot reach them.
+  const pickable = $derived([
+    ...sets.flatMap((set) =>
+      set.copies.flatMap((copy) => {
+        const rec = store.recommendationFor(copy);
+        return rec
+          ? [
+              {
+                id: rec.id,
+                selectable:
+                  !store.isKeeper(set, copy) && rec.action === "quarantine",
+              },
+            ]
+          : [];
+      }),
+    ),
+    ...folderGroups.flatMap((group) =>
+      group.members.flatMap((member) =>
+        member.recommendationIds.map((id) => ({
+          id,
+          selectable: !member.keeper && !member.protected,
+        })),
+      ),
+    ),
+  ]);
+  const totalSets = $derived(store.sets.length + store.folderGroups.length);
   const scan = $derived(store.result?.scan ?? null);
 
   const CLASSES: { value: ExtensionClass; label: string }[] = [
@@ -294,21 +350,17 @@
       >
         {t("duplicates.keepNewest")}
       </button>
-      <button
-        type="button"
-        class="btn-ghost px-3! py-1.5! text-xs!"
-        onclick={() => store.selectAllNonKeepers()}
-      >
-        {t("duplicates.selectAll")}
-      </button>
-      <button
-        type="button"
-        class="btn-ghost px-3! py-1.5! text-xs!"
-        onclick={() => store.selectNone()}
-      >
-        {t("duplicates.selectNone")}
-      </button>
     </section>
+
+    <ListToolbar
+      bind:filter
+      bind:sort
+      shown={sets.length + folderGroups.length}
+      total={totalSets}
+      onselectall={() => (store.selected = selectVisible(store.selected, pickable))}
+      onselectnone={() => (store.selected = deselectVisible(store.selected, pickable))}
+      oninvert={() => (store.selected = invertVisible(store.selected, pickable))}
+    />
 
     {#if sets.length === 0}
       <EmptyState message={t("duplicates.empty")} />
@@ -316,6 +368,11 @@
       <div class="flex flex-col gap-3">
         {#each sets as set (set.id)}
           {@const open = expanded.has(set.id)}
+          {@const setReason = sharedText(
+            set.copies
+              .filter((c) => !store.isKeeper(set, c))
+              .map((c) => store.recommendationFor(c)?.reason ?? ""),
+          )}
           <section class="rounded-xl border border-surface-2 bg-surface-1">
             <header class="flex items-center gap-3 px-4 py-3">
               <button
@@ -351,6 +408,12 @@
                 {formatBytes(set.wastedBytes)}
               </span>
             </header>
+
+            {#if open && setReason && set.copies.length >= 3}
+              <p class="border-t border-surface-2 px-4 py-2 text-xs leading-relaxed text-ink-muted">
+                {setReason}
+              </p>
+            {/if}
 
             <ul
               id="set-{set.id}"
@@ -390,13 +453,15 @@
                         </span>
                       {/if}
                     </span>
-                    <span
-                      class="mt-1 block text-xs leading-relaxed text-ink-muted"
-                    >
-                      {keeper
-                        ? copy.keeperReason
-                        : (rec?.reason ?? copy.keeperReason)}
-                    </span>
+                    {#if keeper || !setReason || set.copies.length < 3}
+                      <span
+                        class="mt-1 block text-xs leading-relaxed text-ink-muted"
+                      >
+                        {keeper
+                          ? copy.keeperReason
+                          : (rec?.reason ?? copy.keeperReason)}
+                      </span>
+                    {/if}
                     <span class="mt-1 block text-[0.7rem] text-ink-faint">
                       {copy.modified
                         ? formatDateTime(copy.modified)
@@ -421,13 +486,13 @@
       </div>
     {/if}
 
-    {#if store.folderGroups.length > 0}
+    {#if folderGroups.length > 0}
       <section class="flex flex-col gap-3">
         <div>
           <h2 class="text-sm font-medium">{t("duplicates.folders.title")}</h2>
           <p class="mt-1 text-xs text-ink-muted">{t("duplicates.folders.intro")}</p>
         </div>
-        {#each store.folderGroups as group (group.id)}
+        {#each folderGroups as group (group.id)}
           <section
             class="rounded-xl border border-surface-2 bg-surface-1"
             data-folder-group={group.id}

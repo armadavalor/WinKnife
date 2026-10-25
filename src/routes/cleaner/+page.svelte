@@ -16,6 +16,7 @@
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import RiskBadge from "$lib/components/RiskBadge.svelte";
   import InfoTip from "$lib/components/InfoTip.svelte";
+  import ListToolbar from "$lib/components/ListToolbar.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import {
     formatBytes,
@@ -26,6 +27,14 @@
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
   import { dashboardStore } from "$lib/stores/dashboard.svelte";
   import { itemsToReport, stopSummary, warningsOf } from "$lib/stores/execNotes";
+  import {
+    deselectVisible,
+    invertVisible,
+    matchesFilter,
+    selectVisible,
+    sortRows,
+    type SortKey,
+  } from "$lib/listTools";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
@@ -59,9 +68,41 @@
   // plainly what it is about to do (module spec 02, and honesty over glue).
   const cameFrom = $derived(page.url.searchParams.get("from"));
 
-  const safeRows = $derived(store.rowsIn("safe"));
-  const reviewRows = $derived(store.rowsIn("needsReview"));
-  const blockedRows = $derived(store.rowsIn("doNotDelete"));
+  let filter = $state("");
+  let sort = $state<SortKey>("size");
+
+  type Row = (typeof store.rows)[number];
+  function visible(risk: "safe" | "needsReview" | "doNotDelete"): Row[] {
+    const rows = store
+      .rowsIn(risk)
+      .filter(({ finding, recommendation }) =>
+        matchesFilter(filter, finding.path, recommendation.reason),
+      );
+    return sortRows(
+      rows,
+      sort,
+      (row) => row.finding.sizeBytes,
+      (row) => row.finding.path,
+    );
+  }
+
+  const safeRows = $derived(visible("safe"));
+  const reviewRows = $derived(visible("needsReview"));
+  const blockedRows = $derived(visible("doNotDelete"));
+
+  // Only green/yellow rows are ever offered. The recycle bin is permanent by
+  // nature, so it is never ticked in bulk: only by its own checkbox.
+  const pickable = $derived(
+    [...safeRows, ...reviewRows].map((row) => ({
+      id: row.recommendation.id,
+      selectable: row.finding.kind !== "recycleBinItem",
+    })),
+  );
+  const totalRows = $derived(
+    store.rowsIn("safe").length +
+      store.rowsIn("needsReview").length +
+      store.rowsIn("doNotDelete").length,
+  );
 
   // The dialog names emptying the recycle bin separately, in the danger
   // colour, because it is the one thing here that quarantine cannot undo. The
@@ -248,6 +289,16 @@
         </p>
       </details>
     {/if}
+
+    <ListToolbar
+      bind:filter
+      bind:sort
+      shown={safeRows.length + reviewRows.length + blockedRows.length}
+      total={totalRows}
+      onselectall={() => (store.selected = selectVisible(store.selected, pickable))}
+      onselectnone={() => (store.selected = deselectVisible(store.selected, pickable))}
+      oninvert={() => (store.selected = invertVisible(store.selected, pickable))}
+    />
 
     <section class="flex flex-col gap-3">
       <h2 class="flex items-center gap-2 text-sm font-medium">

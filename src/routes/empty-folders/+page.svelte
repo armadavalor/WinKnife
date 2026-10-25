@@ -14,9 +14,17 @@
   import RiskBadge from "$lib/components/RiskBadge.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import InfoTip from "$lib/components/InfoTip.svelte";
+  import ListToolbar from "$lib/components/ListToolbar.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatCount, truncatePath } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import {
+    deselectVisible,
+    invertVisible,
+    matchesFilter,
+    selectVisible,
+    sharedText,
+  } from "$lib/listTools";
   import { emptyFoldersStore } from "$lib/stores/emptyFolders.svelte";
   import { itemsToReport, stopSummary, warningsOf } from "$lib/stores/execNotes";
   import { moduleStore } from "$lib/stores/modules.svelte";
@@ -44,6 +52,32 @@
     await store.execute();
     await quarantineStore.reload();
   }
+
+  let filter = $state("");
+
+  const visibleFindings = $derived(
+    (result?.findings ?? []).filter((finding) =>
+      matchesFilter(
+        filter,
+        finding.path,
+        store.recommendationFor(finding)?.reason,
+      ),
+    ),
+  );
+  const pickable = $derived(
+    visibleFindings.flatMap((finding) => {
+      const rec = store.recommendationFor(finding);
+      return rec
+        ? [{ id: rec.id, selectable: store.isSelectable(rec) }]
+        : [];
+    }),
+  );
+  // One reason on every row is said once, above the list.
+  const sharedReason = $derived(
+    sharedText(
+      visibleFindings.map((f) => store.recommendationFor(f)?.reason ?? ""),
+    ) || null,
+  );
 
   const succeeded = $derived(
     store.report?.items.filter((item) => item.outcome.status === "succeeded")
@@ -197,27 +231,27 @@
     {#if result.findings.length === 0}
       <EmptyState message={t("emptyFolders.empty")} />
     {:else}
-      <div class="flex gap-2 text-xs">
-        <button
-          type="button"
-          class="btn-ghost px-3! py-1.5!"
-          onclick={() => store.selectAll()}
-        >
-          {t("emptyFolders.selectAll")}
-        </button>
-        <button
-          type="button"
-          class="btn-ghost px-3! py-1.5!"
-          onclick={() => store.selectNone()}
-        >
-          {t("emptyFolders.selectNone")}
-        </button>
-      </div>
+      <ListToolbar
+        bind:filter
+        shown={visibleFindings.length}
+        total={result.findings.length}
+        onselectall={() => (store.selected = selectVisible(store.selected, pickable))}
+        onselectnone={() => (store.selected = deselectVisible(store.selected, pickable))}
+        oninvert={() => (store.selected = invertVisible(store.selected, pickable))}
+      />
+
+      {#if sharedReason && visibleFindings.length > 1}
+        <p class="text-xs leading-relaxed text-ink-muted">{sharedReason}</p>
+      {/if}
+
+      {#if visibleFindings.length === 0}
+        <EmptyState message={t("list.noMatch")} />
+      {/if}
 
       <ul
         class="divide-y divide-surface-2 rounded-xl border border-surface-2 bg-surface-1"
       >
-        {#each result.findings as finding (finding.id)}
+        {#each visibleFindings as finding (finding.id)}
           {@const rec = store.recommendationFor(finding)}
           {@const nested = store.nestedOf(finding)}
           <li class="flex items-start gap-3 px-4 py-3">
@@ -245,7 +279,7 @@
                   <RiskBadge risk={rec.risk} />
                 {/if}
               </span>
-              {#if rec}
+              {#if rec && !(sharedReason && visibleFindings.length > 1)}
                 <span class="mt-1 block text-xs leading-relaxed text-ink-muted">
                   {rec.reason}
                 </span>
