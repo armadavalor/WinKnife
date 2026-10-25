@@ -100,6 +100,45 @@ pub fn expand(pattern: &str, env: &dyn EnvResolver) -> Expansion {
     Expansion::Expanded(out)
 }
 
+/// Tell running programs (Explorer, new shells) that the user environment
+/// changed, the way the System Properties dialog does. A hung window is
+/// skipped after a short wait. No-op unless real OS effects are armed.
+pub fn broadcast_environment_change() {
+    if !super::real_os_effects_armed() {
+        return;
+    }
+    #[cfg(windows)]
+    sys::broadcast();
+}
+
+#[cfg(windows)]
+mod sys {
+    use windows::core::w;
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+    };
+
+    /// Per-window wait before a non-responding window is skipped.
+    const TIMEOUT_MS: u32 = 1000;
+
+    pub(super) fn broadcast() {
+        let area = w!("Environment");
+        // SAFETY: `area` is a static NUL-terminated string that outlives the call.
+        unsafe {
+            SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                WPARAM(0),
+                LPARAM(area.as_ptr() as isize),
+                SMTO_ABORTIFHUNG,
+                TIMEOUT_MS,
+                None,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
