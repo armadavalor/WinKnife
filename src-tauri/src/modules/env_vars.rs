@@ -14,7 +14,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::env::{expand, Expansion};
 use crate::core::platform::{
     broadcast_environment_change, EnvResolver, Hive, RegValue, Registry, REG_TYPE_EXPAND_SZ,
@@ -619,6 +619,7 @@ impl ToolModule for EnvVarsModule {
                 "View user and system environment variables; edit user ones with a diff and undo."
                     .to_owned(),
             icon: "env".to_owned(),
+            category: ModuleCategory::System,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,

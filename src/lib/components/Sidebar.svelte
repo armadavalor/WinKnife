@@ -12,9 +12,10 @@
 
   import KnifeLogo from "$lib/components/KnifeLogo.svelte";
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
+  import { categoryOf, groupByCategory, pickCategory } from "$lib/categories";
   import { t, tModuleName } from "$lib/i18n";
   import { elevation } from "$lib/stores/elevation.svelte";
-  import type { ModuleManifest } from "$lib/types";
+  import type { ModuleCategory, ModuleManifest } from "$lib/types";
 
   interface Props {
     /** Modules to list, in registry order. */
@@ -49,6 +50,60 @@
 
   function isActive(href: string): boolean {
     return page.url.pathname === href;
+  }
+
+  const CATEGORY_KEY = "winknife.sidebarCategory";
+
+  function readCategory(): string | null {
+    try {
+      return localStorage.getItem(CATEGORY_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  let chosen = $state<string | null>(readCategory());
+  let tabButtons = $state<HTMLButtonElement[]>([]);
+
+  const groups = $derived(groupByCategory(modules));
+  const selected = $derived(pickCategory(groups, chosen));
+  const shownModules = $derived(
+    groups.length > 1
+      ? (groups.find((group) => group.category === selected)?.modules ?? [])
+      : modules,
+  );
+
+  // Opening a tool (link, dashboard card, `--module`) shows its tab.
+  $effect(() => {
+    const active = modules.find((m) => page.url.pathname === `/${m.id}`);
+    if (active) chosen = categoryOf(active);
+  });
+
+  function choose(category: ModuleCategory) {
+    chosen = category;
+    try {
+      localStorage.setItem(CATEGORY_KEY, category);
+    } catch {
+      // Remembering the tab is a convenience; the sidebar works without it.
+    }
+  }
+
+  function onTabKey(event: KeyboardEvent, index: number) {
+    const last = groups.length - 1;
+    const next =
+      event.key === "ArrowRight" || event.key === "ArrowDown"
+        ? index === last ? 0 : index + 1
+        : event.key === "ArrowLeft" || event.key === "ArrowUp"
+          ? index === 0 ? last : index - 1
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? last
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    choose(groups[next].category);
+    tabButtons[next]?.focus();
   }
 
   const linkClass =
@@ -130,8 +185,41 @@
     {:else if modules.length === 0}
       <p class="px-3 text-sm text-ink-faint">{emptyText ?? t("dashboard.empty")}</p>
     {:else}
-      <ul class="flex flex-col gap-1">
-        {#each modules as module (module.id)}
+      {#if groups.length > 1}
+        <div
+          role="tablist"
+          aria-label={t("nav.categories")}
+          class="flex flex-wrap gap-1 px-1"
+        >
+          {#each groups as group, index (group.category)}
+            {@const isSelected = group.category === selected}
+            <button
+              bind:this={tabButtons[index]}
+              type="button"
+              role="tab"
+              id="sidebar-tab-{group.category}"
+              aria-selected={isSelected}
+              aria-controls="sidebar-tools"
+              tabindex={isSelected ? 0 : -1}
+              data-tools={group.modules.map((m) => m.id).join(" ")}
+              class="rounded-md px-2 py-1 text-xs outline-none transition-colors focus-visible:outline-2 focus-visible:outline-accent {isSelected
+                ? 'bg-surface-3 text-ink'
+                : 'text-ink-muted hover:bg-surface-2 hover:text-ink'}"
+              onclick={() => choose(group.category)}
+              onkeydown={(event) => onTabKey(event, index)}
+            >
+              {t(`nav.category.${group.category}`)}
+            </button>
+          {/each}
+        </div>
+      {/if}
+      <ul
+        class="flex flex-col gap-1"
+        id="sidebar-tools"
+        role={groups.length > 1 ? "tabpanel" : undefined}
+        aria-labelledby={groups.length > 1 ? `sidebar-tab-${selected}` : undefined}
+      >
+        {#each shownModules as module (module.id)}
           {@const href = `/${module.id}`}
           <li>
             <a

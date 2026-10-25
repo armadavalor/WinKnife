@@ -25,7 +25,7 @@ use uuid::Uuid;
 use crate::core::brain::{
     self, Brain, CompiledRule, GateVerdict, ProtectedPaths, RuleAction, RulePack,
 };
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare::CanonicalPath;
 use crate::core::platform::RecycleBin;
 use crate::core::scanner::{self, CancellationToken, WalkEntry};
@@ -776,6 +776,7 @@ impl ToolModule for CleanerModule {
                 "Find temporary files, caches and recycle-bin leftovers, sorted by how safe they are to remove."
                     .to_owned(),
             icon: "broom".to_owned(),
+            category: ModuleCategory::Cleanup,
             capabilities: ModuleCapabilities::FULL,
         }
     }

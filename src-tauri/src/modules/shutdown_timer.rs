@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{DryRunPower, PowerAction, PowerController};
 
 /// Longest timer we accept. Anything longer is almost certainly a typo, and an
@@ -491,6 +491,7 @@ impl ToolModule for ShutdownTimerModule {
                 "Schedule a shutdown, restart or sleep with a countdown you can cancel any time."
                     .to_owned(),
             icon: "power".to_owned(),
+            category: ModuleCategory::Power,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,
