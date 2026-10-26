@@ -321,6 +321,11 @@
         {t("duplicates.images.unreadable", { count: images.unreadable })}
       </p>
     {/if}
+    {#if images.cloudOnly > 0}
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
+        {t("duplicates.images.cloudOnly", { count: images.cloudOnly })}
+      </p>
+    {/if}
 
     {#if images.groups.length === 0 && !images.cancelled}
       <EmptyState message={t("duplicates.images.empty")} />

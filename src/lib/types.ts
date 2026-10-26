@@ -464,6 +464,8 @@ export interface SimilarImageScanResult {
   recommendations: Recommendation[];
   skippedRoots: string[];
   unreadable: number;
+  /** Online-only cloud images, skipped unopened so nothing was downloaded. */
+  cloudOnly: number;
   cancelled: boolean;
 }
 

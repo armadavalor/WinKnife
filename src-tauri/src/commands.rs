@@ -727,6 +727,8 @@ pub struct SimilarImageScanResult {
     pub skipped_roots: Vec<String>,
     /// Images that could not be read or decoded.
     pub unreadable: u64,
+    /// Online-only cloud images skipped unopened, so nothing was downloaded.
+    pub cloud_only: u64,
     pub cancelled: bool,
 }
 
@@ -791,6 +793,7 @@ pub async fn start_similar_image_scan<R: Runtime>(
             scan = %scan_id,
             groups = groups.len(),
             unreadable = scan.unreadable,
+            cloud_only = scan.cloud_only,
             cancelled,
             "similar-image scan finished"
         );
@@ -827,6 +830,7 @@ pub async fn start_similar_image_scan<R: Runtime>(
             recommendations,
             skipped_roots: scan.skipped_roots,
             unreadable: scan.unreadable,
+            cloud_only: scan.cloud_only,
             cancelled,
         })
     })

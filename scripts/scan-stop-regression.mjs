@@ -80,7 +80,7 @@ const { treemapStore } = await import(compileStore('treemap.svelte.ts'));
   duplicatesStore.mode = 'images';
   const run = duplicatesStore.scan();
   await tick();
-  scans.at(-1).resolve({ scanId: 'img-1', groups: [{ id: 'g', members: [member('a', true, ['ra']), member('b', false, ['rb'])] }], recommendations: [rec('ra', 'infoOnly'), rec('rb', 'quarantine')], skippedRoots: [], unreadable: 0, cancelled: false });
+  scans.at(-1).resolve({ scanId: 'img-1', groups: [{ id: 'g', members: [member('a', true, ['ra']), member('b', false, ['rb'])] }], recommendations: [rec('ra', 'infoOnly'), rec('rb', 'quarantine')], skippedRoots: [], unreadable: 0, cloudOnly: 0, cancelled: false });
   await run;
   assert.equal(duplicatesStore.step, 'review');
   assert.equal(duplicatesStore.selected.size, 0, 'Look-alikes start with nothing selected');

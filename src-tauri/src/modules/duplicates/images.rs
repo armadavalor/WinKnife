@@ -24,9 +24,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    folders::distinct_roots, is_hidden_or_system, plural, resolve_root, DuplicateContext,
-    DuplicateProgress, ProgressSink, Stage,
+    folders::distinct_roots, plural, resolve_root, DuplicateContext, DuplicateProgress,
+    ProgressSink, Stage,
 };
+#[cfg(not(windows))]
+use super::is_hidden_or_system;
 use crate::core::brain::Brain;
 use crate::core::content_hash::full_hash_cancellable;
 use crate::core::scanner::{self, WalkOptions};
@@ -48,6 +50,12 @@ const DECODE_THREADS: usize = 4;
 /// such picture would look "similar" to every other one, so it is left out.
 const FEATURELESS_BITS: u32 = 2;
 
+const ATTR_HIDDEN: u32 = 0x0000_0002;
+const ATTR_SYSTEM: u32 = 0x0000_0004;
+const ATTR_OFFLINE: u32 = 0x0000_1000;
+const ATTR_RECALL_ON_OPEN: u32 = 0x0004_0000;
+const ATTR_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+
 /// What an image scan found.
 #[derive(Debug, Default)]
 pub struct ImageScan {
@@ -57,6 +65,9 @@ pub struct ImageScan {
     pub skipped_roots: Vec<String>,
     /// Entries the walk could not read, plus images that would not decode.
     pub unreadable: u64,
+    /// Online-only cloud files (OneDrive and the like), skipped unopened:
+    /// reading one would download it.
+    pub cloud_only: u64,
     /// The scan was cancelled; `findings` is empty.
     pub cancelled: bool,
 }
@@ -106,6 +117,15 @@ struct Hashed {
 
 /// Find groups of look-alike images under the context's roots. Read-only.
 pub fn scan_images(ctx: &DuplicateContext<'_>, progress: Option<ProgressSink<'_>>) -> ImageScan {
+    scan_images_above(ctx, ctx.settings.clone().validated().min_size_bytes, progress)
+}
+
+/// [`scan_images`] with the size floor given; tests go below the settings' minimum.
+fn scan_images_above(
+    ctx: &DuplicateContext<'_>,
+    min_size: u64,
+    progress: Option<ProgressSink<'_>>,
+) -> ImageScan {
     let mut output = ImageScan::default();
     let mut files: Vec<(PathBuf, u64)> = Vec::new();
     for root in distinct_roots(ctx.roots) {
@@ -126,13 +146,19 @@ pub fn scan_images(ctx: &DuplicateContext<'_>, progress: Option<ProgressSink<'_>
             ..Default::default()
         };
         let summary = scanner::walk_with(&root, options, ctx.cancel, &mut |entry| {
-            let wanted = !entry.is_dir
+            let candidate = !entry.is_dir
                 && !entry.is_link
+                && entry.size_bytes >= min_size
                 && is_image(&entry.path)
-                && !is_hidden_or_system(&entry.path)
                 && ctx.protected.reason_for(&entry.path).is_none();
-            if wanted {
-                files.push((entry.path.clone(), entry.size_bytes));
+            if !candidate {
+                return;
+            }
+            // Attributes only: reading them never recalls a cloud placeholder.
+            match classify(attributes_of(&entry.path)) {
+                Attributes::Ordinary => files.push((entry.path.clone(), entry.size_bytes)),
+                Attributes::CloudOnly => output.cloud_only += 1,
+                Attributes::HiddenOrSystem => {}
             }
         });
         output.unreadable += summary.unreadable.len() as u64;
@@ -153,6 +179,36 @@ pub fn scan_images(ctx: &DuplicateContext<'_>, progress: Option<ProgressSink<'_>
     output.unreadable += undecodable;
     output.findings = emit_findings(&group_similar(&hashed), &hashed);
     output
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Attributes {
+    Ordinary,
+    /// Not on this disk; opening it would download it.
+    CloudOnly,
+    HiddenOrSystem,
+}
+
+fn classify(attributes: u32) -> Attributes {
+    if attributes & (ATTR_OFFLINE | ATTR_RECALL_ON_OPEN | ATTR_RECALL_ON_DATA_ACCESS) != 0 {
+        Attributes::CloudOnly
+    } else if attributes & (ATTR_HIDDEN | ATTR_SYSTEM) != 0 {
+        Attributes::HiddenOrSystem
+    } else {
+        Attributes::Ordinary
+    }
+}
+
+#[cfg(windows)]
+fn attributes_of(path: &Path) -> u32 {
+    use std::os::windows::fs::MetadataExt;
+    // Unreadable metadata: let the decoder fail and count it as unreadable.
+    std::fs::symlink_metadata(path).map_or(0, |metadata| metadata.file_attributes())
+}
+
+#[cfg(not(windows))]
+fn attributes_of(path: &Path) -> u32 {
+    if is_hidden_or_system(path) { ATTR_HIDDEN } else { 0 }
 }
 
 fn is_image(path: &Path) -> bool {
@@ -183,7 +239,7 @@ fn hash_images(
                 if is_cancelled() {
                     return None;
                 }
-                let result = hash_one(path, *size, &is_cancelled);
+                let result = hash_isolated(|| hash_one(path, *size, &is_cancelled));
                 let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
                 if let Some(report) = progress {
                     report(&DuplicateProgress {
@@ -208,6 +264,15 @@ fn hash_images(
         return None;
     }
     Some((hashed, undecodable.load(Ordering::Relaxed)))
+}
+
+/// Runs one file's hashing so a decoder panic on a crafted file costs that file,
+/// not the scan.
+fn hash_isolated(
+    hash: impl FnOnce() -> Result<Option<Hashed>, String>,
+) -> Result<Option<Hashed>, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(hash))
+        .unwrap_or_else(|_| Err("the image decoder panicked".to_owned()))
 }
 
 /// `Ok(None)` for an image that is fine but not worth comparing (featureless,
@@ -513,13 +578,14 @@ mod tests {
     fn scan(root: &Path, protected: &ProtectedPaths) -> ImageScan {
         let settings = DuplicatesSettings { min_size_bytes: 1, roots: Vec::new() };
         let cancel = CancellationToken::new();
-        scan_images(
+        scan_images_above(
             &DuplicateContext {
                 roots: std::slice::from_ref(&root.to_path_buf()),
                 protected,
                 settings: &settings,
                 cancel: &cancel,
             },
+            0,
             None,
         )
     }
@@ -638,6 +704,42 @@ mod tests {
             None,
         );
         assert!(result.cancelled && result.findings.is_empty());
+    }
+
+    #[test]
+    fn images_below_the_size_floor_are_not_read() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        library(tmp.path());
+        let settings = DuplicatesSettings { min_size_bytes: 1, roots: Vec::new() };
+        let cancel = CancellationToken::new();
+        let protected = ProtectedPaths::empty();
+        let result = scan_images_above(
+            &DuplicateContext {
+                roots: std::slice::from_ref(&tmp.path().to_path_buf()),
+                protected: &protected,
+                settings: &settings,
+                cancel: &cancel,
+            },
+            u64::MAX,
+            None,
+        );
+        assert!(result.findings.is_empty() && result.unreadable == 0);
+    }
+
+    #[test]
+    fn cloud_placeholders_are_skipped_before_hidden_files() {
+        assert_eq!(classify(0x20), Attributes::Ordinary, "archive bit only");
+        assert_eq!(classify(ATTR_RECALL_ON_DATA_ACCESS | 0x20), Attributes::CloudOnly);
+        assert_eq!(classify(ATTR_RECALL_ON_OPEN), Attributes::CloudOnly);
+        assert_eq!(classify(ATTR_OFFLINE), Attributes::CloudOnly);
+        assert_eq!(classify(ATTR_HIDDEN | ATTR_RECALL_ON_DATA_ACCESS), Attributes::CloudOnly);
+        assert_eq!(classify(ATTR_SYSTEM), Attributes::HiddenOrSystem);
+    }
+
+    #[test]
+    fn a_decoder_panic_costs_one_file_not_the_scan() {
+        let result = hash_isolated(|| panic!("crafted file"));
+        assert!(result.is_err());
     }
 
     #[test]

@@ -2734,5 +2734,11 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
   its content changed or the keeper is gone.
 - **Commands.** `start_similar_image_scan`, `set_similar_image_keeper`, both
   covered by `command_wiring` probes. EN + TR strings.
+- **Review fixes.** Online-only cloud files (OFFLINE / RECALL_ON_OPEN /
+  RECALL_ON_DATA_ACCESS) are skipped from their attributes without being
+  opened, so the scan never downloads OneDrive placeholders; the count is
+  shown as `cloudOnly`. Each file's decode runs under `catch_unwind`, so a
+  decoder panic drops one file. The Duplicates minimum file size applies here
+  too.
 - **Decisions.** K-029. HEIC/JXL, thumbnails and a threshold setting deferred
   (DECISIONS-NEEDED).
