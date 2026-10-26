@@ -121,6 +121,16 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "set_folder_keep_rule",
             args: json!({ "scanId": nil, "groupId": "g", "rule": { "kind": "oldest" } }),
         },
+        // An explicit root, or the command decodes the developer's Pictures.
+        Probe {
+            command: "start_similar_image_scan",
+            args: json!({ "roots": [&root] }),
+        },
+        // Unknown scan id: refused after both states resolve.
+        Probe {
+            command: "set_similar_image_keeper",
+            args: json!({ "scanId": nil, "groupId": "g", "keeperPath": &root }),
+        },
         // Writes to the tempdir database only.
         Probe {
             command: "ignore_folder_group",

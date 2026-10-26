@@ -204,6 +204,15 @@ pub enum Justification {
         /// The copy this one was declared identical to.
         keeper_path: Option<PathBuf>,
     },
+    /// The image looks like another one the user keeps. The executor re-hashes
+    /// it (unchanged since the scan) and checks the kept look-alike is there.
+    #[serde(rename_all = "camelCase")]
+    SimilarImage {
+        /// blake3 of this file's own contents when the group was formed.
+        content_hash: String,
+        /// The look-alike that stays.
+        keeper_path: PathBuf,
+    },
     /// An autostart entry. The executor re-reads it from its source and refuses
     /// if it has moved, vanished, or now points at a different program.
     #[serde(rename_all = "camelCase")]

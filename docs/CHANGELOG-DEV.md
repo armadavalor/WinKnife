@@ -2838,3 +2838,28 @@ shell with a Review button that reopens the normal cleaner results.
   `tests/scheduled_auto_quarantine.rs` cover cancelled, busy, manual review,
   ran and failed.
 - **Deferred.** See DECISIONS-NEEDED "scheduled scan" items.
+
+## 2026-10-26 — C18: similar-image duplicates
+
+**Built.** A "Similar images" mode in the Duplicates tool. JPEG, PNG, WebP and
+GIF are decoded with the `image` crate (0.25, only those format features) and
+hashed with a 9x8 dHash; images within `SIMILAR_MAX_DISTANCE = 8` bits are
+grouped with union-find. Scan is read-only, cancellable, reports progress and
+decodes on a bounded rayon pool (4 threads) so memory stays flat.
+
+- **Safety.** Nothing is preselected. Each group keeps one image (largest
+  pixels, then largest file); the keeper is never selectable and the user can
+  move it with "Keep this one" (`set_similar_image_keeper`). Protected members
+  are DoNotDelete/InfoOnly. Removal goes through quarantine and the executor;
+  `Justification::SimilarImage` makes gate 4 re-hash the file and refuse if
+  its content changed or the keeper is gone.
+- **Commands.** `start_similar_image_scan`, `set_similar_image_keeper`, both
+  covered by `command_wiring` probes. EN + TR strings.
+- **Review fixes.** Online-only cloud files (OFFLINE / RECALL_ON_OPEN /
+  RECALL_ON_DATA_ACCESS) are skipped from their attributes without being
+  opened, so the scan never downloads OneDrive placeholders; the count is
+  shown as `cloudOnly`. Each file's decode runs under `catch_unwind`, so a
+  decoder panic drops one file. The Duplicates minimum file size applies here
+  too.
+- **Decisions.** K-032. HEIC/JXL, thumbnails and a threshold setting deferred
+  (DECISIONS-NEEDED).

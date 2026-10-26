@@ -42,6 +42,8 @@ globset = "0.4"
 # full-hash pass (module spec 03).
 blake3 = "1.5"
 rayon = "1.10"
+# Similar images (research C18): decode-only, the four formats v1 reads.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 # `std::fs::canonicalize` hands back `\\?\` verbatim paths, which compare
 # differently from every path the rest of the app has ever seen. `dunce` returns
 # the plain form whenever Win32 accepts one, so the protected-path gate can

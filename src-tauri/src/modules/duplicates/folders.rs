@@ -176,7 +176,7 @@ pub fn scan_folders(
 }
 
 /// Drop repeated and nested roots: a folder must be walked once.
-fn distinct_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+pub(super) fn distinct_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
     roots
         .iter()
         .filter(|root| {

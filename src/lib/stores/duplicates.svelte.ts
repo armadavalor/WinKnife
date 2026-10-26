@@ -7,7 +7,9 @@
  *   and the app has no way to know which copy somebody meant to keep. The
  *   heuristic nominates; the selection stays empty until a person agrees.
  *   Folder groups are the exception: a whole folder that repeats another one
- *   is a clearer call, so its non-kept copies start selected (C3).
+ *   is a clearer call, so its non-kept copies start selected (C3). Similar
+ *   images (C18) are not: look-alikes are never byte-equal, so they start
+ *   with nothing selected.
  * - **A scan can be stopped.** A full-hash pass over a Pictures folder is
  *   minutes of reading, so `cancel_scan` is reachable while it runs.
  */
@@ -17,7 +19,9 @@ import {
   ignoreFolderGroup,
   onScanProgress,
   setFolderKeepRule,
+  setSimilarImageKeeper,
   startDuplicateScan,
+  startSimilarImageScan,
 } from "$lib/api";
 import {
   isApiError,
@@ -27,13 +31,19 @@ import {
   type ExecReport,
   type ExtensionClass,
   type FolderGroup,
+  type ImageGroup,
+  type ImageMember,
   type KeepRule,
   type Recommendation,
+  type SimilarImageScanResult,
 } from "$lib/types";
 import { ExecTracker } from "./execProgress.svelte";
 
 /** Which step of the 3-step pattern the route is on. */
 export type Step = "idle" | "scanning" | "review" | "executing" | "done";
+
+/** Byte-equal copies, or look-alike images (C18). */
+export type DuplicateMode = "files" | "images";
 
 const IMAGE_EXTENSIONS = new Set([
   "jpg",
@@ -105,6 +115,10 @@ function folderRecIds(group: FolderGroup): string[] {
 class DuplicatesStore {
   step = $state<Step>("idle");
   result = $state<DuplicateScanResult | null>(null);
+  /** Which kind of scan the idle step starts and the review step shows. */
+  mode = $state<DuplicateMode>("files");
+  /** The last similar-image scan, when `mode` is "images". */
+  imageResult = $state<SimilarImageScanResult | null>(null);
   /** Selected recommendation ids. */
   selected = $state<Set<string>>(new Set());
   /** Per-set keeper override: set id → finding id of the copy to keep. */
@@ -157,9 +171,14 @@ class DuplicatesStore {
     );
   }
 
+  /** The active mode's scan id and recommendations. */
+  private get active(): { scanId: string; recommendations: Recommendation[] } | null {
+    return this.mode === "images" ? this.imageResult : this.result;
+  }
+
   /** Bytes the current selection would reclaim. */
   get selectedBytes(): number {
-    return (this.result?.recommendations ?? [])
+    return (this.active?.recommendations ?? [])
       .filter((rec) => this.selected.has(rec.id))
       .reduce((total, rec) => total + rec.savingsBytes, 0);
   }
@@ -175,6 +194,22 @@ class DuplicatesStore {
 
   /** Run a scan. */
   async scan(): Promise<void> {
+    await this.runScan(async () => {
+      if (this.mode === "images") {
+        // Nothing preselected: a look-alike is a judgement, not a fact.
+        this.imageResult = await startSimilarImageScan(this.roots());
+        return;
+      }
+      this.result = await startDuplicateScan(this.roots());
+      this.selected = new Set(this.folderDefaults(this.result.folderGroups));
+    });
+  }
+
+  private roots(): string[] | undefined {
+    return this.pinnedRoot === null ? undefined : [this.pinnedRoot];
+  }
+
+  private async runScan(run: () => Promise<void>): Promise<void> {
     this.step = "scanning";
     this.error = null;
     this.report = null;
@@ -185,12 +220,11 @@ class DuplicatesStore {
     this.runningScanId = null;
     this.selected = new Set();
     this.keeperOverrides = new Map();
+    this.result = null;
+    this.imageResult = null;
     try {
       await this.attachProgress();
-      this.result = await startDuplicateScan(
-        this.pinnedRoot === null ? undefined : [this.pinnedRoot],
-      );
-      this.selected = new Set(this.folderDefaults(this.result.folderGroups));
+      await run();
       this.step = "review";
     } catch (error: unknown) {
       this.error = message(error);
@@ -362,6 +396,49 @@ class DuplicatesStore {
     }
   }
 
+  /** Whether a look-alike image may be ticked: never the keeper or a protected one. */
+  isImageSelectable(member: ImageMember): boolean {
+    if (member.keeper || member.protected) {
+      return false;
+    }
+    const ids = new Set(member.recommendationIds);
+    return (this.imageResult?.recommendations ?? []).some(
+      (rec) => ids.has(rec.id) && rec.action === "quarantine",
+    );
+  }
+
+  /**
+   * Keep a different image of a look-alike group. The backend re-analyses the
+   * group; the old recommendations leave the selection and nothing new is
+   * ticked, so the image just chosen can never end up selected.
+   */
+  async chooseImageKeeper(group: ImageGroup, member: ImageMember): Promise<void> {
+    const scan = this.imageResult;
+    if (!scan) {
+      return;
+    }
+    this.error = null;
+    try {
+      const update = await setSimilarImageKeeper(scan.scanId, group.id, member.path);
+      const replaced = new Set(update.replaced);
+      this.imageResult = {
+        ...scan,
+        groups: scan.groups.map((existing) =>
+          existing.id === group.id ? update.group : existing,
+        ),
+        recommendations: [
+          ...scan.recommendations.filter((rec) => !replaced.has(rec.id)),
+          ...update.recommendations,
+        ],
+      };
+      this.selected = new Set(
+        [...this.selected].filter((id) => !replaced.has(id)),
+      );
+    } catch (error: unknown) {
+      this.error = message(error);
+    }
+  }
+
   /** Hide a group now and from future scans. */
   async ignoreGroup(group: FolderGroup): Promise<void> {
     const scan = this.result;
@@ -388,7 +465,7 @@ class DuplicatesStore {
 
   /** Apply the selection. Duplicates never empty the recycle bin. */
   async execute(): Promise<void> {
-    const scan = this.result;
+    const scan = this.active;
     if (!scan) {
       return;
     }
@@ -409,6 +486,7 @@ class DuplicatesStore {
   reset(): void {
     this.step = "idle";
     this.result = null;
+    this.imageResult = null;
     this.selected = new Set();
     this.keeperOverrides = new Map();
     this.report = null;

@@ -113,6 +113,11 @@
   ]);
   const totalSets = $derived(store.sets.length + store.folderGroups.length);
   const scan = $derived(store.result?.scan ?? null);
+  const images = $derived(store.mode === "images" ? store.imageResult : null);
+
+  function fileName(path: string): string {
+    return path.split(/[\\/]/).pop() ?? path;
+  }
 
   const CLASSES: { value: ExtensionClass; label: string }[] = [
     { value: "all", label: t("duplicates.classAll") },
@@ -179,16 +184,31 @@
           </button>
         </p>
       {/if}
+      <div class="flex items-center gap-2" role="group" aria-label={t("duplicates.mode.label")}>
+        {#each ["files", "images"] as const as mode (mode)}
+          <button
+            type="button"
+            class="btn-ghost px-3! py-1.5! text-sm!"
+            aria-pressed={store.mode === mode}
+            class:font-semibold={store.mode === mode}
+            onclick={() => (store.mode = mode)}
+          >
+            {t(`duplicates.mode.${mode}`)}
+          </button>
+        {/each}
+      </div>
       <div class="flex items-center gap-2">
         <button
           type="button"
           class="btn-primary"
           onclick={() => store.scan()}
         >
-          {t("duplicates.scan")}
+          {store.mode === "images" ? t("duplicates.images.scan") : t("duplicates.scan")}
         </button>
       </div>
-      <p class="text-sm text-ink-muted">{t("duplicates.intro")}</p>
+      <p class="text-sm text-ink-muted">
+        {store.mode === "images" ? t("duplicates.images.intro") : t("duplicates.intro")}
+      </p>
       <details class="group">
         <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
           {t("duplicates.how")}
@@ -270,6 +290,119 @@
         </button>
       </div>
     </section>
+  {:else if store.step === "review" && images}
+    <section
+      class="flex flex-wrap items-center gap-4 rounded-xl border border-surface-2 bg-surface-1 px-5 py-4"
+    >
+      <p class="flex-1 text-sm leading-relaxed">
+        {t("duplicates.images.summary", { groups: images.groups.length })}
+      </p>
+      <button
+        type="button"
+        class="btn-ghost px-3! py-1.5!"
+        onclick={() => store.reset()}
+      >
+        {t("duplicates.scanAgain")}
+      </button>
+    </section>
+
+    {#if images.cancelled}
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
+        {t("duplicates.cancelled")}
+      </p>
+    {/if}
+    {#if images.skippedRoots.length > 0}
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
+        {t("duplicates.skippedRoots", { roots: images.skippedRoots.join(" · ") })}
+      </p>
+    {/if}
+    {#if images.unreadable > 0}
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
+        {t("duplicates.images.unreadable", { count: images.unreadable })}
+      </p>
+    {/if}
+    {#if images.cloudOnly > 0}
+      <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted">
+        {t("duplicates.images.cloudOnly", { count: images.cloudOnly })}
+      </p>
+    {/if}
+
+    {#if images.groups.length === 0 && !images.cancelled}
+      <EmptyState message={t("duplicates.images.empty")} />
+    {/if}
+
+    {#each images.groups as group (group.id)}
+      <section class="rounded-xl border border-surface-2 bg-surface-1" data-image-group={group.id}>
+        <header class="px-4 py-3 text-xs text-ink-muted">
+          {t("duplicates.images.groupLabel", { count: group.members.length })}
+        </header>
+        <ul class="divide-y divide-surface-2 border-t border-surface-2">
+          {#each group.members as member (member.path)}
+            {@const selectable = store.isImageSelectable(member)}
+            <li class="flex items-start gap-3 px-4 py-3">
+              {#if selectable}
+                <input
+                  type="checkbox"
+                  class="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+                  checked={store.isFolderSelected(member.recommendationIds)}
+                  aria-label={member.path}
+                  onchange={(event) =>
+                    store.toggleFolder(member.recommendationIds, event.currentTarget.checked)}
+                />
+              {:else}
+                <span class="mt-1 size-4 shrink-0" aria-hidden="true"></span>
+              {/if}
+              <span class="min-w-0 flex-1">
+                <span class="flex items-center gap-2">
+                  <span class="min-w-0 flex-1 truncate text-sm text-ink" title={member.path}>
+                    {fileName(member.path)}
+                  </span>
+                  {#if member.keeper}
+                    <span
+                      class="shrink-0 rounded-md bg-risk-safe/15 px-1.5 py-0.5 text-[0.65rem] font-medium text-risk-safe"
+                    >
+                      {t("duplicates.folders.keeper")}
+                    </span>
+                  {:else}
+                    <span class="shrink-0 text-xs tabular-nums text-risk-review">
+                      {t("duplicates.images.similar", { pct: member.similarity })}
+                    </span>
+                  {/if}
+                  {#if member.protected}
+                    <span
+                      class="shrink-0 rounded-md bg-surface-2 px-1.5 py-0.5 text-[0.65rem] font-medium text-ink-muted"
+                    >
+                      {t("duplicates.folders.protected")}
+                    </span>
+                  {/if}
+                </span>
+                <span class="mt-0.5 block truncate font-mono text-[0.7rem] text-ink-faint">
+                  {truncatePath(member.path)}
+                </span>
+                <span class="mt-1 block text-xs leading-relaxed text-ink-muted">
+                  {member.reason}
+                </span>
+                <span class="mt-1 block text-[0.7rem] text-ink-faint">
+                  {member.width}×{member.height} · {formatBytes(member.sizeBytes)}
+                  {#if !member.keeper}
+                    ·
+                    <button
+                      type="button"
+                      class="underline underline-offset-2 transition-colors hover:text-ink"
+                      onclick={() => store.chooseImageKeeper(group, member)}
+                    >
+                      {t("duplicates.images.makeKeeper")}
+                    </button>
+                  {/if}
+                </span>
+              </span>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/each}
+
+    {@render selectionBar()}
   {:else if store.step === "review" && scan}
     <section
       class="flex flex-wrap items-center gap-4 rounded-xl border border-surface-2 bg-surface-1 px-5 py-4"
@@ -612,6 +745,11 @@
       </section>
     {/if}
 
+    {@render selectionBar()}
+  {/if}
+</div>
+
+{#snippet selectionBar()}
     <div
       class="sticky bottom-0 -mx-8 flex items-center gap-4 border-t border-surface-2 bg-surface-0/95 px-8 py-4 backdrop-blur"
     >
@@ -630,8 +768,7 @@
         {t("duplicates.remove")}
       </button>
     </div>
-  {/if}
-</div>
+{/snippet}
 
 <ConfirmDialog
   open={confirming}

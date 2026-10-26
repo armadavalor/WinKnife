@@ -418,6 +418,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::cancel_scan,
         commands::start_duplicate_scan,
         commands::set_folder_keep_rule,
+        commands::start_similar_image_scan,
+        commands::set_similar_image_keeper,
         commands::ignore_folder_group,
         commands::clear_ignored_folder_groups,
         commands::start_empty_folder_scan,

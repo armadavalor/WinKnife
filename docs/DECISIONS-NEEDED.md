@@ -952,3 +952,9 @@ not ours to take.
       app restarts; abandoning it with "New scan" does not release the pin, so
       auto-quarantine waits for the next manual execute. Safest reading: never
       move files under a review the user may still act on.
+
+## Open items raised by similar-image duplicates (2026-10-26, C18)
+
+- [ ] 2026-10-26 (K-032): HEIC/HEIF and JPEG XL are skipped. The `image` crate has no pure-Rust decoder for them; adding libheif/libjxl means a native dependency and its licence review. Phone photos in HEIC are therefore not compared.
+- [ ] 2026-10-26 (K-032): no thumbnails. The asset protocol is off, so rows show name, size and pixel size only. Showing previews needs either the asset protocol scoped to scan roots or base64 thumbnails over IPC; both widen what the UI can read.
+- [ ] 2026-10-26 (K-032): the threshold is one named constant (`SIMILAR_MAX_DISTANCE = 8`), not a user setting. Make it a slider only if users report misses or false matches.

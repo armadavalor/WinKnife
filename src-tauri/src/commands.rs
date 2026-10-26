@@ -54,7 +54,7 @@ use crate::core::types::{ExecOutcome, ExecReport};
 use crate::modules::apps::{AppsList, AppsService, SignerInfo};
 use crate::modules::archiver;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
-use crate::modules::duplicates::{self, folders, DuplicateProgress, DuplicateScan};
+use crate::modules::duplicates::{self, folders, images, DuplicateProgress, DuplicateScan};
 use crate::modules::env_vars::{EnvChange, EnvListing, EnvPreview, EnvVarService};
 use crate::modules::hosts::{HostsBackup, HostsDocument, HostsPreview, HostsService, SaveOutcome};
 use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
@@ -714,6 +714,24 @@ pub struct DuplicateScanResult {
     pub folder_groups: Vec<folders::FolderGroup>,
 }
 
+/// The duplicates settings and the roots a scan walks. An explicit selection
+/// from the folder picker wins; then the saved roots; then the profile folders
+/// module spec 03 names.
+fn duplicate_roots(
+    db: &Database,
+    roots: Option<Vec<PathBuf>>,
+) -> Result<(duplicates::DuplicatesSettings, Vec<PathBuf>), CoreError> {
+    let stored: duplicates::DuplicatesSettings = db
+        .with(|conn| settings::get_module(conn, "duplicates"))?
+        .unwrap_or_default();
+    let stored = stored.validated();
+    let roots = roots
+        .filter(|roots| !roots.is_empty())
+        .or_else(|| Some(stored.roots.clone()).filter(|roots| !roots.is_empty()))
+        .unwrap_or_else(|| duplicates::default_roots(&crate::core::platform::SystemEnv));
+    Ok((stored, roots))
+}
+
 /// Run a duplicate scan over the configured roots.
 ///
 /// Blocking work; the caller runs it off the UI thread. Read-only.
@@ -730,17 +748,7 @@ pub async fn start_duplicate_scan<R: Runtime>(
     cancels: State<'_, CancelRegistry>,
 ) -> Result<DuplicateScanResult, ApiError> {
     guarded_async("start_duplicate_scan", async {
-        let stored: duplicates::DuplicatesSettings = db
-            .with(|conn| settings::get_module(conn, "duplicates"))?
-            .unwrap_or_default();
-        let stored = stored.validated();
-
-        // An explicit selection from the folder picker wins; then the saved roots;
-        // then the profile folders module spec 03 names.
-        let roots = roots
-            .filter(|roots| !roots.is_empty())
-            .or_else(|| Some(stored.roots.clone()).filter(|roots| !roots.is_empty()))
-            .unwrap_or_else(|| duplicates::default_roots(&crate::core::platform::SystemEnv));
+        let (stored, roots) = duplicate_roots(&db, roots)?;
 
         let scan_id = Uuid::new_v4();
         let started_at = Utc::now();
@@ -911,6 +919,185 @@ pub fn set_folder_keep_rule(
         store.replace(result)?;
 
         Ok(FolderGroupUpdate {
+            group,
+            replaced: replaced.into_iter().map(|rec| rec.id).collect(),
+            recommendations,
+        })
+    })
+}
+
+/// What a similar-image scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SimilarImageScanResult {
+    /// Id for `execute`, `cancel_scan` and `set_similar_image_keeper`.
+    pub scan_id: Uuid,
+    /// Groups of look-alike images, keeper first in each.
+    pub groups: Vec<images::ImageGroup>,
+    /// One recommendation per image. Never `safe`; keepers never move.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+    /// Roots refused before walking, with the reason.
+    pub skipped_roots: Vec<String>,
+    /// Images that could not be read or decoded.
+    pub unreadable: u64,
+    /// Online-only cloud images skipped unopened, so nothing was downloaded.
+    pub cloud_only: u64,
+    pub cancelled: bool,
+}
+
+/// Look for similar (not byte-equal) images under the duplicate roots
+/// (research C18). Read-only.
+///
+/// # Errors
+/// Returns an error only if the settings could not be read.
+#[tauri::command]
+pub async fn start_similar_image_scan<R: Runtime>(
+    app: AppHandle<R>,
+    roots: Option<Vec<PathBuf>>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+    cancels: State<'_, CancelRegistry>,
+) -> Result<SimilarImageScanResult, ApiError> {
+    guarded_async("start_similar_image_scan", async {
+        let (stored, roots) = duplicate_roots(&db, roots)?;
+        let scan_id = Uuid::new_v4();
+        let started_at = Utc::now();
+        let cancel = cancels.start(scan_id);
+        let throttle = std::sync::Mutex::new(ProgressThrottle::new());
+
+        let emit = |progress: &DuplicateProgress| {
+            // Called from the decode pool's threads, so the throttle is shared.
+            let allowed = throttle
+                .lock()
+                .map(|mut throttle| throttle.should_emit())
+                .unwrap_or(false);
+            if !allowed {
+                return;
+            }
+            let payload = ScanProgress {
+                scan_id,
+                module: "duplicates".to_owned(),
+                items_scanned: progress.done,
+                current_path: Some(progress.current_path.display().to_string()),
+                pct: percent(progress.done, progress.total),
+                items_total: None,
+            };
+            if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                tracing::debug!(error = %err, "image progress event was not delivered");
+            }
+        };
+
+        let scan = images::scan_images(
+            &duplicates::DuplicateContext {
+                roots: &roots,
+                protected: services.brain.protected_paths(),
+                settings: &stored,
+                cancel: &cancel,
+            },
+            Some(&emit),
+        );
+        // A Stop accepted after the scan's last check was still promised to the UI.
+        let cancelled = cancels.finish(scan_id) || scan.cancelled;
+        let findings = if cancelled { Vec::new() } else { scan.findings };
+        let (groups, recommendations) =
+            images::analyze(&findings, &services.brain, &HashMap::new());
+        tracing::info!(
+            scan = %scan_id,
+            groups = groups.len(),
+            unreadable = scan.unreadable,
+            cloud_only = scan.cloud_only,
+            cancelled,
+            "similar-image scan finished"
+        );
+
+        store.insert(ScanResult {
+            scan_id,
+            module: "duplicates".to_owned(),
+            findings: findings.clone(),
+            recommendations: recommendations.clone(),
+            skipped_rules: scan.skipped_roots.clone(),
+            cancelled,
+        });
+        remember(
+            &db,
+            scan_id,
+            "duplicates",
+            started_at,
+            groups.len() as u64,
+            0,
+            cancelled,
+        );
+        let _ = events::emit_scan_done(
+            &app,
+            &ScanDone {
+                scan_id,
+                module: "duplicates".to_owned(),
+                finding_count: findings.len() as u64,
+            },
+        );
+
+        Ok(SimilarImageScanResult {
+            scan_id,
+            groups,
+            recommendations,
+            skipped_roots: scan.skipped_roots,
+            unreadable: scan.unreadable,
+            cloud_only: scan.cloud_only,
+            cancelled,
+        })
+    })
+    .await
+}
+
+/// A look-alike group re-analysed with a new keeper.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageGroupUpdate {
+    /// The group, keeper first.
+    pub group: images::ImageGroup,
+    /// Ids of the recommendations this group had before; they are gone now.
+    pub replaced: Vec<Uuid>,
+    /// The group's recommendations with the new keeper.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+}
+
+/// Change which image a look-alike group keeps. Re-analyses only that group.
+///
+/// # Errors
+/// Returns an error when the scan is no longer retained or the group is not in it.
+#[tauri::command]
+pub fn set_similar_image_keeper(
+    scan_id: Uuid,
+    group_id: String,
+    keeper_path: PathBuf,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+) -> Result<ImageGroupUpdate, ApiError> {
+    guarded("set_similar_image_keeper", || {
+        let mut result = store.get(scan_id)?;
+        let group_findings: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.meta.get("imageGroupId").and_then(|id| id.as_str()) == Some(&group_id))
+            .cloned()
+            .collect();
+        let finding_ids: HashSet<Uuid> = group_findings.iter().map(|f| f.id).collect();
+
+        let keepers = HashMap::from([(group_id.clone(), keeper_path)]);
+        let (groups, recommendations) = images::analyze(&group_findings, &services.brain, &keepers);
+        let group = groups.into_iter().next().ok_or_else(|| {
+            CoreError::UnknownScan(format!("{scan_id} has no image group {group_id}"))
+        })?;
+
+        let (replaced, kept): (Vec<_>, Vec<_>) = result
+            .recommendations
+            .into_iter()
+            .partition(|rec| rec.finding_ids.iter().any(|id| finding_ids.contains(id)));
+        result.recommendations = [kept, recommendations.clone()].concat();
+        store.replace(result)?;
+
+        Ok(ImageGroupUpdate {
             group,
             replaced: replaced.into_iter().map(|rec| rec.id).collect(),
             recommendations,

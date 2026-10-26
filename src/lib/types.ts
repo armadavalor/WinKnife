@@ -105,6 +105,7 @@ export type Justification =
       keeper: boolean;
       keeperPath: string | null;
     }
+  | { kind: "similarImage"; contentHash: string; keeperPath: string }
   | {
       kind: "startupEntry";
       source: StartupSource;
@@ -440,6 +441,49 @@ export interface FolderGroup {
 export interface FolderGroupUpdate {
   group: FolderGroup;
   /** Recommendation ids the group had before; gone now. */
+  replaced: string[];
+  recommendations: Recommendation[];
+}
+
+/** One image in a look-alike group (research C18). */
+export interface ImageMember {
+  path: string;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  keeper: boolean;
+  /** Under a protected path: never selectable. */
+  protected: boolean;
+  /** 0–100, against the keeper. */
+  similarity: number;
+  reason: string;
+  findingIds: string[];
+  recommendationIds: string[];
+}
+
+/** Images that look alike (not byte-equal). */
+export interface ImageGroup {
+  id: string;
+  /** Keeper first. */
+  members: ImageMember[];
+}
+
+/** What `start_similar_image_scan` hands back. */
+export interface SimilarImageScanResult {
+  scanId: string;
+  groups: ImageGroup[];
+  /** One per image. Never `safe`; keepers never move. */
+  recommendations: Recommendation[];
+  skippedRoots: string[];
+  unreadable: number;
+  /** Online-only cloud images, skipped unopened so nothing was downloaded. */
+  cloudOnly: number;
+  cancelled: boolean;
+}
+
+/** What `set_similar_image_keeper` hands back. */
+export interface ImageGroupUpdate {
+  group: ImageGroup;
   replaced: string[];
   recommendations: Recommendation[];
 }
