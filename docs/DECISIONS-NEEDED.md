@@ -915,3 +915,11 @@ not ours to take.
 ## Open items raised by treemap tagging (C13, 2026-10-26)
 
 - [ ] 2026-10-26 (K-027): folder tagging is not offered. Quarantining a whole folder from the treemap needs its own gate-4 check (a folder's contents can change between tagging and sending; size + mtime of the folder itself does not prove that) and a decision on protected children. The UI only lets files be tagged; the backend refuses folders.
+- [ ] 2026-10-26 (K-028): the drive-root refusal only sees a root by its path (`C:\`, `\\server\share\`, after `..` folding and `canonicalize`). A system or EFI volume mounted on a folder (`D:\mnt\bootmgr`, volume mount point) still looks like an ordinary folder, so its root files can be tagged. Spotting that needs `GetVolumePathNameW` per file. Left as is: mounting the boot volume on a folder is rare, and Quarantine keeps the file restorable.
+
+## Open items raised by the big-file archiver (2026-10-26, C16)
+
+- [ ] 2026-10-26 (phase 7): a running move cannot be cancelled; a multi-GB copy runs to the end of the current file and the batch. Safest interpretation taken: no cancel.
+- [ ] 2026-10-26 (phase 7): if a source changes between hashing and quarantine, the archived copy is the older version but nothing is lost — Quarantine holds the newer original. Safest interpretation taken: no re-hash after the copy; the report shows the archived hash.
+- [ ] 2026-10-26 (phase 7): a copy that fails half way leaves an incomplete file in the destination, because only quarantine may remove files. Safest interpretation taken: leave it and name it in the report; a retry refuses to overwrite it until the user deletes it. Alternative: quarantine the partial copy (costs a second copy across volumes).
+- [ ] 2026-10-26 (phase 7): restoring from the manifest (copy back from the archive drive) is not built; undo goes through Quarantine only. Revisit if users archive and then purge quarantine.

@@ -51,6 +51,7 @@ use crate::core::settings;
 use crate::core::state::{CancelRegistry, ScanResult, ScanStore};
 use crate::core::types::ExecReport;
 use crate::modules::apps::{AppsList, AppsService, SignerInfo};
+use crate::modules::archiver;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, folders, DuplicateProgress, DuplicateScan};
 use crate::modules::empty_folders;
@@ -873,6 +874,263 @@ pub async fn start_empty_folder_scan<R: Runtime>(
         })
     })
     .await
+}
+
+/// What a big-file archiver scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiverScanResult {
+    /// Id for `archive_files` and `cancel_scan`.
+    pub scan_id: Uuid,
+    /// The folder that was scanned.
+    pub root: PathBuf,
+    /// Large files unused for a long time.
+    pub findings: Vec<crate::core::types::Finding>,
+    /// One explained recommendation per finding.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+    /// Paths that could not be read.
+    pub unreadable: u64,
+    /// Large, old files left out because they are in a protected location.
+    pub skipped_protected: u64,
+    /// Entries looked at.
+    pub entries_seen: u64,
+    /// Whether the scan was cancelled part-way.
+    pub cancelled: bool,
+    /// The size limit used, in bytes.
+    pub min_size_bytes: u64,
+    /// The age limit used, in days.
+    pub min_age_days: i64,
+}
+
+/// Scan `root` (default: the user profile) for large files unused for a year.
+///
+/// Blocking work; read-only.
+///
+/// # Errors
+/// Returns an error when the root is not a folder, is a protected location, or
+/// no default root can be determined.
+#[tauri::command]
+pub async fn start_archiver_scan<R: Runtime>(
+    app: AppHandle<R>,
+    root: Option<PathBuf>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+    cancels: State<'_, CancelRegistry>,
+) -> Result<ArchiverScanResult, ApiError> {
+    guarded_async("start_archiver_scan", async {
+        use crate::core::platform::EnvResolver;
+
+        let root = root
+            .or_else(|| {
+                crate::core::platform::SystemEnv
+                    .var("USERPROFILE")
+                    .map(PathBuf::from)
+            })
+            .ok_or_else(|| {
+                invalid_input("no folder was chosen and no user profile was found".to_owned())
+            })?;
+        if !root.is_dir() {
+            return Err(invalid_input(format!("`{}` is not a folder", root.display())).into());
+        }
+        if let Some(refusal) = services.brain.path_refusal(&root) {
+            return Err(invalid_input(refusal.reason).into());
+        }
+
+        let scan_id = Uuid::new_v4();
+        let started_at = Utc::now();
+        let cancel = cancels.start(scan_id);
+        let mut throttle = ProgressThrottle::new();
+        let mut emit = |seen: u64, current: &Path| {
+            if !throttle.should_emit() {
+                return;
+            }
+            let payload = ScanProgress {
+                scan_id,
+                module: archiver::MODULE_ID.to_owned(),
+                items_scanned: seen,
+                current_path: Some(current.display().to_string()),
+                pct: None,
+                items_total: None,
+            };
+            if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                tracing::debug!(error = %err, "archiver progress event was not delivered");
+            }
+        };
+
+        // Name the scan before the walk starts so Stop has an id right away.
+        let initial = ScanProgress {
+            scan_id,
+            module: archiver::MODULE_ID.to_owned(),
+            items_scanned: 0,
+            current_path: Some(root.display().to_string()),
+            pct: None,
+            items_total: None,
+        };
+        if let Err(err) = events::emit_scan_progress(&app, &initial) {
+            tracing::debug!(error = %err, "initial archiver progress event was not delivered");
+        }
+
+        let thresholds = archiver::Thresholds::default();
+        let output = archiver::scan(
+            &archiver::ScanContext {
+                root: &root,
+                protected: services.brain.protected_paths(),
+                cancel: &cancel,
+                thresholds,
+                now: Utc::now(),
+            },
+            Some(&mut emit),
+        );
+        cancels.finish(scan_id);
+
+        let recommendations = archiver::analyze(&output.findings, &services.brain);
+        let total_bytes = output.findings.iter().map(|f| f.size_bytes).sum();
+        store.insert(ScanResult {
+            scan_id,
+            module: archiver::MODULE_ID.to_owned(),
+            findings: output.findings.clone(),
+            recommendations: recommendations.clone(),
+            skipped_rules: Vec::new(),
+            cancelled: false,
+        });
+        remember(
+            &db,
+            scan_id,
+            archiver::MODULE_ID,
+            started_at,
+            output.findings.len() as u64,
+            total_bytes,
+            output.cancelled,
+        );
+        let _ = events::emit_scan_done(
+            &app,
+            &ScanDone {
+                scan_id,
+                module: archiver::MODULE_ID.to_owned(),
+                finding_count: output.findings.len() as u64,
+            },
+        );
+
+        Ok(ArchiverScanResult {
+            scan_id,
+            root,
+            unreadable: output.unreadable,
+            skipped_protected: output.skipped_protected,
+            entries_seen: output.entries_seen,
+            cancelled: output.cancelled,
+            findings: output.findings,
+            recommendations,
+            min_size_bytes: thresholds.min_size_bytes,
+            min_age_days: thresholds.min_age_days,
+        })
+    })
+    .await
+}
+
+/// One file of an archive run.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveItemReport {
+    /// The finding this was.
+    pub finding_id: Uuid,
+    /// The file as it was found.
+    pub path: PathBuf,
+    /// What happened to it.
+    #[serde(flatten)]
+    pub outcome: archiver::ArchiveOutcome,
+}
+
+/// What `archive_files` hands the UI.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveReport {
+    /// The validated destination folder.
+    pub destination: PathBuf,
+    /// The manifest file in it.
+    pub manifest_path: PathBuf,
+    /// Quarantine batch holding the originals.
+    pub batch_id: Uuid,
+    /// One entry per requested finding.
+    pub items: Vec<ArchiveItemReport>,
+}
+
+/// Move chosen archiver findings to `destination`: copy, verify, then send the
+/// original to quarantine. A file whose copy fails or does not verify is left
+/// exactly where it was.
+///
+/// # Errors
+/// Returns an error for an unknown or non-archiver scan, a refused destination,
+/// or a quarantine that is busy.
+#[tauri::command]
+pub async fn archive_files<R: Runtime>(
+    app: AppHandle<R>,
+    scan_id: Uuid,
+    finding_ids: Vec<Uuid>,
+    destination: PathBuf,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+) -> Result<ArchiveReport, ApiError> {
+    guarded_async("archive_files", async {
+        let scan = store.get(scan_id)?;
+        if scan.module != archiver::MODULE_ID {
+            return Err(
+                invalid_input(format!("scan {scan_id} is not a big-file archiver scan")).into(),
+            );
+        }
+        let chosen: Vec<_> = scan
+            .findings
+            .iter()
+            .filter(|f| finding_ids.contains(&f.id))
+            .collect();
+        let Some(first) = chosen.first() else {
+            return Err(invalid_input("no files were chosen".to_owned()).into());
+        };
+        let meta: archiver::ArchiverMeta = serde_json::from_value(first.meta.clone())
+            .map_err(|err| invalid_input(format!("the scan is missing its folder: {err}")))?;
+        let destination = archiver::validate_destination(
+            &destination,
+            &services.brain,
+            &meta.root,
+            services.quarantine.root(),
+        )
+        .map_err(invalid_input)?;
+
+        let _busy = services.quarantine.begin(Operation::Clean)?;
+        let batch_id = services.quarantine.start_batch();
+        let items = chosen
+            .iter()
+            .map(|finding| ArchiveItemReport {
+                finding_id: finding.id,
+                path: finding.path.clone(),
+                outcome: archiver::archive_one(
+                    &services.quarantine,
+                    &**db,
+                    &services.brain,
+                    batch_id,
+                    &finding.path,
+                    &destination,
+                ),
+            })
+            .collect();
+        notify_quarantine_changed(&app, &services, &db, Some(batch_id));
+
+        Ok(ArchiveReport {
+            manifest_path: destination.join(archiver::MANIFEST_FILE_NAME),
+            destination,
+            batch_id,
+            items,
+        })
+    })
+    .await
+}
+
+fn invalid_input(message: String) -> CoreError {
+    CoreError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        message,
+    ))
 }
 
 fn percent(done: u64, total: u64) -> Option<u8> {

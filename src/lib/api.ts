@@ -25,6 +25,8 @@ import type {
   EnvPreview,
   ProfilePreview,
   EmptyFolderScanResult,
+  ArchiverScanResult,
+  ArchiveReport,
   ExecProgress,
   ExecReport,
   FolderGroupUpdate,
@@ -225,6 +227,30 @@ export function startEmptyFolderScan(
   root?: string,
 ): Promise<EmptyFolderScanResult> {
   return invoke<EmptyFolderScanResult>("start_empty_folder_scan", { root });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — archiver
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Find large files unused for a long time under `root` (default: the user
+ * profile). Read-only; progress arrives on `scan:progress`.
+ */
+export function startArchiverScan(root?: string): Promise<ArchiverScanResult> {
+  return invoke<ArchiverScanResult>("start_archiver_scan", { root });
+}
+
+/**
+ * Copy the chosen findings to `destination`, verify each copy, then send the
+ * original to quarantine. A file whose copy fails is left where it was.
+ */
+export function archiveFiles(
+  scanId: string,
+  findingIds: string[],
+  destination: string,
+): Promise<ArchiveReport> {
+  return invoke<ArchiveReport>("archive_files", { scanId, findingIds, destination });
 }
 
 /* -------------------------------------------------------------------------
