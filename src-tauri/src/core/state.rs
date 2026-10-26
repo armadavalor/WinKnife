@@ -63,6 +63,9 @@ impl ScanResult {
 #[derive(Debug, Default)]
 pub struct ScanStore {
     scans: Mutex<VecDeque<ScanResult>>,
+    /// The manual cleaner scan the user has not executed yet. Eviction skips
+    /// it, and the scheduled auto-quarantine waits for it (C11).
+    review: Mutex<Option<Uuid>>,
 }
 
 impl ScanStore {
@@ -71,13 +74,40 @@ impl ScanStore {
         Self::default()
     }
 
-    /// Remember a scan, evicting the oldest once the cap is reached.
+    /// Remember a scan, evicting the oldest once the cap is reached. The scan
+    /// under review is never the one evicted.
     pub fn insert(&self, result: ScanResult) {
+        let review = *self.review_lock();
         let mut scans = self.lock();
         scans.push_back(result);
         while scans.len() > MAX_RETAINED_SCANS {
-            scans.pop_front();
+            let oldest = scans
+                .iter()
+                .position(|scan| Some(scan.scan_id) != review)
+                .unwrap_or(0);
+            scans.remove(oldest);
         }
+    }
+
+    /// Remember a manual scan and mark it as the one under review.
+    pub fn insert_for_review(&self, result: ScanResult) {
+        *self.review_lock() = Some(result.scan_id);
+        self.insert(result);
+    }
+
+    /// The user executed `scan_id`; if it was the scan under review, it no
+    /// longer is.
+    pub fn finish_review(&self, scan_id: Uuid) {
+        let mut review = self.review_lock();
+        if *review == Some(scan_id) {
+            *review = None;
+        }
+    }
+
+    /// Whether a manual scan is still waiting for the user's decision.
+    pub fn manual_review_pending(&self) -> bool {
+        self.review_lock()
+            .is_some_and(|id| self.lock().iter().any(|scan| scan.scan_id == id))
     }
 
     /// Fetch a scan by id.
@@ -114,6 +144,12 @@ impl ScanStore {
     /// Whether nothing is retained.
     pub fn is_empty(&self) -> bool {
         self.lock().is_empty()
+    }
+
+    fn review_lock(&self) -> std::sync::MutexGuard<'_, Option<Uuid>> {
+        self.review
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<ScanResult>> {
@@ -282,6 +318,35 @@ mod tests {
             store.get(first_id).is_err(),
             "the oldest scan should have been evicted"
         );
+    }
+
+    #[test]
+    fn the_scan_under_review_is_never_evicted() {
+        let store = ScanStore::new();
+        let manual = result("cleaner");
+        let manual_id = manual.scan_id;
+        store.insert_for_review(manual);
+        for _ in 0..MAX_RETAINED_SCANS * 2 {
+            store.insert(result("cleaner"));
+        }
+
+        assert_eq!(store.len(), MAX_RETAINED_SCANS);
+        assert!(store.get(manual_id).is_ok());
+        assert!(store.manual_review_pending());
+    }
+
+    #[test]
+    fn executing_the_scan_under_review_ends_the_review() {
+        let store = ScanStore::new();
+        let manual = result("cleaner");
+        let manual_id = manual.scan_id;
+        store.insert_for_review(manual);
+
+        store.finish_review(Uuid::new_v4());
+        assert!(store.manual_review_pending(), "another scan's execute");
+
+        store.finish_review(manual_id);
+        assert!(!store.manual_review_pending());
     }
 
     #[test]
