@@ -28,7 +28,10 @@ globalThis.__scanApi = {
   execute() { return Promise.reject(new Error('not under test')); },
   setFolderKeepRule() { return Promise.reject(new Error('not under test')); },
   ignoreFolderGroup() { return Promise.reject(new Error('not under test')); },
+  startSimilarImageScan() { const request = deferred(); scans.push(request); return request.promise; },
+  setSimilarImageKeeper() { return Promise.resolve(imageUpdate); },
 };
+let imageUpdate = null;
 const emit = (module, scanId, itemsScanned = 0) =>
   listeners.forEach(handler => handler({ module, scanId, itemsScanned, currentPath: 'C:\\big', pct: null, itemsTotal: null }));
 
@@ -70,6 +73,30 @@ const { treemapStore } = await import(compileStore('treemap.svelte.ts'));
   cancels.length = 0;
 }
 
+// Similar images (C18): nothing starts ticked, and a keeper change ticks nothing.
+{
+  const member = (path, keeper, ids) => ({ path, width: 9, height: 8, sizeBytes: 10, keeper, protected: false, similarity: 97, reason: 'r', findingIds: ids, recommendationIds: ids });
+  const rec = (id, action) => ({ id, action, savingsBytes: 10 });
+  duplicatesStore.mode = 'images';
+  const run = duplicatesStore.scan();
+  await tick();
+  scans.at(-1).resolve({ scanId: 'img-1', groups: [{ id: 'g', members: [member('a', true, ['ra']), member('b', false, ['rb'])] }], recommendations: [rec('ra', 'infoOnly'), rec('rb', 'quarantine')], skippedRoots: [], unreadable: 0, cancelled: false });
+  await run;
+  assert.equal(duplicatesStore.step, 'review');
+  assert.equal(duplicatesStore.selected.size, 0, 'Look-alikes start with nothing selected');
+  const [keeper, other] = duplicatesStore.imageResult.groups[0].members;
+  assert.equal(duplicatesStore.isImageSelectable(keeper), false, 'The keeper is never selectable');
+  assert.equal(duplicatesStore.isImageSelectable(other), true);
+  duplicatesStore.toggleFolder(['rb'], true);
+  assert.equal(duplicatesStore.selectedBytes, 10);
+  imageUpdate = { group: { id: 'g', members: [member('b', true, ['rb2']), member('a', false, ['ra2'])] }, replaced: ['ra', 'rb'], recommendations: [rec('rb2', 'infoOnly'), rec('ra2', 'quarantine')] };
+  await duplicatesStore.chooseImageKeeper(duplicatesStore.imageResult.groups[0], other);
+  assert.equal(duplicatesStore.selected.size, 0, 'A keeper change drops the old ticks and adds none');
+  assert.equal(duplicatesStore.imageResult.recommendations.length, 2);
+  duplicatesStore.reset();
+  duplicatesStore.mode = 'files';
+}
+
 // Treemap: same early Stop, then a clean rescan that a late event cannot hijack.
 const treeResult = (scanId, cancelled) => ({ scanId, summary: null, level: null, links: [], unreadable: [], cancelled });
 treemapStore.selected = 'C:\\';
@@ -98,5 +125,5 @@ await treemapStore.listen(); // the page attaches this on mount
   await rescan;
   assert.equal(treemapStore.partial, false, 'A completed rescan clears the stopped flag');
 }
-console.log('PASS: deferred Stop (duplicates, treemap), late events after the scan, rescan state reset');
+console.log('PASS: deferred Stop (duplicates, treemap), similar images start unselected, late events after the scan, rescan state reset');
 delete globalThis.__scanApi;

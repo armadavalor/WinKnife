@@ -58,6 +58,7 @@ use crate::core::types::{
 };
 
 pub mod folders;
+pub mod images;
 
 /// Files below this are not worth a person's attention (module spec 03).
 pub const DEFAULT_MIN_SIZE_BYTES: u64 = 1024 * 1024;

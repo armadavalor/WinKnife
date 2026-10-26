@@ -2717,3 +2717,22 @@ C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; th
   strings; route `/archiver`.
 - Decisions: K-026. Deferred: cancelling a running move, restore from the
   manifest in one click (restore goes through Quarantine today).
+
+## 2026-10-26 — C18: similar-image duplicates
+
+**Built.** A "Similar images" mode in the Duplicates tool. JPEG, PNG, WebP and
+GIF are decoded with the `image` crate (0.25, only those format features) and
+hashed with a 9x8 dHash; images within `SIMILAR_MAX_DISTANCE = 8` bits are
+grouped with union-find. Scan is read-only, cancellable, reports progress and
+decodes on a bounded rayon pool (4 threads) so memory stays flat.
+
+- **Safety.** Nothing is preselected. Each group keeps one image (largest
+  pixels, then largest file); the keeper is never selectable and the user can
+  move it with "Keep this one" (`set_similar_image_keeper`). Protected members
+  are DoNotDelete/InfoOnly. Removal goes through quarantine and the executor;
+  `Justification::SimilarImage` makes gate 4 re-hash the file and refuse if
+  its content changed or the keeper is gone.
+- **Commands.** `start_similar_image_scan`, `set_similar_image_keeper`, both
+  covered by `command_wiring` probes. EN + TR strings.
+- **Decisions.** K-029. HEIC/JXL, thumbnails and a threshold setting deferred
+  (DECISIONS-NEEDED).

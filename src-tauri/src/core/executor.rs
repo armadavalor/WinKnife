@@ -521,6 +521,10 @@ fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Opti
             keeper_path.as_deref(),
             &unit.finding.path,
         ),
+        Justification::SimilarImage {
+            content_hash,
+            keeper_path,
+        } => similar_image_refusal(content_hash, keeper_path, &unit.finding.path),
         Justification::StartupEntry {
             source,
             key,
@@ -597,6 +601,41 @@ fn duplicate_refusal(
         )),
         Err(err) => Some(format!(
             "skipped: `{}` could not be re-read to confirm it is still a duplicate: {err}",
+            path.display()
+        )),
+    }
+}
+
+/// Re-verify "this image looks like one you keep": the kept look-alike is still
+/// a different file that exists, and this file's bytes are what the user saw.
+fn similar_image_refusal(
+    content_hash: &str,
+    keeper_path: &std::path::Path,
+    path: &std::path::Path,
+) -> Option<String> {
+    if crate::core::path_compare::same_path(keeper_path, path) {
+        return Some(format!(
+            "skipped: `{}` is the image this one was compared against, so removing \
+             it would leave none",
+            path.display()
+        ));
+    }
+    if std::fs::symlink_metadata(keeper_path).is_err() {
+        return Some(format!(
+            "skipped: `{}`, the look-alike that was going to stay, is no longer \
+             there — removing this would leave you with none",
+            keeper_path.display()
+        ));
+    }
+    match crate::core::content_hash::full_hash(path) {
+        Ok(hash) if hash == content_hash => None,
+        Ok(_) => Some(format!(
+            "skipped: `{}` has changed since the scan, so the comparison you \
+             reviewed no longer describes it",
+            path.display()
+        )),
+        Err(err) => Some(format!(
+            "skipped: `{}` could not be re-read to confirm it is unchanged: {err}",
             path.display()
         )),
     }
@@ -945,6 +984,28 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, bytes).expect("write");
         path
+    }
+
+    #[test]
+    fn a_look_alike_goes_only_when_unchanged_and_its_keeper_is_still_there() {
+        let h = harness();
+        let keeper = write(&h.work, "keep.png", b"keeper");
+        let copy = write(&h.work, "copy.jpg", b"look-alike");
+        let hash = crate::core::content_hash::full_hash(&copy).expect("hash");
+
+        assert_eq!(similar_image_refusal(&hash, &keeper, &copy), None);
+        let same = similar_image_refusal(&hash, &copy, &copy).expect("refused");
+        assert!(same.contains("compared against"), "{same}");
+
+        std::fs::write(&copy, b"edited since the scan").expect("edit");
+        let changed = similar_image_refusal(&hash, &keeper, &copy).expect("refused");
+        assert!(changed.contains("changed since the scan"), "{changed}");
+
+        std::fs::write(&copy, b"look-alike").expect("restore");
+        #[allow(clippy::disallowed_methods)] // test fixture in a tempdir
+        std::fs::rename(&keeper, h.work.join("moved.png")).expect("move keeper");
+        let gone = similar_image_refusal(&hash, &keeper, &copy).expect("refused");
+        assert!(gone.contains("no longer there"), "{gone}");
     }
 
     /// Backdate a file's modification time, so a rule's `min_age_hours` can be

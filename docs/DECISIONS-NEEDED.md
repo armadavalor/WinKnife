@@ -918,3 +918,9 @@ not ours to take.
 - [ ] 2026-10-26 (phase 7): if a source changes between hashing and quarantine, the archived copy is the older version but nothing is lost — Quarantine holds the newer original. Safest interpretation taken: no re-hash after the copy; the report shows the archived hash.
 - [ ] 2026-10-26 (phase 7): a copy that fails half way leaves an incomplete file in the destination, because only quarantine may remove files. Safest interpretation taken: leave it and name it in the report; a retry refuses to overwrite it until the user deletes it. Alternative: quarantine the partial copy (costs a second copy across volumes).
 - [ ] 2026-10-26 (phase 7): restoring from the manifest (copy back from the archive drive) is not built; undo goes through Quarantine only. Revisit if users archive and then purge quarantine.
+
+## Open items raised by similar-image duplicates (2026-10-26, C18)
+
+- [ ] 2026-10-26 (K-029): HEIC/HEIF and JPEG XL are skipped. The `image` crate has no pure-Rust decoder for them; adding libheif/libjxl means a native dependency and its licence review. Phone photos in HEIC are therefore not compared.
+- [ ] 2026-10-26 (K-029): no thumbnails. The asset protocol is off, so rows show name, size and pixel size only. Showing previews needs either the asset protocol scoped to scan roots or base64 thumbnails over IPC; both widen what the UI can read.
+- [ ] 2026-10-26 (K-029): the threshold is one named constant (`SIMILAR_MAX_DISTANCE = 8`), not a user setting. Make it a slider only if users report misses or false matches.

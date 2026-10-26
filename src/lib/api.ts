@@ -30,6 +30,8 @@ import type {
   ExecProgress,
   ExecReport,
   FolderGroupUpdate,
+  ImageGroupUpdate,
+  SimilarImageScanResult,
   KeepRule,
   HostsBackup,
   HostsDocument,
@@ -188,6 +190,26 @@ export function startDuplicateScan(
   roots?: string[],
 ): Promise<DuplicateScanResult> {
   return invoke<DuplicateScanResult>("start_duplicate_scan", { roots });
+}
+
+/** Look for similar (not byte-equal) images under the duplicate roots. */
+export function startSimilarImageScan(
+  roots?: string[],
+): Promise<SimilarImageScanResult> {
+  return invoke<SimilarImageScanResult>("start_similar_image_scan", { roots });
+}
+
+/** Change which image of one look-alike group stays. */
+export function setSimilarImageKeeper(
+  scanId: string,
+  groupId: string,
+  keeperPath: string,
+): Promise<ImageGroupUpdate> {
+  return invoke<ImageGroupUpdate>("set_similar_image_keeper", {
+    scanId,
+    groupId,
+    keeperPath,
+  });
 }
 
 /** Change which folder of one duplicate-folder group stays. */
