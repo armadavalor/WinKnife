@@ -2811,3 +2811,30 @@ files, leaves the folders on disk and keeps a protected child red.
 
 **Deferred.** No shipped pack uses it yet; no UI strings were needed.
 
+## 2026-10-26 — C11: scheduled scan with report (K-031)
+
+**Built.** A new `scheduled-scan` module (sidebar, clock icon) with an Off /
+daily / weekly schedule at a set time, stored in settings, and the last report
+(date plus count and bytes per bucket) shown on its page and as a banner in the
+shell with a Review button that reopens the normal cleaner results.
+
+- **Backend.** `modules/scheduled_scan.rs` holds the settings, slot maths
+  (`latest_slot`, `is_due`), the report and `auto_quarantine_ids`. Commands
+  `scheduled_scan_get`, `scheduled_scan_set`, `scheduled_scan_run_due` (wiring
+  probes added). The run reuses the cleaner scan path (`run_cleaner_scan`); a
+  `SCHEDULED_RUNNING` guard keeps it to one at a time.
+- **Auto-quarantine.** Off by default, explicit opt-in. Only Safe
+  recommendations whose action is a quarantine move are picked; Yellow, Red,
+  protected and non-move actions are never selected (unit tests). Moves go
+  through the normal executor and quarantine; nothing is deleted (K-016).
+- **When it runs.** K-021 forbids an OS scheduled task, so the shell checks on
+  start and every 5 minutes while the app is open; a missed slot runs once at
+  the next start.
+- **Review fixes (#108).** Turning auto-quarantine on asks once in a confirm
+  dialog (Cancel leaves it off). Moved items are pruned from the stored scan,
+  so Review no longer pre-ticks them. A manual scan still under review is
+  pinned: auto-quarantine skips with `manualReview`, and a scheduled scan
+  cannot evict it at `MAX_RETAINED_SCANS`. Integration tests in
+  `tests/scheduled_auto_quarantine.rs` cover cancelled, busy, manual review,
+  ran and failed.
+- **Deferred.** See DECISIONS-NEEDED "scheduled scan" items.

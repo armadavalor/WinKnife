@@ -58,6 +58,9 @@ import type {
   ScanProgress,
   ScanResult,
   ScheduleMode,
+  ScheduledReport,
+  ScheduledScanSettings,
+  ScheduledScanState,
   KeepAwakeStatus,
   ShutdownTick,
   StartupScanResult,
@@ -496,6 +499,25 @@ export function quarantinePurge(): Promise<PurgeReport> {
  */
 export function quarantinePurgeItems(itemIds: string[]): Promise<PurgeReport> {
   return invoke<PurgeReport>("quarantine_purge_items", { itemIds, confirmed: true });
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — scheduled scan (C11)
+ * ---------------------------------------------------------------------- */
+
+/** Saved schedule and the last report. */
+export function scheduledScanGet(): Promise<ScheduledScanState> {
+  return invoke<ScheduledScanState>("scheduled_scan_get");
+}
+
+/** Save the schedule; the backend re-arms it from now. */
+export function scheduledScanSet(settings: ScheduledScanSettings): Promise<ScheduledScanState> {
+  return invoke<ScheduledScanState>("scheduled_scan_set", { settings });
+}
+
+/** Run the scan if a slot is due; `null` when nothing was due (or one is already running). */
+export function scheduledScanRunDue(): Promise<ScheduledReport | null> {
+  return invoke<ScheduledReport | null>("scheduled_scan_run_due");
 }
 
 /* -------------------------------------------------------------------------

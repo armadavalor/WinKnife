@@ -51,6 +51,7 @@ register_modules! {
     network => network::NetworkModule,
     uninstaller => uninstaller::UninstallerModule,
     archiver => archiver::ArchiverModule,
+    scheduled_scan => scheduled_scan::ScheduledScanModule,
 }
 
 /// Build the application's module registry.
@@ -140,6 +141,7 @@ mod tests {
             "network",
             "uninstaller",
             "archiver",
+            "scheduled-scan",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);
         }

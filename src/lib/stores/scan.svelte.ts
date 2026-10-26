@@ -8,6 +8,7 @@
 import {
   cancelScan,
   execute as invokeExecute,
+  getRecommendations,
   onScanProgress,
   scanSummary,
   startScan,
@@ -146,6 +147,22 @@ class ScanStore {
       this.stopping = false;
       this.runningScanId = null;
     }
+  }
+
+  /**
+   * Open a scan that already ran (a scheduled one) in the review step, with
+   * the same initial selection a manual scan gets. Throws when the backend no
+   * longer holds it, so the caller can say so.
+   */
+  async loadExisting(scanId: string): Promise<void> {
+    const result = await getRecommendations(scanId);
+    const summary = await scanSummary(scanId);
+    this.error = null;
+    this.report = null;
+    this.result = result;
+    this.selected = initialSelection(result.recommendations, result.findings);
+    this.summary = summary;
+    this.step = "review";
   }
 
   /**

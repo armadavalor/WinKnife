@@ -25,6 +25,9 @@
   import { visibleModules } from "$lib/hiddenModules";
   import { motion } from "$lib/stores/motion.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
+  import { scanStore } from "$lib/stores/scan.svelte";
+  import { scheduledScanStore } from "$lib/stores/scheduledScan.svelte";
+  import { formatBytes } from "$lib/format";
   import { locale } from "$lib/stores/locale.svelte";
   import { theme } from "$lib/stores/theme.svelte";
 
@@ -45,7 +48,19 @@
     void moduleStore.load();
     void quarantineStore.reload();
     void openLaunchRoute();
+    // On start (a slot missed while closed) and then every few minutes (K-021).
+    return scheduledScanStore.start();
   });
+
+  async function reviewScheduled(scanId: string): Promise<void> {
+    scheduledScanStore.dismissBanner();
+    try {
+      await scanStore.loadExisting(scanId);
+      await goto("/cleaner");
+    } catch {
+      await goto("/scheduled-scan");
+    }
+  }
 
   /**
    * Open the module a launch asked for (`--module <id>`): the first launch's
@@ -148,6 +163,35 @@
           onclick={() => elevation.dismiss()}
         >
           {t("elevation.dismiss")}
+        </button>
+      </div>
+    {/if}
+    {#if scheduledScanStore.banner}
+      {@const report = scheduledScanStore.banner}
+      <div
+        class="mx-6 mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-surface-3 bg-surface-2 px-4 py-3 text-sm text-ink"
+        role="status"
+        data-testid="scheduled-scan-banner"
+      >
+        <p class="min-w-0 flex-1">
+          {t("scheduledScan.banner", {
+            safe: formatBytes(report.safe.bytes),
+            review: formatBytes(report.review.bytes),
+          })}
+        </p>
+        <button
+          type="button"
+          class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent"
+          onclick={() => void reviewScheduled(report.scanId)}
+        >
+          {t("scheduledScan.review")}
+        </button>
+        <button
+          type="button"
+          class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          onclick={() => scheduledScanStore.dismissBanner()}
+        >
+          {t("scheduledScan.dismiss")}
         </button>
       </div>
     {/if}

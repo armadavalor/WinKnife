@@ -928,3 +928,27 @@ not ours to take.
 - [ ] 2026-10-26 (phase 7): if a source changes between hashing and quarantine, the archived copy is the older version but nothing is lost — Quarantine holds the newer original. Safest interpretation taken: no re-hash after the copy; the report shows the archived hash.
 - [ ] 2026-10-26 (phase 7): a copy that fails half way leaves an incomplete file in the destination, because only quarantine may remove files. Safest interpretation taken: leave it and name it in the report; a retry refuses to overwrite it until the user deletes it. Alternative: quarantine the partial copy (costs a second copy across volumes).
 - [ ] 2026-10-26 (phase 7): restoring from the manifest (copy back from the archive drive) is not built; undo goes through Quarantine only. Revisit if users archive and then purge quarantine.
+
+## Open items raised by the scheduled scan (2026-10-26, C11)
+
+- [ ] 2026-10-26 (C11): K-021 forbids a Windows scheduled task, so the scan runs
+      only while WinKnife is open (checked on start and every 5 minutes); a slot
+      missed while closed runs once at the next start — kept, noted in the UI.
+- [ ] 2026-10-26 (C11): `armedAt` is the time the current schedule was saved; a
+      slot before it never fires, so saving a schedule does not trigger an
+      immediate catch-up run. Toggling only auto-quarantine keeps `armedAt`.
+- [ ] 2026-10-26 (C11): the report keeps the scan id; once that scan is evicted
+      (MAX_RETAINED_SCANS or a restart) Review shows a "no longer available"
+      message instead of rerunning — safest, no surprise scan.
+- [ ] 2026-10-26 (C11): background runs emit no progress events, so the
+      cleaner's progress bar is not driven by a scheduled run.
+- [ ] 2026-10-26 (C11): if the quarantine is busy (a manual clean or restore is
+      running) auto-quarantine is skipped and the report says so; it is not
+      retried later.
+- [ ] 2026-10-26 (C11): schedule validation reuses `CoreError::InvalidTimer`
+      rather than adding a new error variant.
+- [ ] 2026-10-26 (C11): a manual scan stays pinned (not evicted, and
+      auto-quarantine skips with `manualReview`) until it is executed or the
+      app restarts; abandoning it with "New scan" does not release the pin, so
+      auto-quarantine waits for the next manual execute. Safest reading: never
+      move files under a review the user may still act on.

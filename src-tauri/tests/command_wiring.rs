@@ -443,6 +443,26 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "restart_as_admin",
             args: json!({ "module": "startup" }),
         },
+        Probe {
+            command: "scheduled_scan_get",
+            args: json!({}),
+        },
+        Probe {
+            command: "scheduled_scan_set",
+            args: json!({
+                "settings": {
+                    "frequency": { "kind": "off" },
+                    "hour": 3,
+                    "minute": 0,
+                    "autoQuarantine": false
+                }
+            }),
+        },
+        // Off in a fresh database, so this answers `null` without scanning.
+        Probe {
+            command: "scheduled_scan_run_due",
+            args: json!({}),
+        },
     ]
 }
 
