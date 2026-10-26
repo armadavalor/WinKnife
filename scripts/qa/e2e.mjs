@@ -187,6 +187,9 @@ async function click(sel, text, within) {
 }
 
 async function goTo(route) {
+  const tab = `nav [role="tab"][data-tools~="${route}"]`;
+  // The sidebar lists one category tab at a time; open the tool's tab first.
+  if (!(await has(`a[href="/${route}"]`)) && (await has(tab))) await click(tab);
   await click(`a[href="/${route}"]`);
   await sleep(SETTLE_MS);
 }
@@ -828,7 +831,7 @@ async function main() {
     deviceScaleFactor: 1,
     mobile: false,
   });
-  await waitFor('a[href="/cleaner"]', null, null, STARTUP_TIMEOUT_MS);
+  await waitFor('a[href="/settings"]', null, null, STARTUP_TIMEOUT_MS);
 
   const only = process.env.WINKNIFE_QA_ONLY;
   const results = [];

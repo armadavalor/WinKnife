@@ -49,7 +49,7 @@ use crate::core::brain::{self, Brain, GateVerdict, ProtectedPaths};
 // The same hash the executor recomputes to confirm a copy is still a copy
 // (review H10) — one implementation, so the two numbers are comparable.
 use crate::core::content_hash::full_hash_cancellable;
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare;
 use crate::core::platform::{file_identity, EnvResolver, FileId};
 use crate::core::scanner::{self, CancellationToken};
@@ -891,6 +891,7 @@ impl ToolModule for DuplicatesModule {
                 "Find files with byte-for-byte identical contents, see which copy to keep, and quarantine the rest."
                     .to_owned(),
             icon: "copies".to_owned(),
+            category: ModuleCategory::Cleanup,
             capabilities: ModuleCapabilities::FULL,
         }
     }

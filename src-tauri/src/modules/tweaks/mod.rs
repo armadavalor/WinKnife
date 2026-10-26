@@ -15,7 +15,7 @@ use serde::Serialize;
 
 use crate::core::error::{CoreError, Result};
 use crate::core::executor::TweakControl;
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{Hive, RegValue, Registry};
 use crate::core::types::{
     Action, Finding, FindingKind, Justification, Recommendation, RiskBucket, MAX_CONFIDENCE,
@@ -653,6 +653,7 @@ impl ToolModule for TweaksModule {
                           exactly what was there."
                 .to_owned(),
             icon: "settings".to_owned(),
+            category: ModuleCategory::System,
             capabilities: ModuleCapabilities {
                 has_scan: true,
                 has_execute: true,
