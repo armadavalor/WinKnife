@@ -427,6 +427,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::treemap_scan,
         commands::treemap_children,
         commands::treemap_cached,
+        commands::treemap_propose,
         commands::reveal_in_explorer,
         commands::startup_scan,
         commands::startup_enable,

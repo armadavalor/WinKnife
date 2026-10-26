@@ -18,16 +18,19 @@
   import { goto } from "$app/navigation";
   import { onMount, untrack } from "svelte";
 
-  import { revealInExplorer } from "$lib/api";
+  import { execute, revealInExplorer, treemapPropose } from "$lib/api";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
   import { t } from "$lib/i18n";
+  import { quarantineStore } from "$lib/stores/quarantine.svelte";
+  import { settingsStore } from "$lib/stores/settings.svelte";
   import { theme } from "$lib/stores/theme.svelte";
   import { treemapStore } from "$lib/stores/treemap.svelte";
   import { hitTest, squarify, type Placed } from "$lib/treemap/squarify";
-  import type { TreeChild, TreemapCategory } from "$lib/types";
+  import type { TaggedRefusal, TreeChild, TreemapCategory } from "$lib/types";
 
   const store = treemapStore;
 
@@ -63,6 +66,7 @@
     hatch: "rgba(255,255,255,0.28)",
     edge: "rgba(0,0,0,0.35)",
     focus: "#e8eaf0",
+    tag: "#f2c14e",
     label: "rgba(255,255,255,0.94)",
     sublabel: "rgba(255,255,255,0.7)",
   };
@@ -72,6 +76,7 @@
     hatch: "rgba(0,0,0,0.18)",
     edge: "rgba(255,255,255,0.6)",
     focus: "#1f2430",
+    tag: "#a86b00",
     label: "rgba(20,24,32,0.92)",
     sublabel: "rgba(20,24,32,0.66)",
   };
@@ -89,11 +94,108 @@
   let focused = $state(0);
   let placed: Placed<TreeChild>[] = [];
 
+  // Tagging (C13) is UI state only; Rust re-checks every path before it moves.
+  interface Tagged {
+    path: string;
+    name: string;
+    sizeBytes: number;
+    modified: string | null;
+  }
+  let tagged = $state<Tagged[]>([]);
+  let confirming = $state(false);
+  let sending = $state(false);
+  let outcome = $state<{
+    moved: number;
+    reclaimed: number;
+    notMoved: TaggedRefusal[];
+  } | null>(null);
+
+  const taggedPaths = $derived(new Set(tagged.map((item) => item.path)));
+  const taggedBytes = $derived(
+    tagged.reduce((sum, item) => sum + item.sizeBytes, 0),
+  );
+  const retentionDays = $derived(
+    settingsStore.settings?.quarantine.retentionDays ?? 7,
+  );
+
+  /** Only plain files: folder tagging is deferred (K-028). */
+  function isTaggable(child: TreeChild | undefined | null): child is TreeChild {
+    return !!child && !child.isDir && !child.isLink && child.path !== "";
+  }
+
+  function toggleTag(child: TreeChild): void {
+    menu = null;
+    outcome = null;
+    tagged = taggedPaths.has(child.path)
+      ? tagged.filter((item) => item.path !== child.path)
+      : [
+          ...tagged,
+          {
+            path: child.path,
+            name: child.name,
+            sizeBytes: child.sizeBytes,
+            modified: child.modified,
+          },
+        ];
+  }
+
+  function untag(path: string): void {
+    tagged = tagged.filter((item) => item.path !== path);
+  }
+
+  async function sendTagged(): Promise<void> {
+    confirming = false;
+    sending = true;
+    store.error = null;
+    try {
+      const proposal = await treemapPropose(
+        tagged.map(({ path, sizeBytes, modified }) => ({ path, sizeBytes, modified })),
+      );
+      const ids = proposal.recommendations.map((rec) => rec.id);
+      const report =
+        ids.length > 0 ? await execute(proposal.scanId, ids, false) : null;
+      const items = report?.items ?? [];
+      const notMoved: TaggedRefusal[] = [
+        ...proposal.refused,
+        ...items.flatMap((item) =>
+          item.outcome.status === "skipped"
+            ? [{ path: item.path, reason: item.outcome.reason }]
+            : item.outcome.status === "failed"
+              ? [{ path: item.path, reason: item.outcome.error }]
+              : [],
+        ),
+      ];
+      const moved = new Set(
+        items
+          .filter((item) => item.outcome.status === "succeeded")
+          .map((item) => item.path),
+      );
+      tagged = tagged.filter((item) => !moved.has(item.path));
+      outcome = {
+        moved: moved.size,
+        reclaimed: report?.reclaimedBytes ?? 0,
+        notMoved,
+      };
+      await quarantineStore.reload();
+      if (store.level) {
+        await store.open(store.level.path);
+      }
+    } catch (error: unknown) {
+      store.error =
+        error && typeof error === "object" && "message" in error
+          ? String((error as { message: unknown }).message)
+          : String(error);
+    } finally {
+      sending = false;
+    }
+  }
+
   // Run-once mounting, deliberately not reactive: as an effect this subscribed
   // to the store's own `status`, which is why the page sat on "Looking for
   // drives…" while the drive list was already loaded.
   onMount(() => {
     void store.loadDrives();
+    void settingsStore.load();
   });
 
   $effect(() => {
@@ -126,10 +228,11 @@
     const w = width;
     const h = height;
     const active = focused;
+    const marks = taggedPaths;
     if (!canvas) {
       return;
     }
-    paint(canvas, level?.children ?? [], w, h, active);
+    paint(canvas, level?.children ?? [], w, h, active, marks);
   });
 
   function paint(
@@ -138,6 +241,7 @@
     w: number,
     h: number,
     active: number,
+    marks: ReadonlySet<string>,
   ): void {
     const dpr = window.devicePixelRatio || 1;
     target.width = Math.floor(w * dpr);
@@ -160,7 +264,7 @@
     });
 
     for (let i = 0; i < placed.length; i += 1) {
-      drawCell(ctx, placed[i], i === active);
+      drawCell(ctx, placed[i], i === active, marks.has(placed[i].item.path));
     }
   }
 
@@ -168,6 +272,7 @@
     ctx: CanvasRenderingContext2D,
     cell: Placed<TreeChild>,
     isFocused: boolean,
+    isTagged: boolean,
   ): void {
     const { x, y, w, h, item } = cell;
     if (w < 1 || h < 1) {
@@ -202,6 +307,14 @@
       ctx.strokeStyle = INK.edge;
       ctx.lineWidth = 1;
       ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    }
+
+    if (isTagged) {
+      ctx.strokeStyle = INK.tag;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 3]);
+      ctx.strokeRect(x + 2, y + 2, w - 4, h - 4);
+      ctx.setLineDash([]);
     }
 
     if (isFocused) {
@@ -300,6 +413,12 @@
       if (crumbs.length > 1) {
         void store.open(crumbs[crumbs.length - 2]);
         focused = 0;
+      }
+    } else if (event.key === "t" || event.key === "T") {
+      const child = store.level?.children[focused];
+      if (isTaggable(child)) {
+        event.preventDefault();
+        toggleTag(child);
       }
     } else if (event.key === "Escape") {
       menu = null;
@@ -544,6 +663,9 @@
               {#if hovered.itemCount > 1}
                 · {t("treemap.foldedNote", { count: hovered.itemCount })}
               {/if}
+              {#if taggedPaths.has(hovered.path)}
+                · {t("treemap.tagged")}
+              {/if}
             </p>
           </div>
         {/if}
@@ -553,12 +675,23 @@
             class="absolute z-20 w-56 rounded-lg border border-surface-3 bg-surface-1 p-1 shadow-2xl"
             style="left: {Math.min(menu.x, width - 232)}px; top: {Math.min(
               menu.y,
-              height - 128,
+              height - 160,
             )}px"
           >
             <p class="truncate px-2 py-1 font-mono text-[0.65rem] text-ink-faint">
               {truncatePath(menu.child.path, 40)}
             </p>
+            {#if isTaggable(menu.child)}
+              <button
+                type="button"
+                class="w-full rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-surface-2"
+                onclick={() => menu && toggleTag(menu.child)}
+              >
+                {taggedPaths.has(menu.child.path)
+                  ? t("treemap.untag")
+                  : t("treemap.tag")}
+              </button>
+            {/if}
             <button
               type="button"
               class="w-full rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-surface-2"
@@ -616,5 +749,101 @@
         {t("treemap.linksNote", { count: store.links.length })}
       </p>
     {/if}
+
+    <!-- Tagged files: review, prune, then one confirmed move to quarantine -->
+    <section
+      class="flex flex-col gap-3 rounded-xl border border-surface-3 bg-surface-1 p-4"
+      aria-labelledby="tagged-title"
+    >
+      <div class="flex flex-wrap items-center gap-3">
+        <h2 id="tagged-title" class="text-sm font-semibold">
+          {t("treemap.taggedTitle", {
+            count: tagged.length,
+            size: formatBytes(taggedBytes),
+          })}
+        </h2>
+        <p class="text-xs text-ink-faint">{t("treemap.tagHint")}</p>
+        {#if tagged.length > 0}
+          <div class="ml-auto flex gap-2">
+            <button
+              type="button"
+              class="btn-outline px-3! py-1.5!"
+              disabled={sending}
+              onclick={() => (tagged = [])}
+            >
+              {t("treemap.taggedClear")}
+            </button>
+            <button
+              type="button"
+              class="btn-primary px-3! py-1.5!"
+              disabled={sending || store.scanning}
+              onclick={() => (confirming = true)}
+            >
+              {t("treemap.taggedSend")}
+            </button>
+          </div>
+        {/if}
+      </div>
+
+      {#if sending}
+        <p class="text-sm text-ink-muted" role="status">{t("treemap.taggedSending")}</p>
+      {/if}
+
+      {#if tagged.length === 0}
+        <p class="text-xs text-ink-faint">{t("treemap.taggedEmpty")}</p>
+      {:else}
+        <ul class="flex max-h-56 flex-col gap-1 overflow-y-auto">
+          {#each tagged as item (item.path)}
+            <li class="flex items-center gap-3 rounded-lg px-2 py-1 text-xs hover:bg-surface-2">
+              <span class="min-w-0 flex-1 truncate font-mono" title={item.path}>
+                {truncatePath(item.path, 80)}
+              </span>
+              <span class="text-ink-muted">{formatBytes(item.sizeBytes)}</span>
+              <button
+                type="button"
+                class="rounded px-2 py-0.5 text-ink-muted transition-colors hover:bg-surface-3"
+                aria-label={t("treemap.taggedRemove", { name: item.name })}
+                disabled={sending}
+                onclick={() => untag(item.path)}
+              >
+                ✕
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
+      {#if outcome}
+        <div class="flex flex-col gap-1 text-xs" role="status">
+          <p class="text-ink-muted">
+            {t("treemap.taggedDone", {
+              count: outcome.moved,
+              size: formatBytes(outcome.reclaimed),
+            })}
+          </p>
+          {#if outcome.notMoved.length > 0}
+            <p class="font-semibold">{t("treemap.taggedNotMoved")}</p>
+            <ul class="flex flex-col gap-1">
+              {#each outcome.notMoved as refusal (refusal.path)}
+                <li>
+                  <span class="font-mono">{truncatePath(refusal.path, 80)}</span>
+                  <span class="text-ink-faint">— {refusal.reason}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
+    </section>
   {/if}
 </div>
+
+<ConfirmDialog
+  open={confirming}
+  title={t("treemap.confirmTitle", { count: tagged.length })}
+  message={t("treemap.confirmBody", { size: formatBytes(taggedBytes) })}
+  note={t("cleaner.confirmNote", { days: retentionDays })}
+  confirmLabel={t("treemap.taggedSend")}
+  onconfirm={sendTagged}
+  oncancel={() => (confirming = false)}
+/>
