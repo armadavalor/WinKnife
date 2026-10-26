@@ -49,6 +49,7 @@ register_modules! {
     repair => repair::RepairModule,
     apps => apps::AppsModule,
     network => network::NetworkModule,
+    uninstaller => uninstaller::UninstallerModule,
     archiver => archiver::ArchiverModule,
 }
 
@@ -137,6 +138,7 @@ mod tests {
             "repair",
             "apps",
             "network",
+            "uninstaller",
             "archiver",
         ] {
             assert_eq!(registry.get(id).expect("registered module").id(), id);

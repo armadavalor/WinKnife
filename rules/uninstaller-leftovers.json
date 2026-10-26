@@ -1,0 +1,18 @@
+{
+  "$schema": "./rule-pack.schema.json",
+  "id": "uninstaller-leftovers",
+  "name": "Uninstaller leftovers",
+  "version": 1,
+  "module": "uninstaller",
+  "enabled_by_default": true,
+  "description": "App-data folders that no installed program claims. Only the Uninstaller tool reads this pack; it never rates anything Safe, and folders outside your own app data are shown for information only.",
+  "rules": [
+    {
+      "id": "app-data",
+      "paths": ["%APPDATA%\\*", "%LOCALAPPDATA%\\*"],
+      "score": { "base": 60, "max_bucket": "needs_review" },
+      "action": "quarantine",
+      "reason": "No program in the Windows list of installed apps has a name that matches this folder, so it is probably left over from an app you removed. Names do not always match, so check before moving it to quarantine."
+    }
+  ]
+}

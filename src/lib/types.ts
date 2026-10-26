@@ -1188,6 +1188,27 @@ export interface EmptyFolderScanResult {
   cancelled: boolean;
 }
 
+/** `finding.meta` of an uninstaller-leftover finding. */
+export interface LeftoverMeta {
+  /** Files inside the folder (a lower bound when `incomplete`). */
+  files: number;
+  /** The folder holds a link or junction, so it cannot be moved. */
+  hasReparse: boolean;
+  /** Part of the folder could not be read. */
+  incomplete: boolean;
+}
+
+export interface LeftoverScanResult {
+  scanId: string;
+  roots: string[];
+  /** Folders no installed app claims. */
+  findings: Finding[];
+  recommendations: Recommendation[];
+  unreadable: number;
+  installedApps: number;
+  cancelled: boolean;
+}
+
 /* -------------------------------------------------------------------------
  * modules/archiver.rs
  * ---------------------------------------------------------------------- */
