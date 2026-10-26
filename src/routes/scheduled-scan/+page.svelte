@@ -10,6 +10,7 @@
 
   import { goto } from "$app/navigation";
 
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes, formatCount, formatDateTime } from "$lib/format";
   import { t, tModuleDescription, tModuleName } from "$lib/i18n";
@@ -27,6 +28,7 @@
     busy: "scheduledScan.autoSkipped.busy",
     cancelled: "scheduledScan.autoSkipped.cancelled",
     failed: "scheduledScan.autoSkipped.failed",
+    manualReview: "scheduledScan.autoSkipped.manualReview",
   } as const satisfies Record<AutoQuarantineSkip, string>;
 
   const manifest = $derived(moduleStore.find(MODULE_ID));
@@ -36,6 +38,8 @@
   let weekday = $state(0);
   let time = $state("09:00");
   let autoQuarantine = $state(false);
+  /** Turning auto-quarantine on waits for this dialog (K-028: explicit consent). */
+  let confirmingAuto = $state(false);
   let saved = $state(false);
   let gone = $state(false);
 
@@ -155,8 +159,17 @@
       <input
         type="checkbox"
         class="mt-1"
-        bind:checked={autoQuarantine}
-        onchange={() => (saved = false)}
+        checked={autoQuarantine}
+        onchange={(event) => {
+          saved = false;
+          if (event.currentTarget.checked) {
+            // Stays off until the dialog is confirmed; Cancel leaves it off.
+            event.currentTarget.checked = false;
+            confirmingAuto = true;
+          } else {
+            autoQuarantine = false;
+          }
+        }}
       />
       <span class="flex flex-col gap-1">
         <span class="font-medium">{t("scheduledScan.autoTitle")}</span>
@@ -229,3 +242,16 @@
     {/if}
   </section>
 </div>
+
+<ConfirmDialog
+  open={confirmingAuto}
+  title={t("scheduledScan.autoConfirmTitle")}
+  message={t("scheduledScan.autoConfirmBody")}
+  note={t("scheduledScan.autoConfirmNote")}
+  confirmLabel={t("scheduledScan.autoConfirmAction")}
+  onconfirm={() => {
+    autoQuarantine = true;
+    confirmingAuto = false;
+  }}
+  oncancel={() => (confirmingAuto = false)}
+/>

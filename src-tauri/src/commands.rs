@@ -50,7 +50,7 @@ use crate::core::quarantine::{
 };
 use crate::core::settings;
 use crate::core::state::{CancelRegistry, ScanResult, ScanStore};
-use crate::core::types::ExecReport;
+use crate::core::types::{ExecOutcome, ExecReport};
 use crate::modules::apps::{AppsList, AppsService, SignerInfo};
 use crate::modules::archiver;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
@@ -235,7 +235,7 @@ pub async fn start_scan<R: Runtime>(
             return Err(CoreError::UnknownModule(module_id).into());
         }
         let result = run_cleaner_scan(Some(&app), &services, &db, &cancels)?;
-        store.insert(result.clone());
+        store.insert_for_review(result.clone());
         Ok(result)
     })
     .await
@@ -470,6 +470,7 @@ pub async fn execute<R: Runtime>(
             Some(&mut emit),
         )?;
 
+        store.finish_review(scan_id);
         notify_quarantine_changed(&app, &services, &db, report.batch_id);
         Ok(report)
     })
@@ -581,7 +582,11 @@ pub async fn scheduled_scan_run_due<R: Runtime>(
         store.insert(scan.clone());
         let mut report = ScheduledReport::from_scan(&scan, ran_at);
         if state.settings.auto_quarantine {
-            report.auto_quarantine = Some(auto_quarantine(&app, &services, &db, &scan));
+            let outcome = auto_quarantine(&services, &db, &store, &scan);
+            if let AutoQuarantine::Ran { batch_id, .. } = outcome {
+                notify_quarantine_changed(&app, &services, &db, batch_id);
+            }
+            report.auto_quarantine = Some(outcome);
         }
         db.with(|conn| settings::set_json(conn, scheduled_scan::KEY_LAST_REPORT, &report))?;
         tracing::info!(scan = %scan.scan_id, "scheduled scan finished");
@@ -599,23 +604,27 @@ fn scheduled_state(db: &Database) -> crate::core::error::Result<ScheduledScanSta
     })
 }
 
-/// Move the green quarantine rows of `scan`, nothing else.
-fn auto_quarantine<R: Runtime>(
-    app: &AppHandle<R>,
+/// Move the green quarantine rows of `scan`, nothing else, and drop the moved
+/// rows from the stored scan so Review shows only what is left.
+///
+/// Public for `tests/scheduled_auto_quarantine.rs`; the app reaches it only
+/// through `scheduled_scan_run_due`.
+pub fn auto_quarantine(
     services: &Services,
     db: &Database,
+    store: &ScanStore,
     scan: &ScanResult,
 ) -> AutoQuarantine {
+    let skipped = |reason| AutoQuarantine::Skipped { reason };
     if scan.cancelled {
-        return AutoQuarantine::Skipped {
-            reason: SkipReason::Cancelled,
-        };
+        return skipped(SkipReason::Cancelled);
+    }
+    if store.manual_review_pending() {
+        return skipped(SkipReason::ManualReview);
     }
     // A clean or restore the user started wins; this run just skips.
     let Ok(_busy) = services.quarantine.begin(Operation::Clean) else {
-        return AutoQuarantine::Skipped {
-            reason: SkipReason::Busy,
-        };
+        return skipped(SkipReason::Busy);
     };
     let approved = scheduled_scan::auto_quarantine_ids(&scan.recommendations, &scan.findings);
     let units = executor::plan(&approved, &scan.recommendations, &scan.findings);
@@ -623,9 +632,32 @@ fn auto_quarantine<R: Runtime>(
         confirm_empty_recycle_bin: false,
         cancel: None,
     };
-    match run_units(services, db, &units, &options, None) {
+    let result = run_units(services, db, &units, &options, None);
+    if let Ok(report) = &result {
+        // A row with several findings stays unless every one of them moved.
+        let (moved, kept): (Vec<_>, Vec<_>) = report
+            .items
+            .iter()
+            .partition(|item| matches!(item.outcome, ExecOutcome::Succeeded));
+        let kept: HashSet<Uuid> = kept.iter().map(|item| item.recommendation_id).collect();
+        let gone: HashSet<Uuid> = moved
+            .iter()
+            .map(|item| item.recommendation_id)
+            .filter(|id| !kept.contains(id))
+            .collect();
+        let mut left = scan.clone();
+        left.recommendations.retain(|rec| !gone.contains(&rec.id));
+        if let Err(err) = store.replace(left) {
+            tracing::debug!(error = %err, "scheduled scan left the store before pruning");
+        }
+    }
+    auto_quarantine_outcome(result)
+}
+
+/// The report line for an auto-quarantine batch that got as far as running.
+pub fn auto_quarantine_outcome(result: Result<ExecReport, ApiError>) -> AutoQuarantine {
+    match result {
         Ok(report) => {
-            notify_quarantine_changed(app, services, db, report.batch_id);
             let moved = report.succeeded() as u64;
             AutoQuarantine::Ran {
                 moved,

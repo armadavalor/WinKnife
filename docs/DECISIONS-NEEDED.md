@@ -937,3 +937,8 @@ not ours to take.
       retried later.
 - [ ] 2026-10-26 (C11): schedule validation reuses `CoreError::InvalidTimer`
       rather than adding a new error variant.
+- [ ] 2026-10-26 (C11): a manual scan stays pinned (not evicted, and
+      auto-quarantine skips with `manualReview`) until it is executed or the
+      app restarts; abandoning it with "New scan" does not release the pin, so
+      auto-quarantine waits for the next manual execute. Safest reading: never
+      move files under a review the user may still act on.

@@ -1380,7 +1380,7 @@ export interface BucketTotals {
   bytes: number;
 }
 
-export type AutoQuarantineSkip = "busy" | "cancelled" | "failed";
+export type AutoQuarantineSkip = "busy" | "cancelled" | "failed" | "manualReview";
 
 export type AutoQuarantineOutcome =
   | { kind: "ran"; moved: number; notMoved: number; bytes: number; batchId: string | null }

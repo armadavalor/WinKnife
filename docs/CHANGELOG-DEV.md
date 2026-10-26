@@ -2737,4 +2737,11 @@ shell with a Review button that reopens the normal cleaner results.
 - **When it runs.** K-021 forbids an OS scheduled task, so the shell checks on
   start and every 5 minutes while the app is open; a missed slot runs once at
   the next start.
+- **Review fixes (#108).** Turning auto-quarantine on asks once in a confirm
+  dialog (Cancel leaves it off). Moved items are pruned from the stored scan,
+  so Review no longer pre-ticks them. A manual scan still under review is
+  pinned: auto-quarantine skips with `manualReview`, and a scheduled scan
+  cannot evict it at `MAX_RETAINED_SCANS`. Integration tests in
+  `tests/scheduled_auto_quarantine.rs` cover cancelled, busy, manual review,
+  ran and failed.
 - **Deferred.** See DECISIONS-NEEDED "scheduled scan" items.

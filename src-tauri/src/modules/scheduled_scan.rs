@@ -190,6 +190,9 @@ pub enum SkipReason {
     Cancelled,
     /// The executor refused the batch; the log has the detail.
     Failed,
+    /// A manual scan was still waiting in Review; moving files from under it
+    /// would change what the user is looking at.
+    ManualReview,
 }
 
 /// What auto-quarantine did.
