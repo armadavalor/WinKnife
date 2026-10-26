@@ -2753,6 +2753,28 @@ longer runs off the screen. No tool's behaviour changed.
   recorder open the tool's tab first. Startup waits now look for the Settings
   link, which is always visible.
 
+## 2026-10-25 — Uninstaller+ leftover scan (C5, K-030)
+
+**Built.** New `uninstaller` module: lists immediate child folders of
+`%AppData%`, `%LocalAppData%`, `%ProgramData%` and `Program Files*` that no
+app in the HKLM/HKCU Uninstall keys claims. It never runs an uninstaller,
+never writes the registry and is not a registry cleaner.
+
+- Scan is read-only; Uninstall keys are only read. Matching is generous
+  towards "installed" so a missed leftover, not a broken app, is the failure
+  mode.
+- Rating: `uninstaller-leftovers` pack, Needs Review at most, never Safe.
+  Protected paths, ancestors of protected paths, `Program Files*` and folders
+  with a link inside are info only. Every finding has a reason.
+- Execute: whole folder to quarantine through the shared executor; gate 3 has
+  a `uninstaller`-only exception that runs a fail-closed re-check right before
+  the move (K-030).
+- `start_uninstaller_scan` command + wiring probe, `/uninstaller` route,
+  EN/TR strings, sidebar icon.
+
+**Deferred.** ProgramData leftovers stay info-only; no vendor allow-list for
+dev-cache folders (DECISIONS-NEEDED).
+
 ## 2026-10-26 — Big-file archiver (C16)
 
 - New `archiver` module (`modules/archiver.rs`, sidebar "Big-File Archiver").

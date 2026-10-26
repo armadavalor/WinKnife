@@ -49,6 +49,7 @@ register_modules! {
     repair => repair::RepairModule,
     apps => apps::AppsModule,
     network => network::NetworkModule,
+    uninstaller => uninstaller::UninstallerModule,
     archiver => archiver::ArchiverModule,
     scheduled_scan => scheduled_scan::ScheduledScanModule,
 }
@@ -138,6 +139,7 @@ mod tests {
             "repair",
             "apps",
             "network",
+            "uninstaller",
             "archiver",
             "scheduled-scan",
         ] {
