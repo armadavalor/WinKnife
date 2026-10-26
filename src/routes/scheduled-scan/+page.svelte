@@ -38,7 +38,7 @@
   let weekday = $state(0);
   let time = $state("09:00");
   let autoQuarantine = $state(false);
-  /** Turning auto-quarantine on waits for this dialog (K-028: explicit consent). */
+  /** Turning auto-quarantine on waits for this dialog (K-031: explicit consent). */
   let confirmingAuto = $state(false);
   let saved = $state(false);
   let gone = $state(false);

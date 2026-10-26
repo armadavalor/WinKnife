@@ -50,11 +50,18 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::core::brain::Brain;
 use crate::core::db::{with_db, DbAccess};
 use crate::core::error::{CoreError, Result};
 use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare::CanonicalPath;
 use crate::core::scanner::{self, CancellationToken, WalkOptions};
+use crate::core::types::{
+    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+};
+
+/// Module id, also the `module` of every finding [`propose`] makes.
+pub const MODULE_ID: &str = "treemap";
 
 /// How many children one `children` call returns before the tail is folded into
 /// a single "everything else" row.
@@ -582,6 +589,10 @@ pub struct TreeChild {
     pub category: Category,
     /// How many items this row stands for. `1` except for the folded tail.
     pub item_count: u64,
+    /// Last-modified time of a plain file when the map read it; the snapshot a
+    /// tag carries to `treemap_propose` (K-028). `None` for anything else.
+    #[serde(default)]
+    pub modified: Option<DateTime<Utc>>,
 }
 
 /// What `children` hands the UI for one directory.
@@ -685,6 +696,7 @@ pub fn children(path: &Path, root: &Path, oracle: &dyn SizeOracle) -> Result<Tre
                         is_link: true,
                         category: Category::Other,
                         item_count: 1,
+                        modified: None,
                     });
                 } else if meta.is_dir() {
                     let aggregate = oracle.aggregate(&child);
@@ -697,6 +709,7 @@ pub fn children(path: &Path, root: &Path, oracle: &dyn SizeOracle) -> Result<Tre
                         is_link: false,
                         category: Category::Directory,
                         item_count: 1,
+                        modified: None,
                     });
                 } else {
                     let category = Category::of(&child);
@@ -709,6 +722,7 @@ pub fn children(path: &Path, root: &Path, oracle: &dyn SizeOracle) -> Result<Tre
                         is_link: false,
                         category,
                         item_count: 1,
+                        modified: meta.modified().ok().map(DateTime::<Utc>::from),
                     });
                 }
             }
@@ -749,6 +763,7 @@ pub fn children(path: &Path, root: &Path, oracle: &dyn SizeOracle) -> Result<Tre
             is_link: false,
             category: Category::Other,
             item_count: folded,
+            modified: None,
         });
     }
 
@@ -953,21 +968,206 @@ impl SizeOracle for CacheOracle<'_> {
 }
 
 /* -------------------------------------------------------------------------
+ * Tagging (C13, K-028)
+ * ---------------------------------------------------------------------- */
+
+/// The user picked the file by hand, so the opinion is theirs, not ours.
+const TAGGED_CONFIDENCE: u8 = 100;
+
+/// A tagged path the backend would not turn into an action, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaggedRefusal {
+    /// The path as the UI sent it.
+    pub path: PathBuf,
+    /// Plain-language reason, shown verbatim.
+    pub reason: String,
+}
+
+/// One tagged file as the map showed it: the snapshot the move is checked against.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaggedItem {
+    /// Absolute path.
+    pub path: PathBuf,
+    /// Size the map showed.
+    pub size_bytes: u64,
+    /// Last-modified time the map showed.
+    pub modified: Option<DateTime<Utc>>,
+}
+
+/// What [`propose`] made of a tagged list.
+#[derive(Debug, Clone, Default)]
+pub struct TaggedProposal {
+    /// One per accepted file.
+    pub findings: Vec<Finding>,
+    /// One `Quarantine` recommendation per finding.
+    pub recommendations: Vec<Recommendation>,
+    /// Paths that were refused, in the order they arrived.
+    pub refused: Vec<TaggedRefusal>,
+}
+
+/// Turn the paths the user tagged on the disk map into quarantine proposals.
+///
+/// The UI is not trusted: a protected path, anything that is not a plain file
+/// (folders, links, missing paths), a file that no longer matches the size and
+/// modified time the map showed, and duplicates are refused here, in code, and
+/// reported back. Reads metadata only; nothing moves until `execute`.
+pub fn propose(items: &[TaggedItem], brain: &Brain) -> TaggedProposal {
+    let mut out = TaggedProposal::default();
+    let mut seen = std::collections::HashSet::new();
+    for item in items {
+        let path = &item.path;
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        match tagged_file(item, brain) {
+            Ok((finding, recommendation)) => {
+                out.findings.push(finding);
+                out.recommendations.push(recommendation);
+            }
+            Err(reason) => out.refused.push(TaggedRefusal {
+                path: path.clone(),
+                reason,
+            }),
+        }
+    }
+    out
+}
+
+fn tagged_file(
+    item: &TaggedItem,
+    brain: &Brain,
+) -> std::result::Result<(Finding, Recommendation), String> {
+    let path = item.path.as_path();
+    if let Some(refusal) = brain.path_refusal(path) {
+        return Err(refusal.reason);
+    }
+    // Same check gate 4 runs, against the values the map showed, not today's.
+    if let Some(reason) = tagged_refusal(path, item.size_bytes, item.modified) {
+        return Err(reason.trim_start_matches("skipped: ").to_owned());
+    }
+    let mut finding = Finding::new(MODULE_ID, path, FindingKind::File);
+    finding.size_bytes = item.size_bytes;
+    finding.modified = item.modified;
+    let recommendation = Recommendation::new(
+        vec![finding.id],
+        RiskBucket::NeedsReview,
+        TAGGED_CONFIDENCE,
+        Action::Quarantine,
+        "You tagged this file on the disk map.",
+        item.size_bytes,
+        Justification::UserTagged {
+            size_bytes: item.size_bytes,
+            modified: item.modified,
+        },
+    )
+    .map_err(|err| err.to_string())?;
+    Ok((finding, recommendation))
+}
+
+/// Files sitting directly on a drive (or share) root, such as `C:\bootmgr`, are
+/// never taggable: moving one can leave Windows unable to start, and then
+/// WinKnife cannot run to restore it (K-029). Tagging-only rule; the global
+/// protected list is unchanged. The resolved path is checked too, so `..` or a
+/// junction cannot route around it.
+fn drive_root_refusal(path: &Path) -> Option<String> {
+    let resolved = std::fs::canonicalize(path).ok();
+    let lexical = lexically_normal(path);
+    let on_root = [path, lexical.as_path()]
+        .into_iter()
+        .chain(resolved.as_deref())
+        .any(parent_is_root);
+    on_root.then(|| {
+        format!(
+            "`{}` sits directly on the root of a drive, where Windows keeps its \
+             start-up files; files there cannot be tagged",
+            path.display()
+        )
+    })
+}
+
+/// Folds `.` and `..` without touching the disk; `canonicalize` fails when a
+/// folder named before `..` does not exist, yet Windows still resolves the path.
+fn lexically_normal(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !matches!(
+                    out.components().next_back(),
+                    None | Some(Component::Prefix(_) | Component::RootDir)
+                ) {
+                    out.pop();
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+fn parent_is_root(path: &Path) -> bool {
+    use std::path::Component;
+    path.parent().is_some_and(|parent| {
+        let mut parts = parent.components().peekable();
+        matches!(parts.peek(), Some(Component::Prefix(_)))
+            && parts.all(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+    })
+}
+
+/// Gate 4 for a tagged file: refuse when it is no longer the file the user saw.
+///
+/// The reason was "you tagged this file"; that stays true only while it is the
+/// same plain file with the same size and modified time.
+pub fn tagged_refusal(
+    path: &Path,
+    size_bytes: u64,
+    modified: Option<DateTime<Utc>>,
+) -> Option<String> {
+    if let Some(reason) = drive_root_refusal(path) {
+        return Some(format!("skipped: {reason}"));
+    }
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return Some(format!(
+            "skipped: `{}` is no longer there to move",
+            path.display()
+        ));
+    };
+    if !meta.file_type().is_file() {
+        return Some(format!(
+            "skipped: `{}` is no longer a plain file",
+            path.display()
+        ));
+    }
+    let now = meta.modified().ok().map(DateTime::<Utc>::from);
+    if meta.len() != size_bytes || now != modified {
+        return Some(format!(
+            "skipped: `{}` changed after it was tagged, so it may no longer be \
+             what you meant to remove",
+            path.display()
+        ));
+    }
+    None
+}
+
+/* -------------------------------------------------------------------------
  * Module registration
  * ---------------------------------------------------------------------- */
 
 /// The treemap tool.
 ///
-/// It scans but never executes: a treemap answers a question, and the actions it
-/// leads to are the cleaner's and the duplicate finder's. `has_execute` is
-/// therefore false, and there is no `analyze` — every rectangle is a fact, and
-/// this module has no opinions to record.
+/// A treemap answers a question and has no opinions of its own: there is no
+/// `analyze`. It executes only what the user tagged by hand ([`propose`]), and
+/// only through the quarantine, so `has_execute` is true (K-028).
 #[derive(Debug, Default)]
 pub struct TreemapModule;
 
 impl ToolModule for TreemapModule {
     fn id(&self) -> &'static str {
-        "treemap"
+        MODULE_ID
     }
 
     fn manifest(&self) -> ModuleManifest {
@@ -979,7 +1179,7 @@ impl ToolModule for TreemapModule {
             category: ModuleCategory::Files,
             capabilities: ModuleCapabilities {
                 has_scan: true,
-                has_execute: false,
+                has_execute: true,
                 has_settings: false,
             },
         }
@@ -1482,14 +1682,164 @@ mod tests {
     }
 
     #[test]
-    fn the_manifest_declares_a_scan_only_module() {
+    fn the_manifest_declares_scan_and_tagged_execute() {
         let manifest = TreemapModule.manifest();
         assert_eq!(manifest.id, "treemap");
         assert!(manifest.capabilities.has_scan);
-        assert!(
-            !manifest.capabilities.has_execute,
-            "a map answers a question; the cleaner and the duplicate finder act"
+        assert!(manifest.capabilities.has_execute, "tagged files can be quarantined");
+    }
+
+    /// A tag as the map would send it: size and mtime read now, or zeros.
+    fn as_tagged(path: &Path) -> TaggedItem {
+        let meta = fs::symlink_metadata(path).ok();
+        TaggedItem {
+            path: path.to_path_buf(),
+            size_bytes: meta.as_ref().map_or(0, fs::Metadata::len),
+            modified: meta
+                .and_then(|m| m.modified().ok())
+                .map(DateTime::<Utc>::from),
+        }
+    }
+
+    fn tag_all(paths: &[&Path]) -> Vec<TaggedItem> {
+        paths.iter().map(|p| as_tagged(p)).collect()
+    }
+
+    /// Moves a file's mtime back an hour without changing its size.
+    fn age_by_an_hour(path: &Path) {
+        let then = std::time::SystemTime::now() - std::time::Duration::from_secs(3_600);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .and_then(|f| f.set_modified(then))
+            .expect("set mtime");
+    }
+
+    #[test]
+    fn propose_accepts_files_and_refuses_folders_protected_and_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("big.bin");
+        fs::write(&file, vec![0u8; 1_234]).expect("write");
+        let folder = dir.path().join("folder");
+        fs::create_dir(&folder).expect("mkdir");
+        let missing = dir.path().join("gone.bin");
+        let guarded = dir.path().join("guarded");
+        fs::create_dir(&guarded).expect("mkdir");
+        let protected = guarded.join("system.dll");
+        fs::write(&protected, b"x").expect("write");
+
+        let brain = Brain::builder()
+            .protected_paths(crate::core::brain::ProtectedPaths::from_trees([
+                fs::canonicalize(&guarded).expect("canonical"),
+            ]))
+            .build();
+        let out = propose(
+            &tag_all(&[&file, &folder, &protected, &missing, &file]),
+            &brain,
         );
+
+        assert_eq!(out.findings.len(), 1, "the duplicate entry is dropped");
+        assert_eq!(out.findings[0].path, file);
+        assert_eq!(out.findings[0].size_bytes, 1_234);
+        let rec = &out.recommendations[0];
+        assert_eq!(rec.action, Action::Quarantine);
+        assert_eq!(rec.risk, RiskBucket::NeedsReview);
+        assert!(!rec.reason.is_empty());
+        assert!(matches!(
+            rec.justification,
+            Justification::UserTagged { size_bytes: 1_234, .. }
+        ));
+
+        let refused: Vec<_> = out.refused.iter().map(|r| r.path.clone()).collect();
+        assert_eq!(refused, vec![folder, protected, missing]);
+        assert!(out.refused.iter().all(|r| !r.reason.is_empty()));
+        assert!(out.refused[0].reason.contains("plain file"));
+    }
+
+    /// The snapshot is the map's, not the disk's at send time (review of #105):
+    /// a file rewritten between drawing the map and pressing Send is refused,
+    /// even when its size did not change.
+    #[test]
+    fn propose_refuses_a_file_that_changed_since_the_map_read_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let grown = dir.path().join("grown.bin");
+        let rewritten = dir.path().join("rewritten.bin");
+        fs::write(&grown, b"abc").expect("write");
+        fs::write(&rewritten, b"abc").expect("write");
+        let tags = tag_all(&[&grown, &rewritten]);
+
+        fs::write(&grown, b"abcdef").expect("grow");
+        fs::write(&rewritten, b"xyz").expect("rewrite");
+        age_by_an_hour(&rewritten);
+
+        let out = propose(&tags, &Brain::new());
+        assert!(out.findings.is_empty(), "{:?}", out.findings);
+        assert_eq!(out.refused.len(), 2);
+        assert!(out
+            .refused
+            .iter()
+            .all(|r| r.reason.contains("changed after it was tagged")));
+    }
+
+    #[test]
+    fn tagged_refusal_passes_an_unchanged_file_and_refuses_a_changed_one() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("a.bin");
+        fs::write(&file, b"abc").expect("write");
+        let out = propose(&tag_all(&[&file]), &Brain::new());
+        let Justification::UserTagged {
+            size_bytes,
+            modified,
+        } = out.recommendations[0].justification.clone()
+        else {
+            panic!("expected a UserTagged justification");
+        };
+        assert_eq!(tagged_refusal(&file, size_bytes, modified), None);
+
+        fs::write(&file, b"abcdef").expect("rewrite");
+        let reason = tagged_refusal(&file, size_bytes, modified).expect("refused");
+        assert!(reason.contains("changed after it was tagged"));
+
+        // Same size, new mtime: still a different file.
+        fs::write(&file, b"xyz").expect("same-size rewrite");
+        age_by_an_hour(&file);
+        let reason = tagged_refusal(&file, size_bytes, modified).expect("refused");
+        assert!(reason.contains("changed after it was tagged"));
+    }
+
+    #[test]
+    fn a_file_on_a_drive_root_is_refused_and_one_level_down_is_not() {
+        for root_file in [r"C:\bootmgr", r"\\?\C:\BOOTNXT", r"C:\x\..\bootmgr",
+            // `canonicalize` fails here, so the lexical fold must catch it.
+            r"C:\winknife-no-such-dir\.\..\bootmgr",
+        ] {
+            let path = Path::new(root_file);
+            let reason = drive_root_refusal(path).expect(root_file);
+            assert!(reason.contains("root of a drive"), "{reason}");
+            assert!(tagged_refusal(path, 0, None)
+                .expect("gate 4 refuses")
+                .contains("root of a drive"));
+            let out = propose(&[as_tagged(path)], &Brain::new());
+            // The global protected check may refuse first, with its own reason.
+            assert!(out.findings.is_empty(), "{root_file} must not be proposed");
+            assert_eq!(out.refused.len(), 1);
+        }
+        assert_eq!(drive_root_refusal(Path::new(r"C:\Data\bootmgr")), None);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("one-level-down.bin");
+        fs::write(&file, b"x").expect("write");
+        let out = propose(&tag_all(&[&file]), &Brain::new());
+        assert_eq!(out.findings.len(), 1, "{:?}", out.refused);
+    }
+
+    #[test]
+    fn tagged_refusal_refuses_a_folder_and_a_missing_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(tagged_refusal(dir.path(), 0, None)
+            .expect("folder refused")
+            .contains("no longer a plain file"));
+        assert!(tagged_refusal(&dir.path().join("x"), 0, None).is_some());
     }
 
     /// `analyze` has no opinions to record, so it must produce none — and in

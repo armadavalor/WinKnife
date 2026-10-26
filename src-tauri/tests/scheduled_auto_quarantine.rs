@@ -1,4 +1,4 @@
-//! Scheduled auto-quarantine (C11, K-028) stands aside instead of moving files
+//! Scheduled auto-quarantine (C11, K-031) stands aside instead of moving files
 //! from under the user: a cancelled scan, a clean already running, or a manual
 //! scan still waiting in Review all skip the run, and a batch that fails is
 //! reported as failed rather than as zero moved.

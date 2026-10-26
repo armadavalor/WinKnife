@@ -2697,6 +2697,36 @@ C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; th
   same polite request; nothing is forced. Shortcut: a timed-out call keeps its
   worker thread until Windows answers.
 
+## 2026-10-26 — C13: tag on the treemap, send to Quarantine
+
+- **UI.** Files on the disk-usage treemap can be tagged with the `t` key on the
+  focused cell or from the context menu; tagged cells get a dashed amber
+  border. A "Tagged" list shows each item, the total size, remove buttons and
+  Clear. "Send to Quarantine" opens a confirm dialog (retention days from
+  settings) and reports what moved and what was not moved, with the reason.
+  Tags are UI state only. EN + TR strings.
+- **Backend.** New `treemap_propose(items)` builds one recommendation per file
+  with `Justification::UserTagged { size, modified }`, stored as a scan so the
+  normal `execute` + Quarantine path runs; no new deletion code. Folders,
+  links, protected paths and missing files are refused and returned with a
+  reason. The snapshot is the map's: each item carries the size and mtime the
+  treemap read (`TreeChild.modified`), and propose refuses a file that no
+  longer matches them; gate 4 re-checks the same values at execute time
+  (review of #105). Treemap manifest now has `has_execute: true`.
+- **Tests.** Propose refusals (folder, protected, missing), gate-4 drift
+  refusal, same-size rewrite with a new mtime refused by propose and gate 4,
+  executor end to end (unchanged tag moves, rewritten one skipped),
+  drive-root refusal vs. a file one level down, `command_wiring` probe for
+  `treemap_propose`.
+- **Drive-root files (K-029).** A live probe showed `C:\bootmgr` and
+  `C:\BOOTNXT` passed propose: only the drive root itself is protected.
+  Propose and gate 4 now refuse any file whose parent is a drive (or share)
+  root, checked on both the given and the resolved path (`..`, junctions).
+  Tagging only; the global protected list is unchanged.
+
+**Deferred.** Folder tagging (K-028, DECISIONS-NEEDED); system volumes
+mounted on a folder (DECISIONS-NEEDED).
+
 ## 2026-10-26 — Sidebar category tabs
 
 **Built.** The tool list in the sidebar is split into category tabs so it no
@@ -2759,7 +2789,7 @@ files, leaves the folders on disk and keeps a protected child red.
 
 **Deferred.** No shipped pack uses it yet; no UI strings were needed.
 
-## 2026-10-26 — C11: scheduled scan with report (K-028)
+## 2026-10-26 — C11: scheduled scan with report (K-031)
 
 **Built.** A new `scheduled-scan` module (sidebar, clock icon) with an Off /
 daily / weekly schedule at a set time, stored in settings, and the last report
