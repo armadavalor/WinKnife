@@ -15,7 +15,7 @@ use serde::Serialize;
 
 use crate::core::error::{CoreError, Result};
 use crate::core::executor::TweakControl;
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{
     Hive, RegValue, Registry, Signature, SignatureProbe, REG_TYPE_SZ,
 };
@@ -639,6 +639,7 @@ impl ToolModule for ContextMenuModule {
             description: "Lists what apps added to the right-click menu and disables an entry, reversibly."
                 .to_owned(),
             icon: "menu".to_owned(),
+            category: ModuleCategory::System,
             capabilities: ModuleCapabilities {
                 has_scan: true,
                 has_execute: true,

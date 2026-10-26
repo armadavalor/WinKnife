@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{AwakeRequest, ExecutionState, RecordingExecutionState};
 
 /// Longest session. There is deliberately no "forever" mode.
@@ -310,6 +310,7 @@ impl ToolModule for KeepAwakeModule {
                 "Stop the PC from sleeping for a set time, with a countdown and a stop button."
                     .to_owned(),
             icon: "coffee".to_owned(),
+            category: ModuleCategory::Power,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,

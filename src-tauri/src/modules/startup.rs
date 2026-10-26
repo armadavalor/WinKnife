@@ -51,7 +51,7 @@ use crate::core::error::{CoreError, Result};
 use crate::core::executor::{LiveStartupEntry, StartupControl};
 use crate::core::content_hash::full_hash;
 use crate::core::ledger;
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::quarantine::Quarantine;
 use crate::core::platform::{
     EnvResolver, Hive, RegValue, Registry, Signature, SignatureProbe, TaskScheduler,
@@ -1516,6 +1516,7 @@ impl ToolModule for StartupModule {
                 "See what runs when you log in, and switch things off in a way Windows agrees with."
                     .to_owned(),
             icon: "rocket".to_owned(),
+            category: ModuleCategory::Apps,
             capabilities: ModuleCapabilities {
                 has_scan: true,
                 has_execute: true,

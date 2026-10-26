@@ -92,7 +92,7 @@ let cdp = null;
 async function attach() {
   cdp = await connect(await pageTarget());
   await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
-  await waitFor('a[href="/cleaner"]', null, STARTUP_TIMEOUT_MS);
+  await waitFor('a[href="/settings"]', null, STARTUP_TIMEOUT_MS);
 }
 
 async function evaluate(expression) {
@@ -188,6 +188,8 @@ async function main() {
   const sample = files.filter((_, i) => i % step === 0);
 
   await attach();
+  // The sidebar lists one category tab at a time; open the cleaner's tab first.
+  if (!(await has('a[href="/cleaner"]'))) await click('nav [role="tab"][data-tools~="cleaner"]');
   await click('a[href="/cleaner"]');
   await sleep(800);
   if (await has("main button", "Scan again")) await click("main button", "Scan again");

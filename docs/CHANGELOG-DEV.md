@@ -2697,6 +2697,32 @@ C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; th
   same polite request; nothing is forced. Shortcut: a timed-out call keeps its
   worker thread until Windows answers.
 
+## 2026-10-26 — Sidebar category tabs
+
+**Built.** The tool list in the sidebar is split into category tabs so it no
+longer runs off the screen. No tool's behaviour changed.
+
+- **Category in the manifest.** `ModuleManifest` has a required `category`
+  (`ModuleCategory`: cleanup, files, system, apps, network, power, other), so
+  a new tool cannot register without choosing one. The UI maps a missing or
+  unknown value to "other" (`src/lib/categories.ts`, tested).
+- **Tabs.** A `tablist` of wrapping chips above the tool list. Chips rather
+  than one segmented row because six labels (longer in Turkish) do not fit in
+  the 208 px rail; collapsible sections would bring the long list back. Arrow
+  keys, Home and End move and select (automatic activation, roving
+  tabindex); the list is the `tabpanel`. Only categories with a visible tool
+  get a tab, so hidden tools (#72) can empty a tab and it disappears; with one
+  category left the strip is not shown. Dashboard, Settings and Quarantine
+  stay outside the tabs.
+- **Selection.** Opening a tool (link, dashboard card, `--module`) selects its
+  tab. The last tab the user clicked is remembered in localStorage
+  (`winknife.sidebarCategory`, try/catch); a remembered tab that is now empty
+  falls back to the first one.
+- **e2e.** Each tab carries `data-tools` with its tool ids; `goTo` in
+  `scripts/qa/e2e.mjs`, the cleaner click in `e2e-kill.mjs` and the demo
+  recorder open the tool's tab first. Startup waits now look for the Settings
+  link, which is always visible.
+
 ## 2026-10-26 — Big-file archiver (C16)
 
 - New `archiver` module (`modules/archiver.rs`, sidebar "Big-File Archiver").

@@ -185,6 +185,16 @@ export interface ModuleCapabilities {
   hasSettings: boolean;
 }
 
+/** The sidebar tab a tool is listed under (`core::module::ModuleCategory`). */
+export type ModuleCategory =
+  | "cleanup"
+  | "files"
+  | "system"
+  | "apps"
+  | "network"
+  | "power"
+  | "other";
+
 /** Everything the UI needs to render a module without knowing anything else. */
 export interface ModuleManifest {
   /** kebab-case; also the route segment (`/dummy`). */
@@ -194,6 +204,7 @@ export interface ModuleManifest {
   description: string;
   /** Icon name the UI maps to an inline SVG. */
   icon: string;
+  category: ModuleCategory;
   capabilities: ModuleCapabilities;
 }
 
