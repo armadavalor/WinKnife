@@ -30,6 +30,7 @@ Field notes:
 - `paths`: glob patterns; env vars expanded case-insensitively. Absolute patterns outside user profile require `"requires_admin": true` on the rule.
 - `match` (all optional, AND-ed): `min_age_hours`, `min_size_bytes`, `extensions: []`, `owner_process_absent: "chrome.exe"` (skip/downgrade if process running).
 - `score.base`: 0–100 starting confidence before heuristics. `score.max_bucket`: ceiling — heuristics may lower a bucket, never raise above this. Allowed: `safe | needs_review | do_not_delete`.
+- `keep_folder` (optional, default `false`, `quarantine` rules only): each `paths` entry names a folder; every file under it, at any depth, is matched while the folder and its subfolders stay. Each file still passes `match`, the quiet hour, the lock check and protected paths on its own. Same reach as `Folder\**`; it states the intent and keeps the walk rooted at the folder. A path ending in `*` is refused (`Dir\*` would skip the files directly in `Dir`). `exclude` patterns are not rewritten: write them against the files, e.g. `Folder\**\*.lock`.
 - `reason`: user-facing, required, plain language. This string ships in the UI verbatim.
 - Protected paths override everything here, and the override is a load-time/compile-time property rather than a runtime decision. Precisely:
   - A rule that **proposes an action** on a protected path is a **test failure**. `no_shipped_rule_targets_a_protected_path` asks the real brain to prove it refuses a file under that root, so this is checked against behaviour and not by inspection.

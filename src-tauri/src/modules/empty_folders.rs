@@ -34,7 +34,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::core::brain::{Brain, ProtectedPaths, Signals};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare::CanonicalPath;
 use crate::core::scanner::CancellationToken;
 use crate::core::types::{
@@ -404,6 +404,7 @@ impl ToolModule for EmptyFoldersModule {
                 "Find folders that contain no files at any depth, and move them to quarantine."
                     .to_owned(),
             icon: "folder".to_owned(),
+            category: ModuleCategory::Cleanup,
             capabilities: ModuleCapabilities {
                 has_scan: true,
                 has_execute: true,

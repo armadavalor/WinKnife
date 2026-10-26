@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{
     content_hash, failure_from_exit_code, HelperRun, HostsFence, HostsWriter, EXIT_CHANGED,
     EXIT_INVALID, EXIT_VERIFY_FAILED, EXIT_WRITTEN, FLUSH_DNS_COMMAND,
@@ -743,6 +743,7 @@ impl ToolModule for HostsModule {
             description: "View and edit the Windows hosts file, with a backup and diff before every save."
                 .to_owned(),
             icon: "hosts".to_owned(),
+            category: ModuleCategory::Network,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,

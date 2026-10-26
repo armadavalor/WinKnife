@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::state::ScanResult;
 use crate::core::types::{Action, Finding, FindingKind, Recommendation, RiskBucket};
 
@@ -292,6 +292,7 @@ impl ToolModule for ScheduledScanModule {
                 "Runs the cleaner's read-only scan daily or weekly and keeps a report for you to review."
                     .to_owned(),
             icon: "clock".to_owned(),
+            category: ModuleCategory::Cleanup,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,

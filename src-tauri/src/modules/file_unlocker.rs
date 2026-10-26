@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{
     close_policy, AppKind, CloseOutcome, LockInfo, RestartManager, RmError, UniqueProcess,
 };
@@ -53,6 +53,7 @@ impl ToolModule for FileUnlockerModule {
                 "Find out which program has a file open, and ask it to close politely."
                     .to_owned(),
             icon: "unlock".to_owned(),
+            category: ModuleCategory::Files,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,
