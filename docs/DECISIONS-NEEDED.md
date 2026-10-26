@@ -914,8 +914,8 @@ not ours to take.
 
 ## Open items raised by treemap tagging (C13, 2026-10-26)
 
-- [ ] 2026-10-26 (K-027): folder tagging is not offered. Quarantining a whole folder from the treemap needs its own gate-4 check (a folder's contents can change between tagging and sending; size + mtime of the folder itself does not prove that) and a decision on protected children. The UI only lets files be tagged; the backend refuses folders.
-- [ ] 2026-10-26 (K-028): the drive-root refusal only sees a root by its path (`C:\`, `\\server\share\`, after `..` folding and `canonicalize`). A system or EFI volume mounted on a folder (`D:\mnt\bootmgr`, volume mount point) still looks like an ordinary folder, so its root files can be tagged. Spotting that needs `GetVolumePathNameW` per file. Left as is: mounting the boot volume on a folder is rare, and Quarantine keeps the file restorable.
+- [ ] 2026-10-26 (K-028): folder tagging is not offered. Quarantining a whole folder from the treemap needs its own gate-4 check (a folder's contents can change between tagging and sending; size + mtime of the folder itself does not prove that) and a decision on protected children. The UI only lets files be tagged; the backend refuses folders.
+- [ ] 2026-10-26 (K-029): the drive-root refusal only sees a root by its path (`C:\`, `\\server\share\`, after `..` folding and `canonicalize`). A system or EFI volume mounted on a folder (`D:\mnt\bootmgr`, volume mount point) still looks like an ordinary folder, so its root files can be tagged. Spotting that needs `GetVolumePathNameW` per file. Left as is: mounting the boot volume on a folder is rare, and Quarantine keeps the file restorable.
 
 ## Open items raised by the big-file archiver (2026-10-26, C16)
 

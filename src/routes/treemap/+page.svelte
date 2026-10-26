@@ -118,7 +118,7 @@
     settingsStore.settings?.quarantine.retentionDays ?? 7,
   );
 
-  /** Only plain files: folder tagging is deferred (K-027). */
+  /** Only plain files: folder tagging is deferred (K-028). */
   function isTaggable(child: TreeChild | undefined | null): child is TreeChild {
     return !!child && !child.isDir && !child.isLink && child.path !== "";
   }

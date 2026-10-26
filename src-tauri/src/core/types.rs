@@ -228,7 +228,7 @@ pub enum Justification {
     },
     /// A file the user tagged by hand on the disk map. The executor re-reads its
     /// metadata and refuses if it is no longer a file or its size or modified
-    /// time changed since it was tagged (K-027).
+    /// time changed since it was tagged (K-028).
     #[serde(rename_all = "camelCase")]
     UserTagged {
         /// Size in bytes when it was tagged.

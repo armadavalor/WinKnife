@@ -2718,13 +2718,13 @@ C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; th
   executor end to end (unchanged tag moves, rewritten one skipped),
   drive-root refusal vs. a file one level down, `command_wiring` probe for
   `treemap_propose`.
-- **Drive-root files (K-028).** A live probe showed `C:\bootmgr` and
+- **Drive-root files (K-029).** A live probe showed `C:\bootmgr` and
   `C:\BOOTNXT` passed propose: only the drive root itself is protected.
   Propose and gate 4 now refuse any file whose parent is a drive (or share)
   root, checked on both the given and the resolved path (`..`, junctions).
   Tagging only; the global protected list is unchanged.
 
-**Deferred.** Folder tagging (K-027, DECISIONS-NEEDED); system volumes
+**Deferred.** Folder tagging (K-028, DECISIONS-NEEDED); system volumes
 mounted on a folder (DECISIONS-NEEDED).
 
 ## 2026-10-26 — Big-file archiver (C16)

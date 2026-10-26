@@ -590,7 +590,7 @@ pub struct TreeChild {
     /// How many items this row stands for. `1` except for the folded tail.
     pub item_count: u64,
     /// Last-modified time of a plain file when the map read it; the snapshot a
-    /// tag carries to `treemap_propose` (K-027). `None` for anything else.
+    /// tag carries to `treemap_propose` (K-028). `None` for anything else.
     #[serde(default)]
     pub modified: Option<DateTime<Utc>>,
 }
@@ -968,7 +968,7 @@ impl SizeOracle for CacheOracle<'_> {
 }
 
 /* -------------------------------------------------------------------------
- * Tagging (C13, K-027)
+ * Tagging (C13, K-028)
  * ---------------------------------------------------------------------- */
 
 /// The user picked the file by hand, so the opinion is theirs, not ours.
@@ -1068,7 +1068,7 @@ fn tagged_file(
 
 /// Files sitting directly on a drive (or share) root, such as `C:\bootmgr`, are
 /// never taggable: moving one can leave Windows unable to start, and then
-/// WinKnife cannot run to restore it (K-028). Tagging-only rule; the global
+/// WinKnife cannot run to restore it (K-029). Tagging-only rule; the global
 /// protected list is unchanged. The resolved path is checked too, so `..` or a
 /// junction cannot route around it.
 fn drive_root_refusal(path: &Path) -> Option<String> {
@@ -1161,7 +1161,7 @@ pub fn tagged_refusal(
 ///
 /// A treemap answers a question and has no opinions of its own: there is no
 /// `analyze`. It executes only what the user tagged by hand ([`propose`]), and
-/// only through the quarantine, so `has_execute` is true (K-027).
+/// only through the quarantine, so `has_execute` is true (K-028).
 #[derive(Debug, Default)]
 pub struct TreemapModule;
 
