@@ -73,10 +73,16 @@
       : modules,
   );
 
-  // Opening a tool (link, dashboard card, `--module`) shows its tab.
+  // Opening a tool (link, dashboard card, `--module`) shows its tab once per
+  // route, so hiding or showing tools later does not override a chosen tab.
+  let syncedPath: string | null = null;
   $effect(() => {
-    const active = modules.find((m) => page.url.pathname === `/${m.id}`);
-    if (active) chosen = categoryOf(active);
+    const path = page.url.pathname;
+    if (path === syncedPath) return;
+    const active = modules.find((m) => path === `/${m.id}`);
+    if (!active) return;
+    syncedPath = path;
+    chosen = categoryOf(active);
   });
 
   function choose(category: ModuleCategory) {
