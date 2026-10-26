@@ -912,6 +912,11 @@ not ours to take.
 - [ ] 2026-10-25 (phase 7): undo is one step, like C1 (a newer change supersedes the older row). Multi-step history was not asked for — left out.
 - [ ] 2026-10-25 (phase 7): env changes bypass the executor/`TweakRouter` (no scan, no recommendations); the page calls `env_vars_apply` / `env_vars_undo` directly, like the hosts editor. Revisit if C7 drift check should cover `env:` rows.
 
+## Open items raised by treemap tagging (C13, 2026-10-26)
+
+- [ ] 2026-10-26 (K-028): folder tagging is not offered. Quarantining a whole folder from the treemap needs its own gate-4 check (a folder's contents can change between tagging and sending; size + mtime of the folder itself does not prove that) and a decision on protected children. The UI only lets files be tagged; the backend refuses folders.
+- [ ] 2026-10-26 (K-029): the drive-root refusal only sees a root by its path (`C:\`, `\\server\share\`, after `..` folding and `canonicalize`). A system or EFI volume mounted on a folder (`D:\mnt\bootmgr`, volume mount point) still looks like an ordinary folder, so its root files can be tagged. Spotting that needs `GetVolumePathNameW` per file. Left as is: mounting the boot volume on a folder is rare, and Quarantine keeps the file restorable.
+
 ## Open items raised by the big-file archiver (2026-10-26, C16)
 
 - [ ] 2026-10-26 (phase 7): a running move cannot be cancelled; a multi-GB copy runs to the end of the current file and the batch. Safest interpretation taken: no cancel.
@@ -921,6 +926,6 @@ not ours to take.
 
 ## Open items raised by similar-image duplicates (2026-10-26, C18)
 
-- [ ] 2026-10-26 (K-029): HEIC/HEIF and JPEG XL are skipped. The `image` crate has no pure-Rust decoder for them; adding libheif/libjxl means a native dependency and its licence review. Phone photos in HEIC are therefore not compared.
-- [ ] 2026-10-26 (K-029): no thumbnails. The asset protocol is off, so rows show name, size and pixel size only. Showing previews needs either the asset protocol scoped to scan roots or base64 thumbnails over IPC; both widen what the UI can read.
-- [ ] 2026-10-26 (K-029): the threshold is one named constant (`SIMILAR_MAX_DISTANCE = 8`), not a user setting. Make it a slider only if users report misses or false matches.
+- [ ] 2026-10-26 (K-032): HEIC/HEIF and JPEG XL are skipped. The `image` crate has no pure-Rust decoder for them; adding libheif/libjxl means a native dependency and its licence review. Phone photos in HEIC are therefore not compared.
+- [ ] 2026-10-26 (K-032): no thumbnails. The asset protocol is off, so rows show name, size and pixel size only. Showing previews needs either the asset protocol scoped to scan roots or base64 thumbnails over IPC; both widen what the UI can read.
+- [ ] 2026-10-26 (K-032): the threshold is one named constant (`SIMILAR_MAX_DISTANCE = 8`), not a user setting. Make it a slider only if users report misses or false matches.
