@@ -15,7 +15,7 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{
     failure_from_exit_code, Hive, HelperRun, Registry, RestorePointPlatform,
     CREATE_RESTORE_POINT_FLAG, EXIT_CREATED, EXIT_MAYBE_SKIPPED, EXIT_PROTECTION_OFF,
@@ -287,6 +287,7 @@ impl ToolModule for RestorePointModule {
             description: "Create a Windows restore point before you change system settings."
                 .to_owned(),
             icon: "restore".to_owned(),
+            category: ModuleCategory::System,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,

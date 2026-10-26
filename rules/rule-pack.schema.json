@@ -95,7 +95,11 @@
           "type": "string",
           "minLength": 1
         },
-        "requires_admin": { "type": "boolean" }
+        "requires_admin": { "type": "boolean" },
+        "keep_folder": {
+          "description": "Each path names a folder: every file under it is matched, the folder and its subfolders stay. Only valid with action quarantine.",
+          "type": "boolean"
+        }
       }
     }
   }

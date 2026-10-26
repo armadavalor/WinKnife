@@ -2697,7 +2697,33 @@ C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; th
   same polite request; nothing is forced. Shortcut: a timed-out call keeps its
   worker thread until Windows answers.
 
-## 2026-10-25 — Uninstaller+ leftover scan (C5, K-027)
+## 2026-10-26 — Sidebar category tabs
+
+**Built.** The tool list in the sidebar is split into category tabs so it no
+longer runs off the screen. No tool's behaviour changed.
+
+- **Category in the manifest.** `ModuleManifest` has a required `category`
+  (`ModuleCategory`: cleanup, files, system, apps, network, power, other), so
+  a new tool cannot register without choosing one. The UI maps a missing or
+  unknown value to "other" (`src/lib/categories.ts`, tested).
+- **Tabs.** A `tablist` of wrapping chips above the tool list. Chips rather
+  than one segmented row because six labels (longer in Turkish) do not fit in
+  the 208 px rail; collapsible sections would bring the long list back. Arrow
+  keys, Home and End move and select (automatic activation, roving
+  tabindex); the list is the `tabpanel`. Only categories with a visible tool
+  get a tab, so hidden tools (#72) can empty a tab and it disappears; with one
+  category left the strip is not shown. Dashboard, Settings and Quarantine
+  stay outside the tabs.
+- **Selection.** Opening a tool (link, dashboard card, `--module`) selects its
+  tab. The last tab the user clicked is remembered in localStorage
+  (`winknife.sidebarCategory`, try/catch); a remembered tab that is now empty
+  falls back to the first one.
+- **e2e.** Each tab carries `data-tools` with its tool ids; `goTo` in
+  `scripts/qa/e2e.mjs`, the cleaner click in `e2e-kill.mjs` and the demo
+  recorder open the tool's tab first. Startup waits now look for the Settings
+  link, which is always visible.
+
+## 2026-10-25 — Uninstaller+ leftover scan (C5, K-028)
 
 **Built.** New `uninstaller` module: lists immediate child folders of
 `%AppData%`, `%LocalAppData%`, `%ProgramData%` and `Program Files*` that no
@@ -2712,12 +2738,13 @@ never writes the registry and is not a registry cleaner.
   with a link inside are info only. Every finding has a reason.
 - Execute: whole folder to quarantine through the shared executor; gate 3 has
   a `uninstaller`-only exception that runs a fail-closed re-check right before
-  the move (K-027).
+  the move (K-028).
 - `start_uninstaller_scan` command + wiring probe, `/uninstaller` route,
   EN/TR strings, sidebar icon.
 
 **Deferred.** ProgramData leftovers stay info-only; no vendor allow-list for
 dev-cache folders (DECISIONS-NEEDED).
+
 ## 2026-10-26 — Big-file archiver (C16)
 
 - New `archiver` module (`modules/archiver.rs`, sidebar "Big-File Archiver").
@@ -2736,5 +2763,21 @@ dev-cache folders (DECISIONS-NEEDED).
   not be protected, and not lie inside the scanned root.
 - Commands `start_archiver_scan`, `archive_files` with wiring probes; EN + TR
   strings; route `/archiver`.
-- Decisions: K-027. Deferred: cancelling a running move, restore from the
+- Decisions: K-026. Deferred: cancelling a running move, restore from the
   manifest in one click (restore goes through Quarantine today).
+
+## 2026-10-26 — C12: clean contents, keep the folder
+
+**Built.** Rule field `keep_folder` (`RuleSpec`, schema, `docs/RULES-FORMAT.md`).
+Default `false`, so every existing pack behaves as before; the parser refuses it
+on anything but a `quarantine` rule. At compile time each path becomes
+`<folder>\**`, so the walk root is the folder and the folder itself never
+matches. The cleaner already proposes files only, so no executor change: the
+folder and its subfolder skeleton stay, every file is quarantined on its own and
+passes the usual match, quiet-hour, lock and protected-path checks (K-027,
+option A chosen by the user). Tests: parse/default, refusal on `info_only`,
+matching children but not the folder, and a cleaner scan that takes only the
+files, leaves the folders on disk and keeps a protected child red.
+
+**Deferred.** No shipped pack uses it yet; no UI strings were needed.
+

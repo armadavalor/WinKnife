@@ -27,7 +27,7 @@
 //!
 //! A leftover is moved to quarantine as one restorable folder through the
 //! shared executor, which calls [`recheck_refusal`] right before the move
-//! (KARARLAR K-027). Anything it cannot establish refuses the move.
+//! (KARARLAR K-028). Anything it cannot establish refuses the move.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::brain::{Brain, ProtectedPaths, Signals};
 use crate::core::error::Result;
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare::{same_path, CanonicalPath};
 use crate::core::platform::{EnvResolver, Hive, Registry};
 use crate::core::scanner::CancellationToken;
@@ -564,6 +564,7 @@ impl ToolModule for UninstallerModule {
             description: "Find app-data folders left behind by apps you removed, and move them to quarantine. Runs no uninstaller and never touches the registry."
                 .to_owned(),
             icon: "leftovers".to_owned(),
+            category: ModuleCategory::Apps,
             capabilities: ModuleCapabilities {
                 has_scan: true,
                 has_execute: true,

@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::busy::Operation;
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::RepairRunner;
 use crate::core::scanner::CancellationToken;
 
@@ -415,6 +415,7 @@ impl ToolModule for RepairModule {
             description: "Runs Windows' own SFC and DISM checks when you ask, and says what they found."
                 .to_owned(),
             icon: "wrench".to_owned(),
+            category: ModuleCategory::System,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,

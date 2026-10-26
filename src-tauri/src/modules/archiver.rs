@@ -35,7 +35,7 @@ use uuid::Uuid;
 use crate::core::brain::{Brain, ProtectedPaths};
 use crate::core::content_hash::full_hash;
 use crate::core::db::DbAccess;
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare::is_inside;
 use crate::core::quarantine::Quarantine;
 use crate::core::scanner::{self, CancellationToken};
@@ -478,6 +478,7 @@ impl ToolModule for ArchiverModule {
                 "Find large files you have not used in a year and move them to another drive, verified."
                     .to_owned(),
             icon: "archive".to_owned(),
+            category: ModuleCategory::Files,
             capabilities: ModuleCapabilities {
                 has_scan: true,
                 has_execute: true,

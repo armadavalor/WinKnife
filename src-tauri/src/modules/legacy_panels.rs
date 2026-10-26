@@ -12,7 +12,7 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::PanelLauncher;
 
 /// Where a panel sits on the page.
@@ -334,6 +334,7 @@ impl ToolModule for LegacyPanelsModule {
             name: "Legacy Panels".to_owned(),
             description: "Open the classic Windows windows that Settings hides.".to_owned(),
             icon: "panels".to_owned(),
+            category: ModuleCategory::System,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,

@@ -216,7 +216,11 @@ async function main() {
     mobile: false,
   });
   await evaluate(HELPERS);
-  await waitFor('a[href="/cleaner"]');
+  await waitFor('a[href="/settings"]');
+  // The sidebar lists one category tab at a time; start on the cleaner's tab.
+  if (!(await evaluate(`!!window.__demo.find('a[href="/cleaner"]')`))) {
+    await click('nav [role="tab"][data-tools~="cleaner"]');
+  }
   await click('a[href="/dashboard"]');
   await sleep(1500);
   await evaluate("window.__demo.moveTo(900, 520)");

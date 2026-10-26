@@ -1,5 +1,5 @@
 <!--
-  Uninstaller-leftovers route: Scan → Review → Execute (C5, K-027).
+  Uninstaller-leftovers route: Scan → Review → Execute (C5, K-028).
 
   Lists app-data folders no installed app claims. Runs no uninstaller and
   never touches the registry. Nothing starts selected, nothing is rated Safe,

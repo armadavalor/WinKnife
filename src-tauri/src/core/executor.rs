@@ -431,7 +431,7 @@ fn apply_one(
     //    A folder has no lock state of its own (the probe can only say
     //    `Inaccessible`); the owning module's re-check in gate 4 stands in
     //    for it, so only a module that has one may hand a folder through
-    //    (empty folders; uninstaller leftovers, K-027).
+    //    (empty folders; uninstaller leftovers, K-028).
     if unit.finding.kind == FindingKind::Directory
         && unit.finding.module != empty_folders::MODULE_ID
         && unit.finding.module != uninstaller::MODULE_ID
