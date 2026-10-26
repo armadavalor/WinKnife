@@ -53,7 +53,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::brain::Brain;
 use crate::core::db::{with_db, DbAccess};
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare::CanonicalPath;
 use crate::core::scanner::{self, CancellationToken, WalkOptions};
 use crate::core::types::{
@@ -1176,6 +1176,7 @@ impl ToolModule for TreemapModule {
             name: "Disk map".to_owned(),
             description: "See where your disk space actually went, folder by folder.".to_owned(),
             icon: "treemap".to_owned(),
+            category: ModuleCategory::Files,
             capabilities: ModuleCapabilities {
                 has_scan: true,
                 has_execute: true,

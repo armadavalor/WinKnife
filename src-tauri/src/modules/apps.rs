@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde::Serialize;
 
 use crate::core::error::{CoreError, Result};
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{Hive, PanelLauncher, RegValue, Registry, Signature, SignatureProbe};
 
 const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -398,6 +398,7 @@ impl ToolModule for AppsModule {
             name: "Installed Apps".to_owned(),
             description: "See what is installed and who ships it. Read-only.".to_owned(),
             icon: "apps".to_owned(),
+            category: ModuleCategory::Apps,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,

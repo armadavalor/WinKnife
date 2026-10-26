@@ -53,6 +53,27 @@ impl Default for ModuleCapabilities {
     }
 }
 
+/// The sidebar tab a tool is listed under. Every manifest names one, so a new
+/// tool cannot be added without choosing where it shows up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModuleCategory {
+    /// Removing junk: caches, duplicates, empty folders.
+    Cleanup,
+    /// Looking at and handling files on disk.
+    Files,
+    /// Windows settings, repair and restore points.
+    System,
+    /// Installed programs and what starts with Windows.
+    Apps,
+    /// Network state and the hosts file.
+    Network,
+    /// Shutdown timer and keeping the PC awake.
+    Power,
+    /// Anything that fits none of the above.
+    Other,
+}
+
 /// Everything the UI needs to render a module in the sidebar without knowing
 /// anything else about it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +87,8 @@ pub struct ModuleManifest {
     pub description: String,
     /// Icon name the UI maps to an inline SVG.
     pub icon: String,
+    /// The sidebar tab the tool is listed under.
+    pub category: ModuleCategory,
     /// What this module supports.
     pub capabilities: ModuleCapabilities,
 }
@@ -240,6 +263,7 @@ mod tests {
                 name: "Stub".to_owned(),
                 description: "test double".to_owned(),
                 icon: "beaker".to_owned(),
+                category: ModuleCategory::Other,
                 capabilities: ModuleCapabilities::NONE,
             }
         }

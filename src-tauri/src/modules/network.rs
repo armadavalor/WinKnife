@@ -11,7 +11,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use crate::core::error::Result;
-use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
+use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{read_sockets, Protocol, RawSocket, TcpState};
 
 /// Where a socket can be reached from.
@@ -197,6 +197,7 @@ impl ToolModule for NetworkModule {
             name: "Network".to_owned(),
             description: "See which program uses which port, and flush the DNS cache.".to_owned(),
             icon: "network".to_owned(),
+            category: ModuleCategory::Network,
             capabilities: ModuleCapabilities {
                 has_scan: false,
                 has_execute: false,
