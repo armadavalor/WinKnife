@@ -42,7 +42,7 @@ use crate::core::events::{
 use crate::core::executor::{self, ExecEnvironment};
 use crate::core::history;
 use crate::core::module::{ModuleManifest, ModuleRegistry};
-use crate::core::platform::{PowerAction, RecycleBin};
+use crate::core::platform::{PowerAction, RecycleBin, SystemRegistry};
 use crate::core::quarantine::{
     PurgeReport, Quarantine, QuarantineBatch, QuarantineItem, QuarantineStats, RestoreOutcome,
     RetentionPolicy,
@@ -54,7 +54,6 @@ use crate::modules::apps::{AppsList, AppsService, SignerInfo};
 use crate::modules::archiver;
 use crate::modules::cleaner::{self, CleanerContext, CleanerSummary};
 use crate::modules::duplicates::{self, folders, DuplicateProgress, DuplicateScan};
-use crate::modules::empty_folders;
 use crate::modules::env_vars::{EnvChange, EnvListing, EnvPreview, EnvVarService};
 use crate::modules::hosts::{HostsBackup, HostsDocument, HostsPreview, HostsService, SaveOutcome};
 use crate::modules::keep_awake::{KeepAwake, KeepAwakeStatus};
@@ -63,6 +62,7 @@ use crate::modules::repair::{RepairOutcome, RepairService, RepairTool, RepairToo
 use crate::modules::restore_point::{CreateOutcome, RestorePointService, RestorePointStatus};
 use crate::modules::shutdown_timer::{ScheduleMode, ShutdownTimer, TimerStatus};
 use crate::modules::{context_menu, startup, treemap, tweaks};
+use crate::modules::{empty_folders, uninstaller};
 
 /// Run a sync command body, turning a panic into an `internal` [`ApiError`].
 ///
@@ -431,6 +431,8 @@ pub async fn execute<R: Runtime>(
             recycle_bin: services.recycle_bin.as_ref(),
             startup: services.startup.as_ref(),
             tweaks: &tweak_router,
+            registry: &SystemRegistry,
+            env: &crate::core::platform::SystemEnv,
         };
         let mut emit = |done: u64, total: u64, finding: &crate::core::types::Finding| {
             // The final tick always goes out; the rest are throttled.
@@ -868,6 +870,150 @@ pub async fn start_empty_folder_scan<R: Runtime>(
             unreadable: output.unreadable.len() as u64,
             skipped_protected: output.skipped_protected,
             folders_visited: output.folders_visited,
+            cancelled: output.cancelled,
+            findings: output.findings,
+            recommendations,
+        })
+    })
+    .await
+}
+
+/// What an uninstaller-leftover scan hands the UI.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeftoverScanResult {
+    /// Id for `execute` and `cancel_scan`.
+    pub scan_id: Uuid,
+    /// The folders whose children were looked at.
+    pub roots: Vec<PathBuf>,
+    /// Folders no installed app claims.
+    pub findings: Vec<crate::core::types::Finding>,
+    /// One explained recommendation per finding.
+    pub recommendations: Vec<crate::core::types::Recommendation>,
+    /// Folders that could not be read.
+    pub unreadable: u64,
+    /// Entries read from the Uninstall keys.
+    pub installed_apps: u64,
+    /// Whether the scan was cancelled part-way.
+    pub cancelled: bool,
+}
+
+/// Look for app-data folders that no installed app claims.
+///
+/// `roots` defaults to `%APPDATA%`, `%LOCALAPPDATA%`, `%ProgramData%` and both
+/// Program Files folders, and may only name some of those. Read-only: reads folders and the Uninstall keys,
+/// runs no uninstaller and writes nothing.
+///
+/// # Errors
+/// Returns an error when the Uninstall keys cannot be read.
+#[tauri::command]
+pub async fn start_uninstaller_scan<R: Runtime>(
+    app: AppHandle<R>,
+    roots: Option<Vec<PathBuf>>,
+    services: State<'_, Services>,
+    store: State<'_, ScanStore>,
+    db: State<'_, Arc<Database>>,
+    cancels: State<'_, CancelRegistry>,
+) -> Result<LeftoverScanResult, ApiError> {
+    guarded_async("start_uninstaller_scan", async {
+        let known = uninstaller::known_roots(&crate::core::platform::SystemEnv);
+        // A caller may narrow the scan, never widen it: a folder inside an
+        // installed app's data must not come back as a leftover.
+        let roots = match roots {
+            None => known,
+            Some(roots) => {
+                if let Some(stray) = roots.iter().find(|root| {
+                    !known
+                        .iter()
+                        .any(|k| crate::core::path_compare::same_path(root, k))
+                }) {
+                    return Err(invalid_input(format!(
+                        "`{}` is not one of the folders the leftover scan reads",
+                        stray.display()
+                    ))
+                    .into());
+                }
+                roots
+            }
+        };
+
+        let scan_id = Uuid::new_v4();
+        let started_at = Utc::now();
+        let cancel = cancels.start(scan_id);
+        let mut throttle = ProgressThrottle::new();
+        let mut emit = |visited: u64, current: &Path| {
+            if !throttle.should_emit() {
+                return;
+            }
+            let payload = ScanProgress {
+                scan_id,
+                module: uninstaller::MODULE_ID.to_owned(),
+                items_scanned: visited,
+                current_path: Some(current.display().to_string()),
+                pct: None,
+                items_total: None,
+            };
+            if let Err(err) = events::emit_scan_progress(&app, &payload) {
+                tracing::debug!(error = %err, "leftover progress event was not delivered");
+            }
+        };
+
+        // Name the scan to the UI before the walk starts, so Stop has an id.
+        let initial = ScanProgress {
+            scan_id,
+            module: uninstaller::MODULE_ID.to_owned(),
+            items_scanned: 0,
+            current_path: None,
+            pct: None,
+            items_total: None,
+        };
+        if let Err(err) = events::emit_scan_progress(&app, &initial) {
+            tracing::debug!(error = %err, "initial leftover progress event was not delivered");
+        }
+
+        let output = uninstaller::scan(
+            &uninstaller::ScanContext {
+                roots: &roots,
+                registry: &SystemRegistry,
+                cancel: &cancel,
+            },
+            Some(&mut emit),
+        );
+        cancels.finish(scan_id);
+        let output = output?;
+
+        let recommendations = uninstaller::analyze(&output.findings, &services.brain);
+        store.insert(ScanResult {
+            scan_id,
+            module: uninstaller::MODULE_ID.to_owned(),
+            findings: output.findings.clone(),
+            recommendations: recommendations.clone(),
+            skipped_rules: Vec::new(),
+            cancelled: false,
+        });
+        remember(
+            &db,
+            scan_id,
+            uninstaller::MODULE_ID,
+            started_at,
+            output.findings.len() as u64,
+            0,
+            output.cancelled,
+        );
+        let _ = events::emit_scan_done(
+            &app,
+            &ScanDone {
+                scan_id,
+                module: uninstaller::MODULE_ID.to_owned(),
+                finding_count: output.findings.len() as u64,
+            },
+        );
+
+        Ok(LeftoverScanResult {
+            scan_id,
+            roots,
+            unreadable: output.unreadable.len() as u64,
+            installed_apps: output.installed_apps,
             cancelled: output.cancelled,
             findings: output.findings,
             recommendations,

@@ -25,6 +25,7 @@ import type {
   EnvPreview,
   ProfilePreview,
   EmptyFolderScanResult,
+  LeftoverScanResult,
   ArchiverScanResult,
   ArchiveReport,
   ExecProgress,
@@ -227,6 +228,14 @@ export function startEmptyFolderScan(
   root?: string,
 ): Promise<EmptyFolderScanResult> {
   return invoke<EmptyFolderScanResult>("start_empty_folder_scan", { root });
+}
+
+/**
+ * Look for app-data folders no installed app claims (read-only). Cancellable
+ * with {@link cancelScan}; progress arrives on `scan:progress`.
+ */
+export function startUninstallerScan(): Promise<LeftoverScanResult> {
+  return invoke<LeftoverScanResult>("start_uninstaller_scan");
 }
 
 /* -------------------------------------------------------------------------
