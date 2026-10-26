@@ -295,6 +295,18 @@ pub fn parse_pack(pack_name: &str, json: &str) -> Result<RulePackSpec> {
                 "`keep_folder` only applies to a `quarantine` rule".to_owned(),
             ));
         }
+        // `Dir\*` would become `Dir\*\**` and silently skip the files directly in `Dir`.
+        if rule.keep_folder
+            && rule
+                .paths
+                .iter()
+                .any(|p| p.trim_end_matches(['\\', '/']).ends_with('*'))
+        {
+            return Err(invalid(
+                &field("paths"),
+                "with `keep_folder`, each path must name a folder, not end in `*`".to_owned(),
+            ));
+        }
         if let Some(extensions) = &rule.match_.extensions {
             if extensions.iter().any(|e| e.starts_with('.')) {
                 return Err(invalid(
@@ -1047,14 +1059,29 @@ mod tests {
     fn keep_folder_defaults_off_and_parses_when_set() {
         let spec = parse_pack("windows-temp", VALID).expect("valid pack");
         assert!(!spec.rules[0].keep_folder);
-        let json = with_rule_field("keep_folder", "true");
+        let json =
+            with_rule_field("keep_folder", "true").replace(r#""%TEMP%\\**""#, r#""%TEMP%\\Cache""#);
         let spec = parse_pack("windows-temp", &json).expect("keep_folder pack");
         assert!(spec.rules[0].keep_folder);
     }
 
     #[test]
+    fn keep_folder_refuses_a_path_ending_in_a_wildcard() {
+        for path in [
+            r#""%TEMP%\\**""#,
+            r#""%TEMP%\\Cache\\*""#,
+            r#""%TEMP%\\*\\""#,
+        ] {
+            let json = with_rule_field("keep_folder", "true").replace(r#""%TEMP%\\**""#, path);
+            let err = parse_pack("windows-temp", &json).expect_err(path);
+            assert!(err.to_string().contains("keep_folder"), "{err}");
+        }
+    }
+
+    #[test]
     fn keep_folder_is_refused_on_a_non_quarantine_rule() {
         let json = with_rule_field("keep_folder", "true")
+            .replace(r#""%TEMP%\\**""#, r#""%TEMP%\\Cache""#)
             .replace(r#""action": "quarantine""#, r#""action": "info_only""#);
         let err = parse_pack("windows-temp", &json).expect_err("must refuse");
         assert!(err.to_string().contains("keep_folder"), "{err}");

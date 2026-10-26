@@ -39,6 +39,7 @@
     apps: "layout-grid",
     network: "globe",
     env: "list",
+    archive: "folder-search",
   };
 </script>
 
