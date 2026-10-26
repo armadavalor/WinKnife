@@ -511,6 +511,8 @@ export interface TreeChild {
   category: TreemapCategory;
   /** `1`, except for the folded tail row. */
   itemCount: number;
+  /** A plain file's mtime when the map read it; `null` for anything else. */
+  modified: string | null;
 }
 
 /** A path the disk map's tag list could not take, with Rust's reason. */

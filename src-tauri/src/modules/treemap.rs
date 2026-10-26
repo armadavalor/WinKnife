@@ -589,6 +589,10 @@ pub struct TreeChild {
     pub category: Category,
     /// How many items this row stands for. `1` except for the folded tail.
     pub item_count: u64,
+    /// Last-modified time of a plain file when the map read it; the snapshot a
+    /// tag carries to `treemap_propose` (K-027). `None` for anything else.
+    #[serde(default)]
+    pub modified: Option<DateTime<Utc>>,
 }
 
 /// What `children` hands the UI for one directory.
@@ -692,6 +696,7 @@ pub fn children(path: &Path, root: &Path, oracle: &dyn SizeOracle) -> Result<Tre
                         is_link: true,
                         category: Category::Other,
                         item_count: 1,
+                        modified: None,
                     });
                 } else if meta.is_dir() {
                     let aggregate = oracle.aggregate(&child);
@@ -704,6 +709,7 @@ pub fn children(path: &Path, root: &Path, oracle: &dyn SizeOracle) -> Result<Tre
                         is_link: false,
                         category: Category::Directory,
                         item_count: 1,
+                        modified: None,
                     });
                 } else {
                     let category = Category::of(&child);
@@ -716,6 +722,7 @@ pub fn children(path: &Path, root: &Path, oracle: &dyn SizeOracle) -> Result<Tre
                         is_link: false,
                         category,
                         item_count: 1,
+                        modified: meta.modified().ok().map(DateTime::<Utc>::from),
                     });
                 }
             }
@@ -756,6 +763,7 @@ pub fn children(path: &Path, root: &Path, oracle: &dyn SizeOracle) -> Result<Tre
             is_link: false,
             category: Category::Other,
             item_count: folded,
+            modified: None,
         });
     }
 
@@ -976,6 +984,18 @@ pub struct TaggedRefusal {
     pub reason: String,
 }
 
+/// One tagged file as the map showed it: the snapshot the move is checked against.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaggedItem {
+    /// Absolute path.
+    pub path: PathBuf,
+    /// Size the map showed.
+    pub size_bytes: u64,
+    /// Last-modified time the map showed.
+    pub modified: Option<DateTime<Utc>>,
+}
+
 /// What [`propose`] made of a tagged list.
 #[derive(Debug, Clone, Default)]
 pub struct TaggedProposal {
@@ -990,16 +1010,18 @@ pub struct TaggedProposal {
 /// Turn the paths the user tagged on the disk map into quarantine proposals.
 ///
 /// The UI is not trusted: a protected path, anything that is not a plain file
-/// (folders, links, missing paths) and duplicates are refused here, in code,
-/// and reported back. Reads metadata only; nothing moves until `execute`.
-pub fn propose(paths: &[PathBuf], brain: &Brain) -> TaggedProposal {
+/// (folders, links, missing paths), a file that no longer matches the size and
+/// modified time the map showed, and duplicates are refused here, in code, and
+/// reported back. Reads metadata only; nothing moves until `execute`.
+pub fn propose(items: &[TaggedItem], brain: &Brain) -> TaggedProposal {
     let mut out = TaggedProposal::default();
     let mut seen = std::collections::HashSet::new();
-    for path in paths {
+    for item in items {
+        let path = &item.path;
         if !seen.insert(path.clone()) {
             continue;
         }
-        match tagged_file(path, brain) {
+        match tagged_file(item, brain) {
             Ok((finding, recommendation)) => {
                 out.findings.push(finding);
                 out.recommendations.push(recommendation);
@@ -1014,37 +1036,30 @@ pub fn propose(paths: &[PathBuf], brain: &Brain) -> TaggedProposal {
 }
 
 fn tagged_file(
-    path: &Path,
+    item: &TaggedItem,
     brain: &Brain,
 ) -> std::result::Result<(Finding, Recommendation), String> {
+    let path = item.path.as_path();
     if let Some(refusal) = brain.path_refusal(path) {
         return Err(refusal.reason);
     }
-    if let Some(reason) = drive_root_refusal(path) {
-        return Err(reason);
+    // Same check gate 4 runs, against the values the map showed, not today's.
+    if let Some(reason) = tagged_refusal(path, item.size_bytes, item.modified) {
+        return Err(reason.trim_start_matches("skipped: ").to_owned());
     }
-    let meta = std::fs::symlink_metadata(path)
-        .map_err(|err| format!("`{}` could not be read: {err}", path.display()))?;
-    if !meta.file_type().is_file() {
-        return Err(format!(
-            "`{}` is not a plain file; only files can be tagged",
-            path.display()
-        ));
-    }
-    let modified = meta.modified().ok().map(DateTime::<Utc>::from);
     let mut finding = Finding::new(MODULE_ID, path, FindingKind::File);
-    finding.size_bytes = meta.len();
-    finding.modified = modified;
+    finding.size_bytes = item.size_bytes;
+    finding.modified = item.modified;
     let recommendation = Recommendation::new(
         vec![finding.id],
         RiskBucket::NeedsReview,
         TAGGED_CONFIDENCE,
         Action::Quarantine,
         "You tagged this file on the disk map.",
-        meta.len(),
+        item.size_bytes,
         Justification::UserTagged {
-            size_bytes: meta.len(),
-            modified,
+            size_bytes: item.size_bytes,
+            modified: item.modified,
         },
     )
     .map_err(|err| err.to_string())?;
@@ -1673,6 +1688,32 @@ mod tests {
         assert!(manifest.capabilities.has_execute, "tagged files can be quarantined");
     }
 
+    /// A tag as the map would send it: size and mtime read now, or zeros.
+    fn as_tagged(path: &Path) -> TaggedItem {
+        let meta = fs::symlink_metadata(path).ok();
+        TaggedItem {
+            path: path.to_path_buf(),
+            size_bytes: meta.as_ref().map_or(0, fs::Metadata::len),
+            modified: meta
+                .and_then(|m| m.modified().ok())
+                .map(DateTime::<Utc>::from),
+        }
+    }
+
+    fn tag_all(paths: &[&Path]) -> Vec<TaggedItem> {
+        paths.iter().map(|p| as_tagged(p)).collect()
+    }
+
+    /// Moves a file's mtime back an hour without changing its size.
+    fn age_by_an_hour(path: &Path) {
+        let then = std::time::SystemTime::now() - std::time::Duration::from_secs(3_600);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .and_then(|f| f.set_modified(then))
+            .expect("set mtime");
+    }
+
     #[test]
     fn propose_accepts_files_and_refuses_folders_protected_and_missing() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1692,13 +1733,7 @@ mod tests {
             ]))
             .build();
         let out = propose(
-            &[
-                file.clone(),
-                folder.clone(),
-                protected.clone(),
-                missing.clone(),
-                file.clone(),
-            ],
+            &tag_all(&[&file, &folder, &protected, &missing, &file]),
             &brain,
         );
 
@@ -1717,7 +1752,32 @@ mod tests {
         let refused: Vec<_> = out.refused.iter().map(|r| r.path.clone()).collect();
         assert_eq!(refused, vec![folder, protected, missing]);
         assert!(out.refused.iter().all(|r| !r.reason.is_empty()));
-        assert!(out.refused[0].reason.contains("only files"));
+        assert!(out.refused[0].reason.contains("plain file"));
+    }
+
+    /// The snapshot is the map's, not the disk's at send time (review of #105):
+    /// a file rewritten between drawing the map and pressing Send is refused,
+    /// even when its size did not change.
+    #[test]
+    fn propose_refuses_a_file_that_changed_since_the_map_read_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let grown = dir.path().join("grown.bin");
+        let rewritten = dir.path().join("rewritten.bin");
+        fs::write(&grown, b"abc").expect("write");
+        fs::write(&rewritten, b"abc").expect("write");
+        let tags = tag_all(&[&grown, &rewritten]);
+
+        fs::write(&grown, b"abcdef").expect("grow");
+        fs::write(&rewritten, b"xyz").expect("rewrite");
+        age_by_an_hour(&rewritten);
+
+        let out = propose(&tags, &Brain::new());
+        assert!(out.findings.is_empty(), "{:?}", out.findings);
+        assert_eq!(out.refused.len(), 2);
+        assert!(out
+            .refused
+            .iter()
+            .all(|r| r.reason.contains("changed after it was tagged")));
     }
 
     #[test]
@@ -1725,7 +1785,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("a.bin");
         fs::write(&file, b"abc").expect("write");
-        let out = propose(std::slice::from_ref(&file), &Brain::new());
+        let out = propose(&tag_all(&[&file]), &Brain::new());
         let Justification::UserTagged {
             size_bytes,
             modified,
@@ -1736,6 +1796,12 @@ mod tests {
         assert_eq!(tagged_refusal(&file, size_bytes, modified), None);
 
         fs::write(&file, b"abcdef").expect("rewrite");
+        let reason = tagged_refusal(&file, size_bytes, modified).expect("refused");
+        assert!(reason.contains("changed after it was tagged"));
+
+        // Same size, new mtime: still a different file.
+        fs::write(&file, b"xyz").expect("same-size rewrite");
+        age_by_an_hour(&file);
         let reason = tagged_refusal(&file, size_bytes, modified).expect("refused");
         assert!(reason.contains("changed after it was tagged"));
     }
@@ -1752,7 +1818,7 @@ mod tests {
             assert!(tagged_refusal(path, 0, None)
                 .expect("gate 4 refuses")
                 .contains("root of a drive"));
-            let out = propose(&[path.to_path_buf()], &Brain::new());
+            let out = propose(&[as_tagged(path)], &Brain::new());
             // The global protected check may refuse first, with its own reason.
             assert!(out.findings.is_empty(), "{root_file} must not be proposed");
             assert_eq!(out.refused.len(), 1);
@@ -1762,7 +1828,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("one-level-down.bin");
         fs::write(&file, b"x").expect("write");
-        let out = propose(std::slice::from_ref(&file), &Brain::new());
+        let out = propose(&tag_all(&[&file]), &Brain::new());
         assert_eq!(out.findings.len(), 1, "{:?}", out.refused);
     }
 

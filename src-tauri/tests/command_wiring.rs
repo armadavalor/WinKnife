@@ -163,7 +163,7 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
         // Reads metadata only; the tempdir root is a folder, so it is refused.
         Probe {
             command: "treemap_propose",
-            args: json!({ "paths": [&root] }),
+            args: json!({ "items": [{ "path": &root, "sizeBytes": 0, "modified": null }] }),
         },
         // Refused by `real_os_effects_armed()`, so no window opens.
         Probe {

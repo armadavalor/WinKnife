@@ -1394,6 +1394,58 @@ mod tests {
         assert_eq!(report.reclaimed_bytes, 7);
     }
 
+    /// C13 end to end: a treemap tag moves an unchanged file, and gate 4 skips
+    /// one rewritten after the map read it, even at the same size.
+    #[test]
+    fn a_treemap_tag_moves_an_unchanged_file_and_skips_a_rewritten_one() {
+        let h = harness();
+        let brain = brain();
+        let bin = StubRecycleBin::default();
+        let kept = write(&h.work, "kept.bin", b"abc");
+        let rewritten = write(&h.work, "rewritten.bin", b"abc");
+        let tag = |path: &Path| {
+            let meta = std::fs::metadata(path).expect("meta");
+            treemap::TaggedItem {
+                path: path.to_path_buf(),
+                size_bytes: meta.len(),
+                modified: meta.modified().ok().map(DateTime::<Utc>::from),
+            }
+        };
+        let proposal = treemap::propose(&[tag(&kept), tag(&rewritten)], &brain);
+        assert_eq!(proposal.findings.len(), 2, "{:?}", proposal.refused);
+
+        std::fs::write(&rewritten, b"xyz").expect("same-size rewrite");
+        backdate(&rewritten, 1);
+
+        let approved: Vec<Uuid> = proposal.recommendations.iter().map(|r| r.id).collect();
+        let units = plan(&approved, &proposal.recommendations, &proposal.findings);
+        let report = execute(
+            &units,
+            &env(&h, &brain, &bin),
+            &ExecOptions::default(),
+            None,
+        )
+        .expect("execute");
+
+        assert_eq!(report.succeeded(), 1);
+        assert!(!kept.exists(), "the unchanged tagged file is quarantined");
+        assert!(rewritten.exists(), "the rewritten file is left alone");
+        let skipped = report
+            .items
+            .iter()
+            .find(|i| i.path == rewritten)
+            .expect("the rewritten file is reported");
+        match &skipped.outcome {
+            ExecOutcome::Skipped { reason } => {
+                assert!(
+                    reason.contains("changed after it was tagged"),
+                    "got `{reason}`"
+                );
+            }
+            other => panic!("expected a skip for the rewritten file, got {other:?}"),
+        }
+    }
+
     /// Same guarantee without needing Windows sharing semantics: a probe that
     /// reports everything locked must produce skips, not deletions.
     #[test]

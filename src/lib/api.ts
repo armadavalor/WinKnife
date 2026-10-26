@@ -296,8 +296,11 @@ export function treemapCached(root: string): Promise<CachedScan | null> {
  * Read-only: Rust refuses protected paths, folders and links and reports them
  * in `refused`; the rest go to quarantine only through {@link execute}.
  */
-export function treemapPropose(paths: string[]): Promise<TaggedProposal> {
-  return invoke<TaggedProposal>("treemap_propose", { paths });
+/** `sizeBytes` and `modified` are what the map showed; Rust refuses a file that no longer matches. */
+export function treemapPropose(
+  items: { path: string; sizeBytes: number; modified: string | null }[],
+): Promise<TaggedProposal> {
+  return invoke<TaggedProposal>("treemap_propose", { items });
 }
 
 /** Show a path in File Explorer. Opens a window; changes nothing. */

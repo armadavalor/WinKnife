@@ -1380,19 +1380,20 @@ pub struct TaggedProposalResult {
 ///
 /// Moves nothing: the UI confirms and then calls the ordinary `execute`, so the
 /// executor's four gates and the quarantine are the only path to a move.
-/// Protected paths and anything that is not a plain file are refused here and
-/// reported back, whatever the UI sent.
+/// Each item carries the size and modified time the map showed; a file that no
+/// longer matches them is refused, as are protected paths and anything that is
+/// not a plain file, whatever the UI sent.
 ///
 /// # Errors
 /// Never in practice; refusals are part of the result.
 #[tauri::command(async)]
 pub fn treemap_propose(
-    paths: Vec<PathBuf>,
+    items: Vec<treemap::TaggedItem>,
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
 ) -> Result<TaggedProposalResult, ApiError> {
     guarded("treemap_propose", || {
-        let proposal = treemap::propose(&paths, &services.brain);
+        let proposal = treemap::propose(&items, &services.brain);
         let scan_id = Uuid::new_v4();
         store.insert(ScanResult {
             scan_id,

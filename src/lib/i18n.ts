@@ -218,7 +218,7 @@ const en = {
   "treemap.taggedSend": "Send to quarantine",
   "treemap.taggedSending": "Moving tagged files…",
   "treemap.confirmTitle": "Move {count} tagged files to quarantine?",
-  "treemap.confirmBody": "{size} of files you tagged will be moved to quarantine. Protected locations, folders and files that changed since you tagged them are skipped.",
+  "treemap.confirmBody": "{size} of files you tagged will be moved to quarantine. Protected locations, folders and files that changed since the map read them are skipped.",
   "treemap.taggedDone": "{count} moved to quarantine ({size}).",
   "treemap.taggedNotMoved": "Not moved",
 
@@ -1502,7 +1502,7 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "treemap.taggedSend": "Karantinaya gönder",
   "treemap.taggedSending": "İşaretli dosyalar taşınıyor…",
   "treemap.confirmTitle": "{count} işaretli dosya karantinaya taşınsın mı?",
-  "treemap.confirmBody": "İşaretlediğin {size} dosya karantinaya taşınacak. Korumalı yerler, klasörler ve işaretlendikten sonra değişen dosyalar atlanır.",
+  "treemap.confirmBody": "İşaretlediğin {size} dosya karantinaya taşınacak. Korumalı yerler, klasörler ve harita okuduktan sonra değişen dosyalar atlanır.",
   "treemap.taggedDone": "{count} öğe karantinaya taşındı ({size}).",
   "treemap.taggedNotMoved": "Taşınmayanlar",
   "startup.intro": "Bu listeye bakmak hiçbir şeyi değiştirmez. Bir girişi kapatmak Görev Yöneticisi'ndeki anahtarla aynı şeyi kullanır, yani ikisi her zaman uyumlu kalır. Hiçbir şey silinmez; istediğin zaman buradan tekrar açabilirsin.",

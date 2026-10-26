@@ -99,6 +99,7 @@
     path: string;
     name: string;
     sizeBytes: number;
+    modified: string | null;
   }
   let tagged = $state<Tagged[]>([]);
   let confirming = $state(false);
@@ -129,7 +130,12 @@
       ? tagged.filter((item) => item.path !== child.path)
       : [
           ...tagged,
-          { path: child.path, name: child.name, sizeBytes: child.sizeBytes },
+          {
+            path: child.path,
+            name: child.name,
+            sizeBytes: child.sizeBytes,
+            modified: child.modified,
+          },
         ];
   }
 
@@ -142,7 +148,9 @@
     sending = true;
     store.error = null;
     try {
-      const proposal = await treemapPropose(tagged.map((item) => item.path));
+      const proposal = await treemapPropose(
+        tagged.map(({ path, sizeBytes, modified }) => ({ path, sizeBytes, modified })),
+      );
       const ids = proposal.recommendations.map((rec) => rec.id);
       const report =
         ids.length > 0 ? await execute(proposal.scanId, ids, false) : null;

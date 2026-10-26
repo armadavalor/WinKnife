@@ -2705,22 +2705,28 @@ C7 (drift check, manual re-apply through `apply`) already shipped in 5e4bf0e; th
   Clear. "Send to Quarantine" opens a confirm dialog (retention days from
   settings) and reports what moved and what was not moved, with the reason.
   Tags are UI state only. EN + TR strings.
-- **Backend.** New `treemap_propose(paths)` builds one recommendation per file
+- **Backend.** New `treemap_propose(items)` builds one recommendation per file
   with `Justification::UserTagged { size, modified }`, stored as a scan so the
   normal `execute` + Quarantine path runs; no new deletion code. Folders,
   links, protected paths and missing files are refused and returned with a
-  reason. Executor gate 4 refuses a file whose size or mtime changed since it
-  was tagged. Treemap manifest now has `has_execute: true`.
+  reason. The snapshot is the map's: each item carries the size and mtime the
+  treemap read (`TreeChild.modified`), and propose refuses a file that no
+  longer matches them; gate 4 re-checks the same values at execute time
+  (review of #105). Treemap manifest now has `has_execute: true`.
 - **Tests.** Propose refusals (folder, protected, missing), gate-4 drift
-  refusal, drive-root refusal vs. a file one level down, `command_wiring`
-  probe for `treemap_propose`.
+  refusal, same-size rewrite with a new mtime refused by propose and gate 4,
+  executor end to end (unchanged tag moves, rewritten one skipped),
+  drive-root refusal vs. a file one level down, `command_wiring` probe for
+  `treemap_propose`.
 - **Drive-root files (K-028).** A live probe showed `C:\bootmgr` and
   `C:\BOOTNXT` passed propose: only the drive root itself is protected.
   Propose and gate 4 now refuse any file whose parent is a drive (or share)
   root, checked on both the given and the resolved path (`..`, junctions).
   Tagging only; the global protected list is unchanged.
 
-**Deferred.** Folder tagging (K-027, DECISIONS-NEEDED).
+**Deferred.** Folder tagging (K-027, DECISIONS-NEEDED); system volumes
+mounted on a folder (DECISIONS-NEEDED).
+
 ## 2026-10-26 — Big-file archiver (C16)
 
 - New `archiver` module (`modules/archiver.rs`, sidebar "Big-File Archiver").
