@@ -915,7 +915,12 @@ not ours to take.
 - [ ] 2026-10-25 (phase 7, C5): developer/tool cache folders (no Uninstall entry, e.g. `.npm`-style vendor folders) can look like leftovers. Mitigated by the Needs Review cap and per-item selection; no allow-list was built.
 - [ ] 2026-10-25 (phase 7, C5): name matching is deliberately generous towards "installed" (normalised names, publisher/display/install-location leaves, words of 4+ chars); folder names under 3 chars are skipped. A missed leftover is the accepted failure mode.
 - [ ] 2026-10-25 (phase 7, C5): `start_uninstaller_scan` takes optional `roots` (used by the wiring probe); explicit roots must be one of the known roots (AppData, LocalAppData, ProgramData, Program Files*) or the call is refused, and the executor re-check (run for every justification, not only `Rule`) skips any folder that is not a direct child of AppData, LocalAppData or ProgramData.
-- [ ] 2026-10-25 (phase 7, C5): the brief named the decision K-022, which was already taken; it was recorded as K-026, then renumbered K-028 because the C16 archiver (K-026) and C12 keep-folder (K-027) landed first.
+- [ ] 2026-10-25 (phase 7, C5): the brief named the decision K-022, which was already taken; it was recorded as K-026, then renumbered K-030 because the C16 archiver (K-026), C12 keep-folder (K-027) and C13 treemap tagging (K-028, K-029) landed first.
+
+## Open items raised by treemap tagging (C13, 2026-10-26)
+
+- [ ] 2026-10-26 (K-028): folder tagging is not offered. Quarantining a whole folder from the treemap needs its own gate-4 check (a folder's contents can change between tagging and sending; size + mtime of the folder itself does not prove that) and a decision on protected children. The UI only lets files be tagged; the backend refuses folders.
+- [ ] 2026-10-26 (K-029): the drive-root refusal only sees a root by its path (`C:\`, `\\server\share\`, after `..` folding and `canonicalize`). A system or EFI volume mounted on a folder (`D:\mnt\bootmgr`, volume mount point) still looks like an ordinary folder, so its root files can be tagged. Spotting that needs `GetVolumePathNameW` per file. Left as is: mounting the boot volume on a folder is rare, and Quarantine keeps the file restorable.
 
 ## Open items raised by the big-file archiver (2026-10-26, C16)
 
