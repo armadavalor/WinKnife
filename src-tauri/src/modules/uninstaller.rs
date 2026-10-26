@@ -27,7 +27,7 @@
 //!
 //! A leftover is moved to quarantine as one restorable folder through the
 //! shared executor, which calls [`recheck_refusal`] right before the move
-//! (KARARLAR K-026). Anything it cannot establish refuses the move.
+//! (KARARLAR K-027). Anything it cannot establish refuses the move.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -37,8 +37,8 @@ use serde::{Deserialize, Serialize};
 use crate::core::brain::{Brain, ProtectedPaths, Signals};
 use crate::core::error::Result;
 use crate::core::module::{ModuleCapabilities, ModuleManifest, ToolModule};
-use crate::core::path_compare::CanonicalPath;
-use crate::core::platform::{Hive, Registry};
+use crate::core::path_compare::{same_path, CanonicalPath};
+use crate::core::platform::{EnvResolver, Hive, Registry};
 use crate::core::scanner::CancellationToken;
 use crate::core::types::{
     Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
@@ -369,6 +369,30 @@ fn protected_below(path: &Path, protected: &ProtectedPaths) -> Option<String> {
         .map(|entry| format!("this folder contains a protected location: {}", entry.reason))
 }
 
+/// The folders a leftover may sit directly in: `%APPDATA%`, `%LOCALAPPDATA%`,
+/// `%ProgramData%` and both Program Files folders. The scan reads only these,
+/// and the executor moves only their direct children.
+pub fn known_roots(env: &dyn EnvResolver) -> Vec<PathBuf> {
+    [
+        "APPDATA",
+        "LOCALAPPDATA",
+        "ProgramData",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+    ]
+    .into_iter()
+    .filter_map(|name| env.var(name))
+    .map(PathBuf::from)
+    .collect()
+}
+
+/// Whether `path` is a direct child of one of the [`known_roots`]. A folder
+/// deeper down belongs to whatever app owns its parent, installed or not.
+fn is_top_level(path: &Path, env: &dyn EnvResolver) -> bool {
+    path.parent()
+        .is_some_and(|parent| known_roots(env).iter().any(|root| same_path(parent, root)))
+}
+
 /// The hard gates `analyze` and [`recheck_refusal`] share.
 fn gate_refusal(path: &Path, brain: &Brain) -> Option<String> {
     if under_program_files(path) {
@@ -387,10 +411,20 @@ fn gate_refusal(path: &Path, brain: &Brain) -> Option<String> {
 /// check still holds. Fails closed: anything it cannot establish refuses.
 ///
 /// Called by the executor immediately before the quarantine move.
-pub fn recheck_refusal(path: &Path, registry: &dyn Registry, brain: &Brain) -> Option<String> {
+pub fn recheck_refusal(
+    path: &Path,
+    registry: &dyn Registry,
+    env: &dyn EnvResolver,
+    brain: &Brain,
+) -> Option<String> {
     let shown = path.display();
     if let Some(reason) = gate_refusal(path, brain) {
         return Some(format!("skipped: {reason}"));
+    }
+    if !is_top_level(path, env) {
+        return Some(format!(
+            "skipped: `{shown}` does not sit directly in AppData, LocalAppData or ProgramData, so it was not moved"
+        ));
     }
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -802,6 +836,7 @@ mod tests {
         registry: &dyn Registry,
         rec: &Recommendation,
         finding: &Finding,
+        env: &dyn EnvResolver,
     ) -> crate::core::types::ExecReport {
         let bin = StubRecycleBin::default();
         let env = ExecEnvironment {
@@ -812,6 +847,7 @@ mod tests {
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
             registry,
+            env,
         };
         let units = [ExecUnit {
             recommendation: rec,
@@ -845,7 +881,7 @@ mod tests {
         let (brain, rec, finding) = leftover(&p);
         let rig = rig();
 
-        let report = run_one(&rig, &brain, &installed(), &rec, &finding);
+        let report = run_one(&rig, &brain, &installed(), &rec, &finding, &p.env);
 
         assert_eq!(report.items[0].outcome, ExecOutcome::Succeeded, "{report:?}");
         assert!(!p.roaming.join("OldEditor").exists());
@@ -864,7 +900,7 @@ mod tests {
         let (brain, rec, finding) = leftover(&p);
         let now = app(installed(), "OldEditor", "Old Editor 2");
 
-        assert_skipped(&run_one(&rig(), &brain, &now, &rec, &finding), &p);
+        assert_skipped(&run_one(&rig(), &brain, &now, &rec, &finding, &p.env), &p);
     }
 
     #[test]
@@ -872,7 +908,7 @@ mod tests {
         let p = Profile::new();
         let (brain, rec, finding) = leftover(&p);
 
-        assert_skipped(&run_one(&rig(), &brain, &BrokenRegistry, &rec, &finding), &p);
+        assert_skipped(&run_one(&rig(), &brain, &BrokenRegistry, &rec, &finding, &p.env), &p);
     }
 
     #[test]
@@ -881,7 +917,7 @@ mod tests {
         let (_, rec, finding) = leftover(&p);
         for tree in [p.roaming.join("OldEditor"), p.roaming.join("OldEditor/sub")] {
             let brain = p.brain(ProtectedPaths::from_trees([tree]));
-            assert_skipped(&run_one(&rig(), &brain, &installed(), &rec, &finding), &p);
+            assert_skipped(&run_one(&rig(), &brain, &installed(), &rec, &finding, &p.env), &p);
         }
     }
 
@@ -890,7 +926,41 @@ mod tests {
         let p = Profile::new();
         let brain = p.brain(ProtectedPaths::empty());
         fs::create_dir_all(p.program_files.join("OldTool")).expect("dir");
-        assert!(recheck_refusal(&p.program_files.join("OldTool"), &installed(), &brain).is_some());
+        assert!(recheck_refusal(&p.program_files.join("OldTool"), &installed(), &p.env, &brain).is_some());
+    }
+
+    #[test]
+    fn recheck_refuses_a_folder_below_the_top_level() {
+        let p = Profile::new();
+        let (brain, rec, mut finding) = leftover(&p);
+        finding.path = p.roaming.join("OldEditor/sub");
+
+        assert_skipped(&run_one(&rig(), &brain, &installed(), &rec, &finding, &p.env), &p);
+        assert!(
+            recheck_refusal(&p.roaming.join("OldEditor"), &installed(), &MapEnv::new(), &brain)
+                .is_some(),
+            "a folder outside every known root is refused"
+        );
+    }
+
+    #[test]
+    fn recheck_runs_whatever_the_justification() {
+        let p = Profile::new();
+        let (brain, mut rec, finding) = leftover(&p);
+        rec.justification = Justification::DuplicateOf {
+            content_hash: "abc".to_owned(),
+            keeper: false,
+            keeper_path: None,
+        };
+        let now = app(installed(), "OldEditor", "Old Editor 2");
+
+        let report = run_one(&rig(), &brain, &now, &rec, &finding, &p.env);
+
+        assert_skipped(&report, &p);
+        let ExecOutcome::Skipped { reason } = &report.items[0].outcome else {
+            unreachable!()
+        };
+        assert!(reason.contains("an installed app now matches"), "{reason}");
     }
 
     #[cfg(windows)]
@@ -905,7 +975,7 @@ mod tests {
             "`mklink /J` needs no privilege, so a failure here is a real one"
         );
 
-        assert_skipped(&run_one(&rig(), &brain, &installed(), &rec, &finding), &p);
+        assert_skipped(&run_one(&rig(), &brain, &installed(), &rec, &finding, &p.env), &p);
     }
 
     #[test]
@@ -914,6 +984,6 @@ mod tests {
         let (brain, rec, mut finding) = leftover(&p);
         finding.module = "cleaner".to_owned();
 
-        assert_skipped(&run_one(&rig(), &brain, &installed(), &rec, &finding), &p);
+        assert_skipped(&run_one(&rig(), &brain, &installed(), &rec, &finding, &p.env), &p);
     }
 }

@@ -422,6 +422,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::clear_ignored_folder_groups,
         commands::start_empty_folder_scan,
         commands::start_uninstaller_scan,
+        commands::start_archiver_scan,
+        commands::archive_files,
         commands::treemap_drives,
         commands::treemap_scan,
         commands::treemap_children,

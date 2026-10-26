@@ -140,6 +140,15 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             args: json!({ "roots": [&root] }),
         },
         Probe {
+            command: "start_archiver_scan",
+            args: json!({ "root": &root }),
+        },
+        // Unknown scan id: refused before any file is touched.
+        Probe {
+            command: "archive_files",
+            args: json!({ "scanId": nil, "findingIds": [], "destination": &root }),
+        },
+        Probe {
             command: "treemap_drives",
             args: json!({}),
         },

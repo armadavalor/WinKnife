@@ -252,6 +252,7 @@ fn scan_clean_and_restore_round_trips_byte_identically() {
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
             registry: &MapRegistry::new(),
+            env: &MapEnv::new(),
         },
         &ExecOptions::default(),
         None,
@@ -371,6 +372,7 @@ fn a_protected_path_lands_red_and_survives_an_approved_clean() {
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
             registry: &MapRegistry::new(),
+            env: &MapEnv::new(),
         },
         &ExecOptions::default(),
         None,
@@ -431,6 +433,7 @@ fn a_locked_file_is_skipped_with_a_per_item_report() {
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
             registry: &MapRegistry::new(),
+            env: &MapEnv::new(),
         },
         &ExecOptions::default(),
         None,
@@ -527,6 +530,7 @@ fn emptying_the_recycle_bin_needs_its_own_confirmation() {
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
             registry: &MapRegistry::new(),
+            env: &MapEnv::new(),
         },
         // The user selected the item but never answered the recycle-bin
         // question, which the dialog asks separately.
@@ -580,6 +584,7 @@ fn emptying_the_recycle_bin_bypasses_quarantine() {
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
             registry: &MapRegistry::new(),
+            env: &MapEnv::new(),
         },
         &ExecOptions {
             confirm_empty_recycle_bin: true,
@@ -637,6 +642,7 @@ fn restoring_over_a_recreated_file_never_overwrites_it() {
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
             registry: &MapRegistry::new(),
+            env: &MapEnv::new(),
         },
         &ExecOptions::default(),
         None,

@@ -914,5 +914,12 @@ not ours to take.
 - [ ] 2026-10-25 (phase 7, C5): `%ProgramData%` children are always info-only, because ProgramData is tree-protected and no pack rule lifts it. Leftovers there are listed but cannot be quarantined — safest reading; revisit only with a per-vendor allow rule.
 - [ ] 2026-10-25 (phase 7, C5): developer/tool cache folders (no Uninstall entry, e.g. `.npm`-style vendor folders) can look like leftovers. Mitigated by the Needs Review cap and per-item selection; no allow-list was built.
 - [ ] 2026-10-25 (phase 7, C5): name matching is deliberately generous towards "installed" (normalised names, publisher/display/install-location leaves, words of 4+ chars); folder names under 3 chars are skipped. A missed leftover is the accepted failure mode.
-- [ ] 2026-10-25 (phase 7, C5): `start_uninstaller_scan` takes optional `roots` (used by the wiring probe); explicit roots still go through the brain, the protected-path gates and the executor re-check.
-- [ ] 2026-10-25 (phase 7, C5): the brief named the decision K-022, which was already taken; it is recorded as K-026. Renumber if a parallel PR lands K-026 first.
+- [ ] 2026-10-25 (phase 7, C5): `start_uninstaller_scan` takes optional `roots` (used by the wiring probe); explicit roots must be one of the known roots (AppData, LocalAppData, ProgramData, Program Files*) or the call is refused, and the executor re-check (run for every justification, not only `Rule`) skips any folder that is not a direct child of AppData, LocalAppData or ProgramData.
+- [ ] 2026-10-25 (phase 7, C5): the brief named the decision K-022, which was already taken; it was recorded as K-026, then renumbered K-027 when the C16 archiver landed K-026 first.
+
+## Open items raised by the big-file archiver (2026-10-26, C16)
+
+- [ ] 2026-10-26 (phase 7): a running move cannot be cancelled; a multi-GB copy runs to the end of the current file and the batch. Safest interpretation taken: no cancel.
+- [ ] 2026-10-26 (phase 7): if a source changes between hashing and quarantine, the archived copy is the older version but nothing is lost — Quarantine holds the newer original. Safest interpretation taken: no re-hash after the copy; the report shows the archived hash.
+- [ ] 2026-10-26 (phase 7): a copy that fails half way leaves an incomplete file in the destination, because only quarantine may remove files. Safest interpretation taken: leave it and name it in the report; a retry refuses to overwrite it until the user deletes it. Alternative: quarantine the partial copy (costs a second copy across volumes).
+- [ ] 2026-10-26 (phase 7): restoring from the manifest (copy back from the archive drive) is not built; undo goes through Quarantine only. Revisit if users archive and then purge quarantine.

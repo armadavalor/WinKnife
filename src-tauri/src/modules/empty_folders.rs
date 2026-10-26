@@ -800,6 +800,7 @@ mod tests {
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
             registry: &MapRegistry::new(),
+            env: &MapEnv::new(),
         };
         let units = [ExecUnit {
             recommendation: rec,

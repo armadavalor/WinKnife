@@ -1137,6 +1137,60 @@ export interface LeftoverScanResult {
 }
 
 /* -------------------------------------------------------------------------
+ * modules/archiver.rs
+ * ---------------------------------------------------------------------- */
+
+/** `Finding.meta` of a big-file archiver finding. */
+export interface ArchiverMeta {
+  root: string;
+  ageDays: number;
+}
+
+/** What `start_archiver_scan` returns. */
+export interface ArchiverScanResult {
+  scanId: string;
+  root: string;
+  /** Large files unused for a long time. */
+  findings: Finding[];
+  recommendations: Recommendation[];
+  unreadable: number;
+  skippedProtected: number;
+  entriesSeen: number;
+  cancelled: boolean;
+  minSizeBytes: number;
+  minAgeDays: number;
+}
+
+/** One line of the manifest written next to the archived files. */
+export interface ArchiveManifestEntry {
+  archivedAt: string;
+  originalPath: string;
+  archivedPath: string;
+  sizeBytes: number;
+  hash: string;
+  quarantineItemId: string;
+  batchId: string;
+}
+
+/** How one file of an archive run fared. */
+export type ArchiveOutcome =
+  | { outcome: "archived"; entry: ArchiveManifestEntry; manifestWarning: string | null }
+  | { outcome: "refused"; reason: string }
+  | { outcome: "copyFailed"; reason: string }
+  | { outcome: "quarantineFailed"; archivedPath: string; reason: string };
+
+/** One file of an archive run. */
+export type ArchiveItemReport = { findingId: string; path: string } & ArchiveOutcome;
+
+/** What `archive_files` returns. */
+export interface ArchiveReport {
+  destination: string;
+  manifestPath: string;
+  batchId: string;
+  items: ArchiveItemReport[];
+}
+
+/* -------------------------------------------------------------------------
  * modules/file_unlocker.rs
  * ---------------------------------------------------------------------- */
 

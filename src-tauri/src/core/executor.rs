@@ -50,7 +50,7 @@ use uuid::Uuid;
 
 use crate::core::brain::Brain;
 use crate::core::error::Result;
-use crate::core::platform::{RecycleBin, Registry};
+use crate::core::platform::{EnvResolver, RecycleBin, Registry};
 use crate::core::quarantine::Quarantine;
 use crate::core::scanner::CancellationToken;
 use crate::core::types::{
@@ -208,6 +208,8 @@ pub struct ExecEnvironment<'a> {
     pub tweaks: &'a dyn TweakControl,
     /// Read-only: the uninstaller re-reads the Uninstall keys before a move.
     pub registry: &'a dyn Registry,
+    /// Resolves the folders an uninstaller leftover must sit directly in.
+    pub env: &'a dyn EnvResolver,
 }
 
 /// Per-request confirmations, separate from the services in
@@ -429,7 +431,7 @@ fn apply_one(
     //    A folder has no lock state of its own (the probe can only say
     //    `Inaccessible`); the owning module's re-check in gate 4 stands in
     //    for it, so only a module that has one may hand a folder through
-    //    (empty folders; uninstaller leftovers, K-026).
+    //    (empty folders; uninstaller leftovers, K-027).
     if unit.finding.kind == FindingKind::Directory
         && unit.finding.module != empty_folders::MODULE_ID
         && unit.finding.module != uninstaller::MODULE_ID
@@ -501,6 +503,15 @@ fn apply_one(
 /// `Informational` arm below is unreachable for a mutating action rather than a
 /// silent fall-through.
 fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Option<String> {
+    // A leftover stops being one the moment an app claims it again. Checked
+    // before the match so no justification can carry an uninstaller unit past it.
+    if unit.finding.module == uninstaller::MODULE_ID {
+        if let Some(reason) =
+            uninstaller::recheck_refusal(&unit.finding.path, env.registry, env.env, env.brain)
+        {
+            return Some(reason);
+        }
+    }
     match &unit.recommendation.justification {
         // Gate 1 has already refused a mutating action carrying this, so
         // reaching here means the action changes nothing.
@@ -510,14 +521,6 @@ fn justification_refusal(unit: &ExecUnit<'_>, env: &ExecEnvironment<'_>) -> Opti
             // that is only true until something is written into it.
             if unit.finding.module == empty_folders::MODULE_ID {
                 if let Some(reason) = empty_folders::recheck_refusal(&unit.finding.path) {
-                    return Some(reason);
-                }
-            }
-            // A leftover stops being one the moment an app claims it again.
-            if unit.finding.module == uninstaller::MODULE_ID {
-                if let Some(reason) =
-                    uninstaller::recheck_refusal(&unit.finding.path, env.registry, env.brain)
-                {
                     return Some(reason);
                 }
             }
@@ -1056,6 +1059,7 @@ mod tests {
             startup: &NoStartupControl,
             tweaks: &NoTweakControl,
             registry: Box::leak(Box::new(MapRegistry::new())),
+            env: Box::leak(Box::new(crate::core::platform::MapEnv::new())),
         }
     }
 
@@ -1121,6 +1125,7 @@ mod tests {
                     startup: &NoStartupControl,
                     tweaks: &NoTweakControl,
                     registry: &MapRegistry::new(),
+                    env: &crate::core::platform::MapEnv::new(),
                 };
                 execute(&units, &env, &ExecOptions::default(), None)
             });

@@ -40,6 +40,7 @@
     network: "globe",
     env: "list",
     leftovers: "folder",
+    archive: "folder-search",
   };
 </script>
 
