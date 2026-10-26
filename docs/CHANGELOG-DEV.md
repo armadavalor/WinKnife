@@ -2743,3 +2743,19 @@ longer runs off the screen. No tool's behaviour changed.
   strings; route `/archiver`.
 - Decisions: K-026. Deferred: cancelling a running move, restore from the
   manifest in one click (restore goes through Quarantine today).
+
+## 2026-10-26 — C12: clean contents, keep the folder
+
+**Built.** Rule field `keep_folder` (`RuleSpec`, schema, `docs/RULES-FORMAT.md`).
+Default `false`, so every existing pack behaves as before; the parser refuses it
+on anything but a `quarantine` rule. At compile time each path becomes
+`<folder>\**`, so the walk root is the folder and the folder itself never
+matches. The cleaner already proposes files only, so no executor change: the
+folder and its subfolder skeleton stay, every file is quarantined on its own and
+passes the usual match, quiet-hour, lock and protected-path checks (K-027,
+option A chosen by the user). Tests: parse/default, refusal on `info_only`,
+matching children but not the folder, and a cleaner scan that takes only the
+files, leaves the folders on disk and keeps a protected child red.
+
+**Deferred.** No shipped pack uses it yet; no UI strings were needed.
+
