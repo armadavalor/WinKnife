@@ -1,4 +1,4 @@
-<!-- devir: 2026-10-27 | yazan: claude | commit: (#113 sonrası, 63c4c65) -->
+<!-- devir: 2026-10-27 | yazan: claude | commit: (#115 sonrası, 65dd300) -->
 # Devir notu
 <!-- /devir üzerine yazar; elle düzeltirsen "yazan: kullanıcı" yap. ≤40 satır. Geçmiş git log'da, kararlar KARARLAR.md'de. -->
 
@@ -18,7 +18,7 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 - 2026-10-26 (2. tur, masaüstüne kurulu): C12 klasörü koruyup içini temizle (#103, K-027), C16 büyük dosya arşivleyici (#104), C13 treemap'ten etiketle-karantina, kök sürücü reddi (#105, K-028/K-029), C5 kaldırma kalıntıları, kapı 3 istisnası fail-closed yeniden kontrolle (#106, K-030), kenar çubuğu kategori sekmeleri (#107), C11 zamanlı tarama: otomatik karantina varsayılan kapalı, yalnız Safe, onay penceresi (#108, K-031), C18 benzer görseller: bulut-yalnız dosyalar açılmadan atlanır (#109, K-032). #104 artıkları (spawn_blocking, iptal, boş alan kontrolü, `cancelled` bayrağı, testler) küçük takip işi.
 
 ## Yarım kalan
-- Demo GIF yeni tasarımla `demo/` (Remotion) üzerinden yeniden render edilecek; gerçek makinede çekilmez (senaryo `docs/DEMO-SCRIPT.md`).
+- Yok. README b-roll'u (#115) birleşti: `assets/demo/demo.gif` + `demo.mp4`, 14.5 s Remotion; kareler CI `demo.yml` ile temiz runner'da demo profilinden çekilir, gerçek makineden asla. Remotion skill'leri repoda değil, `demo/README.md`'deki komutla yerel kurulur.
 
 ## Açık sorular
 - TR arayüz (K-022): dil seçici + tam TR çevirisi PR olarak hazır; Rust kaynaklı gerekçe/hata metinleri hâlâ İngilizce (DECISIONS-NEEDED).
@@ -27,7 +27,7 @@ Hedef: Codex for OSS başvurusu (yıldız eşiği yok); öncelik yayın ve dağ�
 ## Sıradaki adım
 0. **QA/QC turu (kullanıcı, 2026-10-18):** `docs/QA-CHECKLIST.md`. 2026-10-20: A5/A8/A13/A17 testlendi, A9 düzeltildi (K-017). 2026-10-23: A14/A15/A19 UI e2e ile kapandı (#70); ürün hatası çıkmadı. Açık yalnız A18 (gerçek ikinci birim gerek).
 1. Polish queue (`docs/modules/BACKLOG.md`, kullanıcı 2026-10-18) tamamen kapandı; direkt silme yok, yalnız karantina (K-016). Temizlik süresi kullanıcının PC'sinde ölçülmedi. Araştırma listesinde (`docs/RESEARCH-FEATURES-2026-10.md`) kalan yalnız C17 TR/dil seçici (K-022 ile kısmen). C2'nin Explorer'da gerçekten gizlediği elle doğrulanmalı. Açık issue: #21. Worktree başına ~15 GB `target/` birikir; disk dolunca eski worktree'lerin `src-tauri/target`'ı silinir (yeni oturum worktree'si ≥5.4 GB boş ister).
-2. Demo GIF, sonra Codex for OSS başvurusu.
+2. Codex for OSS başvurusu (demo GIF hazır, #115).
 3. winget 0.2.0 birleşince 0.4.0 manifestini (repoda hazır) microsoft/winget-pkgs'e gönder (`packaging/winget/README.md`).
 4. Kod imzalama (SmartScreen uyarısı + VT ML tespitleri): SignPath Foundation 2026-10-15 reddetti (görünürlük yetersiz, K-014). Şimdilik imzasız; görünürlük artınca yeniden başvur. Ücretli/ucuz yol: Certum Open Source sertifikası.
 
