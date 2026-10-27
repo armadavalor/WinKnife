@@ -15,3 +15,4 @@
 | Remotion 4.0.539 (`remotion`, `@remotion/cli`) | remotion.dev | Remotion License: ücretsiz bireyler, ≤3 kişilik ekipler ve kâr amacı gütmeyenler için | Hayır (ücretsiz kapsam; ticari kullanımda ücretli) | `demo/` içinde, yalnız dev; uygulama ve Tauri paketine girmez; `free-license` anahtarı; 2026-10-27 |
 | React 19.1.0 / react-dom (demo/) | react.dev | MIT | Evet | yalnız `demo/`, 2026-10-27 |
 | demo/public/*.png ekran görüntüleri | WinKnife 0.4.0 CI kaydı (sahte `C:\Users\Demo` profili) | Proje lisansı | Evet | gerçek kullanıcı verisi yok; 2026-10-27 |
+| Remotion agent skills (`.claude/skills/remotion-*`, `skills-lock.json`) | github.com/remotion-dev/skills (`npx skills add`) | Belirtilmemiş (repoda LICENSE yok, 2026-10-27) | Belirsiz | Yalnız ajan talimatı (markdown); uygulamaya, pakete, demo çıktısına girmez; lisans netleşmezse repodan çıkarılır; 2026-10-27 |
