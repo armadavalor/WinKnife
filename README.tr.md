@@ -4,10 +4,10 @@
 
 # WinKnife
 
-### 20 Windows aracı. Tek pencere. Sen onaylamadan hiçbir şey silinmez.
+### Sürekli güncellenen 20+ Windows aracı. Hızlı, güvenilir, kullanımı kolay.
 
-Diski temizle, kopyaları bul, başlangıcı toparla, kilitli dosyayı aç, Windows ayarlarını değiştir; hepsini geri al.<br>
-Her bulgunun bir gerekçesi var. Her silme önce karantinaya gider.
+Diskleri temizleyin, yinelenen dosyaları bulun, başlangıç öğelerini düzenleyin, dosyaların kilidini açın, Windows'u özelleştirin ve tüm bu değişiklikleri geri alın.
+Her bulgunun bir nedeni vardır. Kaldırılan her dosya önce karantinaya alınır.
 
 [![CI](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml/badge.svg)](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml)
 [![Son sürüm](https://img.shields.io/github/v/release/armadavalor/WinKnife)](https://github.com/armadavalor/WinKnife/releases/latest)
