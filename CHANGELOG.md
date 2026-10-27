@@ -20,7 +20,7 @@ live in [docs/CHANGELOG-DEV.md](docs/CHANGELOG-DEV.md).
 - The animated backdrops use about 4× less CPU per frame and stand still while
   the window is not in focus.
 
-## [0.4.0] — 2026-10-25
+## 0.4.0 — 2026-10-25
 
 ### Added
 - **Turkish interface** — choose English or Türkçe in Settings; it applies at
@@ -53,7 +53,7 @@ live in [docs/CHANGELOG-DEV.md](docs/CHANGELOG-DEV.md).
 - Release builds carry a GitHub build attestation; see "Verify this download"
   in the README.
 
-## [0.3.0] — 2026-10-19
+## 0.3.0 — 2026-10-19
 
 ### Added
 - **Legacy Panels** — open 22 classic Windows tools from one page; unavailable
@@ -118,7 +118,6 @@ First public release. (0.1.0 was never tagged; its contents ship here.)
 - Content security policy for the app window; unused opener plugin removed.
 - Log folder keeps only the newest 14 daily files.
 
-[Unreleased]: https://github.com/armadavalor/WinKnife/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/armadavalor/WinKnife/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/armadavalor/WinKnife/compare/v0.2.0...v0.3.0
+[Unreleased]: https://github.com/armadavalor/WinKnife/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/armadavalor/WinKnife/releases/tag/v0.5.0
 [0.2.0]: https://github.com/armadavalor/WinKnife/releases/tag/v0.2.0
