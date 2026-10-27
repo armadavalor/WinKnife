@@ -13,20 +13,19 @@
   import InfoTip from "$lib/components/InfoTip.svelte";
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
-  import StatCard from "$lib/components/StatCard.svelte";
-  import {
-    formatBytes,
-    formatCount,
-    formatDateTime,
-    formatRemaining,
-  } from "$lib/format";
-  import { t, tDynamic, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { formatBytes, formatDateTime, formatRemaining } from "$lib/format";
+  import { visibleModules } from "$lib/hiddenModules";
+  import { t, tModuleName } from "$lib/i18n";
   import { dashboardStore } from "$lib/stores/dashboard.svelte";
+  import { hiddenModules } from "$lib/stores/hiddenModules.svelte";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
-  import type { ModuleManifest } from "$lib/types";
 
   const store = dashboardStore;
+
+  /** Tiles shown, and the tools offered before anything has been run. */
+  const RECENT_COUNT = 6;
+  const DEFAULT_TOOLS = ["cleaner", "treemap", "duplicates", "startup", "apps", "shutdown-timer"];
 
   // Run-once mounting, deliberately not reactive: as an effect this subscribed
   // to the store's own `status`, so "ready" was never observable and the
@@ -35,144 +34,105 @@
     void store.load();
   });
 
-  function actionLabel(module: ModuleManifest): string {
-    return tDynamic(`dashboard.action.${module.id}`, t("module.open"));
-  }
-
-  function statusText(module: ModuleManifest): string {
-    return tDynamic(`dashboard.status.${module.id}`, t("dashboard.status.default"));
-  }
-
   const timer = $derived(store.summary?.timer.active ?? null);
   const drives = $derived(store.summary?.drives ?? []);
+
+  // Most recently run first, then the defaults, then registry order.
+  const recent = $derived.by(() => {
+    const shown = visibleModules(moduleStore.modules, hiddenModules.ids);
+    const ranTime = (id: string) => Date.parse(store.lastScan(id)?.startedAt ?? "") || 0;
+    const ran = shown.filter((m) => ranTime(m.id) > 0).sort((a, b) => ranTime(b.id) - ranTime(a.id));
+    const rest = shown.filter((m) => !ran.includes(m));
+    const defaults = DEFAULT_TOOLS.flatMap((id) => rest.filter((m) => m.id === id));
+    return [...ran, ...defaults, ...rest.filter((m) => !defaults.includes(m))].slice(0, RECENT_COUNT);
+  });
+
+  const glass =
+    "rounded-2xl border border-surface-3/60 bg-surface-1/60 backdrop-blur-xl";
 </script>
 
 <div class="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
   <PageHeader title={t("dashboard.title")} info={t("dashboard.subtitle")} />
 
   {#if store.status === "error"}
-    <div class="flex flex-col items-start gap-3 rounded-xl border border-surface-3 bg-surface-1 p-5">
+    <div class="flex flex-col items-start gap-3 {glass} p-5">
       <p class="text-sm">{t("dashboard.error")}</p>
       {#if store.error}
         <p class="font-mono text-xs text-ink-faint">{store.error}</p>
       {/if}
-      <button
-        type="button"
-        class="btn-secondary"
-        onclick={() => store.load()}
-      >
+      <button type="button" class="btn-secondary" onclick={() => store.load()}>
         {t("dashboard.retry")}
       </button>
     </div>
   {/if}
 
-  <!-- The three things worth knowing at a glance -->
-  <section class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-    <StatCard
-      label={t("dashboard.reclaimable")}
-      value={store.status === "ready" ? formatBytes(store.reclaimable) : "—"}
-      info={t("dashboard.reclaimableNote")}
-    />
+  <!-- One card: the number worth knowing, the one thing worth doing -->
+  <section class="flex flex-col gap-5 {glass} p-6">
+    <div class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <p class="flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-faint">
+          <span>{t("dashboard.reclaimable")}</span>
+          <InfoTip text={t("dashboard.reclaimableNote")} />
+        </p>
+        <p class="mt-1 text-4xl font-semibold tabular-nums">
+          {store.status === "ready" ? formatBytes(store.reclaimable) : "—"}
+        </p>
+      </div>
+      <a href="/cleaner" class="btn-primary">{t("cleaner.scan")}</a>
+    </div>
 
-    <StatCard
-      label={t("quarantine.title")}
-      value={store.summary ? formatBytes(store.summary.quarantine.totalBytes) : "—"}
-    >
-      {#snippet footer()}
-        <button
-          type="button"
-          class="mt-1 text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
-          onclick={() => quarantineStore.show()}
-        >
-          {t("dashboard.quarantineNote", {
-            count: store.summary?.quarantine.itemCount ?? 0,
-          })}
-        </button>
-      {/snippet}
-    </StatCard>
-
-    <StatCard
-      label={t("dashboard.timer")}
-      value={timer ? formatRemaining(timer.remainingSecs) : "—"}
-    >
-      {#snippet footer()}
-        <a
-          href="/shutdown-timer"
-          class="mt-1 inline-block text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
-        >
-          {timer
-            ? t("dashboard.timerActive", { when: formatDateTime(timer.target) })
-            : t("shutdown.noTimer")}
-        </a>
-      {/snippet}
-    </StatCard>
-  </section>
-
-  {#if drives.length > 0}
-    <section class="flex flex-wrap gap-3 text-xs text-ink-muted">
+    <div class="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
       {#each drives as drive (drive.root)}
         <a
           href="/treemap"
-          class="rounded-xl border border-surface-2 bg-surface-1 px-3 py-2 transition-colors hover:border-accent-soft"
+          class="rounded-xl border border-surface-3/60 bg-surface-2/50 px-3 py-1.5 transition-colors hover:border-accent-soft hover:bg-surface-2/80"
         >
           <span class="font-medium text-ink">{drive.root}</span>
           {formatBytes(drive.freeBytes)} {t("dashboard.free")}
         </a>
       {/each}
-    </section>
-  {/if}
+      <button
+        type="button"
+        class="rounded-xl border border-surface-3/60 bg-surface-2/50 px-3 py-1.5 transition-colors hover:border-accent-soft hover:bg-surface-2/80"
+        onclick={() => quarantineStore.show()}
+      >
+        <span class="font-medium text-ink">{t("quarantine.title")}</span>
+        {store.summary ? formatBytes(store.summary.quarantine.totalBytes) : "—"} ·
+        {t("dashboard.quarantineNote", { count: store.summary?.quarantine.itemCount ?? 0 })}
+      </button>
+      {#if timer}
+        <a
+          href="/shutdown-timer"
+          class="rounded-xl border border-surface-3/60 bg-surface-2/50 px-3 py-1.5 transition-colors hover:border-accent-soft hover:bg-surface-2/80"
+        >
+          <span class="font-medium text-ink">{t("dashboard.timer")}</span>
+          {formatRemaining(timer.remainingSecs)} · {t("dashboard.timerActive", { when: formatDateTime(timer.target) })}
+        </a>
+      {/if}
+    </div>
+  </section>
 
-  <!-- One card per module -->
-  {#if moduleStore.status === "loading" || moduleStore.status === "idle"}
-    <LoadingNote text={t("dashboard.loading")} />
-  {:else if moduleStore.modules.length === 0}
-    <p class="text-sm text-ink-faint">{t("dashboard.empty")}</p>
-  {:else}
-    <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {#each moduleStore.modules as module (module.id)}
-        {@const last = store.lastScan(module.id)}
-        <li>
-          <div
-            class="flex h-full flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-4"
-          >
-            <span class="flex items-center gap-2">
-              <ModuleIcon name={module.icon} class="size-5 shrink-0 text-accent" />
-              <a href="/{module.id}" class="font-medium hover:underline">
-                {tModuleName(module.id, module.name)}
-              </a>
-              <InfoTip text={tModuleDescription(module.id, module.description)} />
-            </span>
-
-            <span class="text-xs text-ink-muted">
-              {#if last}
-                {t("dashboard.lastScan", {
-                  when: formatDateTime(last.startedAt),
-                  count: formatCount(last.findingCount),
-                })}
-                {#if last.reclaimableBytes > 0}
-                  · {t("dashboard.couldFree", {
-                    size: formatBytes(last.reclaimableBytes),
-                  })}
-                {/if}
-                {#if last.status === "cancelled"}
-                  · {t("dashboard.wasCancelled")}
-                {/if}
-              {:else if module.capabilities.hasScan}
-                {t("dashboard.neverRun")}
-              {:else}
-                {statusText(module)}
-              {/if}
-            </span>
-
+  <!-- The sidebar lists every tool; this is only the way back to the last few -->
+  <section class="flex flex-col gap-3">
+    <h2 class="text-xs font-medium uppercase tracking-wider text-ink-muted">{t("dashboard.recent")}</h2>
+    {#if moduleStore.status === "loading" || moduleStore.status === "idle"}
+      <LoadingNote text={t("dashboard.loading")} />
+    {:else if recent.length === 0}
+      <p class="text-sm text-ink-faint">{t("dashboard.empty")}</p>
+    {:else}
+      <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {#each recent as module (module.id)}
+          <li>
             <a
               href="/{module.id}"
-              class="btn-primary mt-auto w-fit"
+              class="flex items-center gap-3 {glass} px-4 py-3 text-sm font-medium transition-colors hover:bg-surface-1/85"
             >
-              {actionLabel(module)}
+              <ModuleIcon name={module.icon} class="size-5 shrink-0 text-accent" />
+              <span class="truncate">{tModuleName(module.id, module.name)}</span>
             </a>
-          </div>
-        </li>
-      {/each}
-    </ul>
-  {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
 </div>
