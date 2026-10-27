@@ -18,7 +18,7 @@ export function clampPct(pct: number | null): number | null {
 /**
  * `active` is false for gauges that are not work in progress (disk capacity);
  * those never move. Motion itself is switched off in CSS under
- * `prefers-reduced-motion` and `data-animations="off"`.
+ * `data-animations="off"`.
  */
 export function progressMode(pct: number | null, active: boolean): ProgressMode {
   const clamped = clampPct(pct);

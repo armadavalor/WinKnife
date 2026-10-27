@@ -3,14 +3,24 @@
  * system's reduced-motion setting is watched live. Whenever either changes,
  * `data-animations="off"` is set on <html> or removed.
  */
-import { animationsEnabled, parseAnimationPref, type AnimationPref } from "$lib/motion";
+import {
+  animationsEnabled,
+  isAnimationPref,
+  migrateLegacyPref,
+  parseAnimationPref,
+  type AnimationPref,
+} from "$lib/motion";
 
-const STORAGE_KEY = "winknife.animations";
+const STORAGE_KEY = "winknife.motion";
+/** The two-value key from before `system` existed; read once, never written. */
+const LEGACY_KEY = "winknife.animations";
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 function readStored(): AnimationPref {
   try {
-    return parseAnimationPref(localStorage.getItem(STORAGE_KEY));
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (isAnimationPref(raw)) return raw;
+    return migrateLegacyPref(localStorage.getItem(LEGACY_KEY));
   } catch {
     return parseAnimationPref(null);
   }
@@ -24,7 +34,7 @@ function applyToDocument(enabled: boolean): void {
 
 class MotionStore {
   pref = $state<AnimationPref>("on");
-  /** True while the system asks for reduced motion. */
+  /** True while the system asks for reduced motion (only `system` listens). */
   reducedMotion = $state(false);
   enabled = $derived(animationsEnabled(this.pref, this.reducedMotion));
 

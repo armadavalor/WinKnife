@@ -2864,6 +2864,26 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 - **Decisions.** K-032. HEIC/JXL, thumbnails and a threshold setting deferred
   (DECISIONS-NEEDED).
 
+## Animation preference (system/on/off) and Bliss backdrop
+
+- **Bug.** WebView2 reports `prefers-reduced-motion: reduce` when Windows
+  "show animations" is off, and `app.css` honoured that unconditionally, so
+  animations stayed still on such PCs even with the setting "on". The media
+  query is gone; CSS binds only to `<html data-animations>`. The pref is now
+  `system` (default, follows the OS) / `on` (ignores the OS) / `off`; a legacy
+  saved "on" migrates to `system`. Settings shows a 3-way selector and a hint
+  when the OS reduces motion and System is selected. K-033.
+- **Backdrop.** `Sky.svelte`: one `<canvas>`, procedural clouds over a green
+  hill as a halftone dot raster or ASCII (glyph atlas + `drawImage`), 2
+  parallax cloud layers, 20 fps cap, paused while hidden, one still frame when
+  animations are off, dark and light palettes, drawn at reduced strength so
+  text contrast is unchanged. Settings: Background Halftone / ASCII / Soft
+  light (old glow) / Off (`winknife.backdrop`). Tone math in `sky.ts` (tested).
+- **CPU.** rAF does not tick in the dev browser pane, so this is a replica
+  estimate on a software canvas (conservative): ~4.4 ms/frame halftone at
+  1280x800 (~9% of one core at 20 fps); ASCII ~16 ms worst case. Not measured
+  in the packaged app.
+
 ## 2026-10-27 — Remotion demo projesi
 
 **Built.** `demo/`: ayrı package.json'lu Remotion projesi (4.0.539, sürümler sabit). `npm run render:gif|mp4` → `demo/out/`. 21 sn, 1280x720@30; GIF 960x540@15, 3.8 MB. Çıktı `assets/demo-remotion.gif`.
@@ -2879,3 +2899,17 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
   hidden (`hiddenModules`) still do not render. `winknife.sidebarCategory` is no
   longer read.
 - **e2e.** Headers keep `data-tools`; QA/demo scripts click `nav button[data-tools~=…]`.
+
+## 2026-10-27 — Bliss backdrop: feedback round
+
+- **Clouds.** Puffier cumulus (bigger banks, per-kind alpha: sky 0.3 / cloud 0.6 / hill 0.5, ASCII x1.5), darker dark-theme sky for contrast. Loop/density tests added to `sky.test.ts`.
+- **Sidebar.** Frosted (`bg-surface-1/70 backdrop-blur-xl`) so the backdrop runs underneath; nav pills are solid on hover and active. Bigger logo (48 px), "Restart as admin" is a bordered button, Standard/Admin badge kept.
+- **Dashboard.** Disk-free chips use the card surface (`bg-surface-1` + border).
+- **Dashboard simplified.** One frosted hero card (reclaimable, disk-free chips, quarantine, timer only when armed, one "Scan for junk" button) plus a "Recent" row of 6 icon+name tiles (most recently run first, then a default set; hidden tools respected). The all-tools grid is gone (sidebar stays the full list); `StatCard` removed. Error card and retry unchanged. Old `dashboard.action.*`/`status.*` i18n keys are now unused.
+
+## 2026-10-27 — 0.5.0: pinned tools, opacity sliders, backdrop cost
+
+- **Pinned tools.** The dashboard "Recent" row is now "Pinned tools" (`pinnedModules.ts`, store `winknife.pinnedModules`, default six). "+ Add tool" opens a picker; × unpins. Hidden/unknown ids are dropped on read.
+- **Opacity.** `--sidebar-alpha` / `--panel-alpha` on `<html>` (stores `winknife.sidebarOpacity` 70 / `winknife.panelOpacity` 60, clamp 30–100), used by the sidebar and dashboard cards via `bg-surface-1/[var(--…)]`.
+- **Backdrop cost.** Offline 1920x1080 frame: `toneAt` over the 12 px grid 33.2 -> 7.6 ms (puffs outside the max rim radius are rejected before the noise call; output identical). Canvas scale 0.5/1/2 cost the same, so DPR cap unchanged. Loop now also pauses on window blur/hidden. Real GPU % not measured (hidden Browser pane gets no rAF); backdrop-blur re-blur cost unmeasured.
+- Version bumped to 0.5.0 (not tagged).

@@ -7,6 +7,8 @@
   Rust clamps retention and the duplicate size floor, and the page says so.
 -->
 <script lang="ts">
+  import { panelOpacity } from "$lib/stores/panelOpacity.svelte";
+  import { OPACITY_MAX, OPACITY_MIN } from "$lib/panelOpacity";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import LoadingNote from "$lib/components/LoadingNote.svelte";
   import { onMount } from "svelte";
@@ -26,6 +28,9 @@
   import { hiddenModules } from "$lib/stores/hiddenModules.svelte";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
+  import { ANIMATION_PREFS } from "$lib/motion";
+  import { BACKDROPS } from "$lib/sky";
+  import { backdrop } from "$lib/stores/backdrop.svelte";
   import { GLOW_VARIANTS } from "$lib/glow";
   import { glow } from "$lib/stores/glow.svelte";
   import { locale } from "$lib/stores/locale.svelte";
@@ -245,25 +250,91 @@
       <div class="min-w-0">
         <p class="text-sm text-ink">{t("settings.animationsLabel")}</p>
         <p class="text-xs text-ink-faint">
-          {motion.reducedMotion
+          {motion.reducedMotion && motion.pref === "system"
             ? t("settings.animationsReduced")
             : t("settings.animationsHint")}
         </p>
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={motion.pref === "on"}
-        aria-label={t("settings.animationsLabel")}
-        class="shrink-0 rounded-lg px-3 py-1 text-xs font-medium transition-colors {motion.pref === 'on'
-          ? 'bg-accent-soft text-ink hover:bg-accent hover:text-on-accent'
-          : 'border border-surface-3 text-ink-muted hover:bg-surface-2'}"
-        onclick={() => motion.set(motion.pref === "on" ? "off" : "on")}
-      >
-        {motion.pref === "on" ? t("settings.animationsOn") : t("settings.animationsOff")}
-      </button>
+      <div class="flex shrink-0 gap-1" role="radiogroup" aria-label={t("settings.animationsLabel")}>
+        {#each ANIMATION_PREFS as id (id)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={motion.pref === id}
+            class="rounded-lg px-3 py-1 text-xs font-medium transition-colors {motion.pref === id
+              ? 'bg-accent-soft text-ink'
+              : 'border border-surface-3 text-ink-muted hover:bg-surface-2'}"
+            onclick={() => motion.set(id)}
+          >
+            {t(`settings.animations.${id}` as TranslationKey)}
+          </button>
+        {/each}
+      </div>
     </div>
 
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-surface-2 pt-4">
+      <div class="min-w-0">
+        <p class="text-sm text-ink">{t("settings.backdropLabel")}</p>
+        <p class="text-xs text-ink-faint">{t("settings.backdropHint")}</p>
+      </div>
+      <div class="flex shrink-0 flex-wrap gap-1" role="radiogroup" aria-label={t("settings.backdropLabel")}>
+        {#each BACKDROPS as id (id)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={backdrop.value === id}
+            class="rounded-lg px-3 py-1 text-xs font-medium transition-colors {backdrop.value === id
+              ? 'bg-accent-soft text-ink'
+              : 'border border-surface-3 text-ink-muted hover:bg-surface-2'}"
+            onclick={() => backdrop.set(id)}
+          >
+            {t(`settings.backdrop.${id}` as TranslationKey)}
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-surface-2 pt-4">
+      <div class="min-w-0">
+        <p class="text-sm text-ink">{t("settings.sidebarOpacityLabel")}</p>
+        <p class="text-xs text-ink-faint">{t("settings.sidebarOpacityHint")}</p>
+      </div>
+      <label class="flex shrink-0 items-center gap-3 text-xs text-ink-muted">
+        <input
+          type="range"
+          min={OPACITY_MIN}
+          max={OPACITY_MAX}
+          step="5"
+          class="w-40 accent-[var(--color-accent)]"
+          aria-label={t("settings.sidebarOpacityLabel")}
+          value={panelOpacity.sidebar}
+          oninput={(e) => panelOpacity.setSidebar(e.currentTarget.valueAsNumber)}
+        />
+        <span class="w-10 text-right tabular-nums">{panelOpacity.sidebar}%</span>
+      </label>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-surface-2 pt-4">
+      <div class="min-w-0">
+        <p class="text-sm text-ink">{t("settings.panelOpacityLabel")}</p>
+        <p class="text-xs text-ink-faint">{t("settings.panelOpacityHint")}</p>
+      </div>
+      <label class="flex shrink-0 items-center gap-3 text-xs text-ink-muted">
+        <input
+          type="range"
+          min={OPACITY_MIN}
+          max={OPACITY_MAX}
+          step="5"
+          class="w-40 accent-[var(--color-accent)]"
+          aria-label={t("settings.panelOpacityLabel")}
+          value={panelOpacity.panel}
+          oninput={(e) => panelOpacity.setPanel(e.currentTarget.valueAsNumber)}
+        />
+        <span class="w-10 text-right tabular-nums">{panelOpacity.panel}%</span>
+      </label>
+    </div>
+
+    {#if backdrop.value === "light"}
     <div class="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-surface-2 pt-4">
       <div class="min-w-0">
         <p class="text-sm text-ink">{t("settings.glowLabel")}</p>
@@ -285,6 +356,7 @@
         {/each}
       </div>
     </div>
+    {/if}
 
     <div class="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-surface-2 pt-4">
       <div class="min-w-0">
