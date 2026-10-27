@@ -27,7 +27,7 @@
 //!
 //! A leftover is moved to quarantine as one restorable folder through the
 //! shared executor, which calls [`recheck_refusal`] right before the move
-//! (KARARLAR K-030). Anything it cannot establish refuses the move.
+//! (decision K-030). Anything it cannot establish refuses the move.
 
 use std::path::{Component, Path, PathBuf};
 

@@ -3,7 +3,7 @@
  *
  * The recycle bin is the one cleaner action that is not reversible, so it must
  * never be chosen for the user: they tick it themselves, then confirm the
- * warning (DECISIONS-NEEDED, Phase 4 release audit, option a).
+ * warning (Phase 4 release audit).
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";

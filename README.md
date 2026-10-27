@@ -127,7 +127,7 @@ npm run tauri dev -- -- --dry-run
 
 **The flag only disables real power actions.** It does not disable cleaner,
 startup edits, recycle-bin emptying or quarantine retention. Use an isolated
-VM or the separate QA identity described in [QA notes](docs/POLISH-QA.md).
+VM or the separate QA identity described in [QA notes](docs/QA-PLAN.md).
 
 ## Contributing
 

@@ -2398,7 +2398,7 @@ const STARTUP_UNRESOLVED_PROGRAM: &str = "the program it runs could not be worke
 /// green, or `None` when it may. This is the cleaner's gate
 /// (`Brain::path_refusal`), so "protected" means one thing everywhere and no
 /// startup entry whose program lives in `C:\Windows` or `C:\Program Files*`
-/// comes out Safe (CLAUDE.md hard rule).
+/// comes out Safe (CONTRIBUTING.md hard rule).
 fn startup_safe_refusal(entry: &startup::StartupEntry, brain: &Brain) -> Option<String> {
     let Some(program) = entry.target.as_deref() else {
         return Some(STARTUP_UNRESOLVED_PROGRAM.to_owned());
@@ -3701,7 +3701,7 @@ mod tests {
         );
     }
 
-    /* --- startup ratings pass the protected-path gate (CLAUDE.md) ------- */
+    /* --- startup ratings pass the protected-path gate (CONTRIBUTING.md) ------- */
 
     /// The gate the app itself builds (`lib.rs`), from the real environment,
     /// with its own storage pointed into a scratch folder.

@@ -4,7 +4,7 @@
 //! "everything reversible". Quarantine is that promise in code. Nothing else in
 //! the crate is allowed to call `fs::remove_*` on user data — there is a test
 //! (`no_other_module_removes_user_data`) that walks the crate's own source and
-//! fails the build if anyone tries (ARCHITECTURE section 6, CLAUDE.md hard
+//! fails the build if anyone tries (ARCHITECTURE section 6, CONTRIBUTING.md hard
 //! rules).
 //!
 //! Layout: `{app_data}/quarantine/{batch_id}/{item_id}{ext}`, with the original
@@ -3730,7 +3730,7 @@ mod tests {
 
     /// The same refusal for a **junction**, which any standard user can create —
     /// so this asserts on every developer machine rather than only in CI
-    /// (`docs/DECISIONS-NEEDED.md`, architect resolution before phase 2).
+    /// (architect resolution before phase 2).
     ///
     /// Moving a junction moves the door, not the room: the tree it points at
     /// would be left dangling and the quarantine would hold something it cannot
@@ -5128,7 +5128,7 @@ mod tests {
 
     /// The same refusal when the link inside the tree is a **junction**, which
     /// needs no privilege — so this asserts on every developer machine rather
-    /// than only in CI (`docs/DECISIONS-NEEDED.md`, architect resolution before
+    /// than only in CI (architect resolution before
     /// phase 2).
     #[cfg(windows)]
     #[test]
@@ -5268,7 +5268,7 @@ mod tests {
         assert!(bad_item.quarantine_path.exists());
     }
 
-    /// CLAUDE.md hard rule. The *enforcement* is `clippy.toml`, which resolves
+    /// CONTRIBUTING.md hard rule. The *enforcement* is `clippy.toml`, which resolves
     /// the path of every call and so cannot be walked past with an aliased
     /// import or a fully-qualified spelling. This is the smoke check that goes
     /// with it: it reads the whole crate — `src/`, `tests/` and `build.rs`, not

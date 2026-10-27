@@ -110,7 +110,7 @@ pub(crate) fn short_path_name(path: &std::path::Path) -> Option<std::path::PathB
 /// resolves it identically, `std::fs::FileType::is_symlink` reports it as a
 /// link, and the walker refuses to follow it. So a junction-based companion asserts
 /// the same guarantee on every machine, and a junction probe is what proved the
-/// last two real bugs (`docs/DECISIONS-NEEDED.md`, architect resolution).
+/// last two real bugs (architect resolution).
 ///
 /// Shelling out to `cmd.exe` is the architect-approved way to do it: the
 /// alternative is hand-rolling `FSCTL_SET_REPARSE_POINT`, which is a page of

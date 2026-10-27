@@ -1469,7 +1469,7 @@ mod tests {
         // the junction and `sub` as the same place, which is exactly true and
         // exactly not the question. What is being asserted here is that the
         // junction's own *name* never became a node (standing rule,
-        // `docs/DECISIONS-NEEDED.md`: say why when a comparison stays lexical).
+        // say why when a comparison stays lexical).
         assert!(
             !scan.dirs.iter().any(|d| d.path == door),
             "the junction's own name must not become a folder with contents of its own"

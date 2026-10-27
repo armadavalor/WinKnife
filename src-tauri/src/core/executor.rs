@@ -28,7 +28,7 @@
 //! - a browser could be opened, and its cache moved under a rule whose whole
 //!   premise (`owner_process_absent`) is that the browser is closed.
 //!
-//! CLAUDE.md makes the `reason` a hard rule: "Every Recommendation carries a
+//! CONTRIBUTING.md makes the `reason` a hard rule: "Every Recommendation carries a
 //! human-readable `reason`." A reason that was true an hour ago and is false now
 //! is not a reason, and acting on one is the defect class that erodes the single
 //! promise this app makes. So the executor re-derives the preconditions it can
@@ -493,7 +493,7 @@ fn apply_one(
 /// its actions were never re-verified. Every shipped module happened to record
 /// something, so nothing reachable from the UI was unchecked — but the guarantee
 /// was "modules that record a justification get it verified" rather than "every
-/// action is verified" (`docs/DECISIONS-NEEDED.md`, phase 2 review H10).
+/// action is verified" (phase 2 review H10).
 ///
 /// The justification is now part of the contract: [`Recommendation::validate`]
 /// refuses to build a mutating action carrying
@@ -1735,7 +1735,7 @@ mod tests {
 
     /// The same refusal through a **junction**, which needs no privilege — so
     /// this asserts on every developer machine rather than only in CI
-    /// (`docs/DECISIONS-NEEDED.md`, architect resolution before phase 2).
+    /// (architect resolution before phase 2).
     #[cfg(windows)]
     #[test]
     fn a_junction_pointing_into_a_protected_directory_is_refused() {

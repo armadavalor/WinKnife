@@ -258,7 +258,7 @@ impl Justification {
 }
 
 /// A suggestion about one or more findings. Always carries a `reason` — no
-/// unexplained suggestions (CLAUDE.md hard rules) — and, when it proposes to
+/// unexplained suggestions (CONTRIBUTING.md hard rules) — and, when it proposes to
 /// change anything, a [`Justification`] the executor can re-derive.
 ///
 /// # Every construction site validates
@@ -922,7 +922,7 @@ mod tests {
                 "savingsBytes": 1,
                 "justification": {"kind": "informational"}
             }),
-            // No reason at all, which CLAUDE.md forbids outright.
+            // No reason at all, which CONTRIBUTING.md forbids outright.
             serde_json::json!({
                 "id": Uuid::new_v4(),
                 "findingIds": [Uuid::new_v4()],

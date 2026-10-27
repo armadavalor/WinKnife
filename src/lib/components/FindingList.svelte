@@ -1,7 +1,7 @@
 <!--
   One risk bucket, grouped by the rule pack that produced it.
 
-  Every row carries its `reason` — no unexplained suggestions (CLAUDE.md). It
+  Every row carries its `reason` — no unexplained suggestions (CONTRIBUTING.md). It
   is shown as one truncated line (full text in the tooltip, and on click). The
   red bucket has no checkboxes at all: it is informational, and offering a
   disabled checkbox would only look like a bug.
