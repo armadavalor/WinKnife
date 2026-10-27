@@ -1,9 +1,9 @@
 /**
  * The animations preference. Run with `npm run test:ui`.
  *
- * Three values: `system` (default) follows the OS reduced-motion setting, `on`
- * ignores it, `off` is always off. A legacy stored "on" meant "follow the OS",
- * so it migrates to `system`.
+ * Three values: `on` (default) ignores the OS reduced-motion setting, `system`
+ * follows it, `off` is always off. A legacy stored "on" meant "follow the OS",
+ * so it migrates to `system`; nothing stored means the default.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -21,9 +21,10 @@ test("system, on and off are the preferences", () => {
   assert.equal(isAnimationPref(1), false);
 });
 
-test("a missing or unknown stored value means system", () => {
-  assert.equal(parseAnimationPref(null), "system");
-  assert.equal(parseAnimationPref("garbage"), "system");
+test("a missing or unknown stored value means on", () => {
+  assert.equal(parseAnimationPref(null), "on");
+  assert.equal(parseAnimationPref("garbage"), "on");
+  assert.equal(parseAnimationPref("system"), "system");
   assert.equal(parseAnimationPref("on"), "on");
   assert.equal(parseAnimationPref("off"), "off");
 });
@@ -40,6 +41,6 @@ test("system follows the OS; on ignores it; off never runs", () => {
 test("the legacy 'on' becomes system, the legacy 'off' stays off", () => {
   assert.equal(migrateLegacyPref("on"), "system");
   assert.equal(migrateLegacyPref("off"), "off");
-  assert.equal(migrateLegacyPref(null), "system");
-  assert.equal(migrateLegacyPref("garbage"), "system");
+  assert.equal(migrateLegacyPref(null), "on");
+  assert.equal(migrateLegacyPref("garbage"), "on");
 });

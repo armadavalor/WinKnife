@@ -33,7 +33,7 @@ function applyToDocument(enabled: boolean): void {
 }
 
 class MotionStore {
-  pref = $state<AnimationPref>("system");
+  pref = $state<AnimationPref>("on");
   /** True while the system asks for reduced motion (only `system` listens). */
   reducedMotion = $state(false);
   enabled = $derived(animationsEnabled(this.pref, this.reducedMotion));
