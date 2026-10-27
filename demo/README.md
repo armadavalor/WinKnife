@@ -1,28 +1,36 @@
 # WinKnife demo (Remotion)
 
-Renders the README demo GIF/MP4 from real app screenshots. Dev-only: nothing here ships in the app or the Tauri bundle.
+Renders the ~15 s looping README b-roll (`assets/demo/demo.gif`, linked to `assets/demo/demo.mp4`) from real app stills. Dev-only: nothing here ships in the app or the Tauri bundle.
 
 ```bash
 cd demo
 npm ci
-npm run render:gif   # out/demo.gif (960x540, 15 fps, ~4 MB)
-npm run render:mp4   # out/demo.mp4 (1280x720, 30 fps)
+npm run render:mp4   # out/demo.mp4 (1280x720, 30 fps, h264)
 npm run studio       # live preview
 ```
 
-`out/` is gitignored. Copy the approved GIF to `assets/demo-remotion.gif` (or `assets/demo.gif` once the README is switched over).
+The GIF is made from the MP4 with the ffmpeg Remotion bundles (Remotion's own GIF codec gives ~50 MB because the halftone sky moves). This build has no `fps`/`select` filters, so use `-r`:
 
-## Refresh the screenshots (after a UI change)
+```powershell
+$ff = "node_modules/@remotion/compositor-win32-x64-msvc/ffmpeg.exe"
+& $ff -y -i out/demo.mp4 -r 8 -filter_complex "scale=640:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=64:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" -loop 0 out/demo.gif
+```
 
-Stills in `public/`: `scan`, `results`, `confirm`, `restore` (+ `dashboard`, unused), 1280x800 PNG, shown at 1000x625.
+Keep the GIF under ~8 MB. `out/` is gitignored; copy the approved files to `assets/demo/`.
 
-1. Needs a **released** build (the workflow installs it): `gh workflow run demo.yml --ref main -f version=X.Y.Z`. It seeds junk into a fake `C:\Users\Demo` profile, so no real names or paths leak.
-2. `gh run list --workflow demo.yml`, then `gh run download <id> -n demo-frames` (`NNNNN.png` + `frames.txt`).
-3. Pick one frame per scene: Disk Cleaner idle with the Scan button; results with reasons visible; the "Move N items to quarantine?" dialog; the quarantine drawer with the cursor on Restore. Copy over the files in `public/`.
-4. Without a release: run a local dev build with `--remote-debugging-port=9222` and drive it with `scripts/demo/record.mjs` against a fake-profile folder.
-5. Re-render and eyeball a few frames: `npx remotion still src/index.ts Demo f.png --frame=130`.
+## Scenes
 
-Captions and timings live in `src/Demo.tsx` (`SCENES`).
+`src/Demo.tsx`: dashboard → Disk Cleaner with reasons → quarantine → restored → disk map → a whip tour of one still per tool (`TOUR_STILLS`) → end card (`KnifeLogo.tsx`, "Fast. Modular. Useful."). Captions, timings and camera moves live in `SHOTS`. `SkyBackdrop.tsx` draws the app's Bliss halftone sky (`sky.ts` mirrors `src/lib/sky.ts`) under everything, on a period that matches the composition so the loop is seamless.
+
+## Refresh the stills (after a UI change)
+
+Stills in `public/broll/`: 2560x1600 PNG with a transparent background (the app's backdrop is hidden while capturing, so they sit over the animated sky).
+
+1. Needs an installer: a published release (`-f version=X.Y.Z`) or a draft release run (`-f release_run=<run id>`).
+2. `gh workflow run demo.yml --ref main -f script=broll -f release_run=<id>`. On a throwaway runner it seeds junk into a fake `C:\Users\Demo` profile and a fake `W:` drive and drives the app with `scripts/demo/broll.mjs`, so no real names or paths are in frame. Never capture on a real machine.
+3. `gh run download <run> -n demo-frames`, copy the PNGs into `public/broll/`.
+4. Check every still for real usernames or paths before committing.
+5. Re-render and eyeball a few frames: `npx remotion still src/index.ts Demo f.png --frame=200`.
 
 ## Licence
 
