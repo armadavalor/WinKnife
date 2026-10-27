@@ -2868,3 +2868,13 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 
 **Built.** `demo/`: ayrı package.json'lu Remotion projesi (4.0.539, sürümler sabit). `npm run render:gif|mp4` → `demo/out/`. 21 sn, 1280x720@30; GIF 960x540@15, 3.8 MB. Çıktı `assets/demo-remotion.gif`.
 **Decisions.** Mevcut `assets/demo.gif`'e dokunulmadı; README'ye bağlanmadı (yeni tasarım onayı bekliyor). Kareler CI `demo.yml` sahte profil hattından; yeniden üretim `demo/README.md`.
+## 2026-10-27 — Sidebar accordion
+
+- **Built.** The sidebar's category tabs became a vertical accordion: each
+  category is a `<button aria-expanded aria-controls>` row with a chevron, tools
+  slide open below it (instant when `motion.enabled` is off). Several groups may
+  be open; the set persists in `winknife.sidebarOpenGroups` (try/catch). Opening
+  a tool's route expands its group once per route. Categories whose tools are all
+  hidden (`hiddenModules`) still do not render. `winknife.sidebarCategory` is no
+  longer read.
+- **e2e.** Headers keep `data-tools`; QA/demo scripts click `nav button[data-tools~=…]`.

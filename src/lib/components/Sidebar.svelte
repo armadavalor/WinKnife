@@ -12,9 +12,12 @@
 
   import KnifeLogo from "$lib/components/KnifeLogo.svelte";
   import ModuleIcon from "$lib/components/ModuleIcon.svelte";
-  import { categoryOf, groupByCategory, pickCategory } from "$lib/categories";
+  import { slide } from "svelte/transition";
+  import { categoryOf, groupByCategory } from "$lib/categories";
   import { t, tModuleName } from "$lib/i18n";
   import { elevation } from "$lib/stores/elevation.svelte";
+  import { motion } from "$lib/stores/motion.svelte";
+  import Icon from "$lib/components/Icon.svelte";
   import type { ModuleCategory, ModuleManifest } from "$lib/types";
 
   interface Props {
@@ -52,29 +55,33 @@
     return page.url.pathname === href;
   }
 
-  const CATEGORY_KEY = "winknife.sidebarCategory";
+  const OPEN_KEY = "winknife.sidebarOpenGroups";
 
-  function readCategory(): string | null {
+  function readOpen(): string[] {
     try {
-      return localStorage.getItem(CATEGORY_KEY);
+      const raw = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]");
+      return Array.isArray(raw) ? raw.filter((v) => typeof v === "string") : [];
     } catch {
-      return null;
+      return [];
     }
   }
 
-  let chosen = $state<string | null>(readCategory());
-  let tabButtons = $state<HTMLButtonElement[]>([]);
+  let openGroups = $state<string[]>(readOpen());
 
   const groups = $derived(groupByCategory(modules));
-  const selected = $derived(pickCategory(groups, chosen));
-  const shownModules = $derived(
-    groups.length > 1
-      ? (groups.find((group) => group.category === selected)?.modules ?? [])
-      : modules,
-  );
 
-  // Opening a tool (link, dashboard card, `--module`) shows its tab once per
-  // route, so hiding or showing tools later does not override a chosen tab.
+  function setOpen(category: string, open: boolean) {
+    const rest = openGroups.filter((c) => c !== category);
+    openGroups = open ? [...rest, category] : rest;
+    try {
+      localStorage.setItem(OPEN_KEY, JSON.stringify(openGroups));
+    } catch {
+      // Remembering open groups is a convenience; the sidebar works without it.
+    }
+  }
+
+  // Opening a tool (link, dashboard card, `--module`) expands its group once
+  // per route, so collapsing it afterwards sticks.
   let syncedPath: string | null = null;
   $effect(() => {
     const path = page.url.pathname;
@@ -82,35 +89,12 @@
     const active = modules.find((m) => path === `/${m.id}`);
     if (!active) return;
     syncedPath = path;
-    chosen = categoryOf(active);
+    const category = categoryOf(active);
+    if (!openGroups.includes(category)) setOpen(category, true);
   });
 
-  function choose(category: ModuleCategory) {
-    chosen = category;
-    try {
-      localStorage.setItem(CATEGORY_KEY, category);
-    } catch {
-      // Remembering the tab is a convenience; the sidebar works without it.
-    }
-  }
-
-  function onTabKey(event: KeyboardEvent, index: number) {
-    const last = groups.length - 1;
-    const next =
-      event.key === "ArrowRight" || event.key === "ArrowDown"
-        ? index === last ? 0 : index + 1
-        : event.key === "ArrowLeft" || event.key === "ArrowUp"
-          ? index === 0 ? last : index - 1
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? last
-              : null;
-    if (next === null) return;
-    event.preventDefault();
-    choose(groups[next].category);
-    tabButtons[next]?.focus();
-  }
+  /** Instant when animations are off; `slide` otherwise. */
+  const reveal = (node: Element) => slide(node, { duration: motion.enabled ? 150 : 0 });
 
   const linkClass =
     "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors";
@@ -191,53 +175,48 @@
     {:else if modules.length === 0}
       <p class="px-3 text-sm text-ink-faint">{emptyText ?? t("dashboard.empty")}</p>
     {:else}
-      {#if groups.length > 1}
-        <div
-          role="tablist"
-          aria-label={t("nav.categories")}
-          class="flex flex-wrap gap-1 px-1"
-        >
-          {#each groups as group, index (group.category)}
-            {@const isSelected = group.category === selected}
-            <button
-              bind:this={tabButtons[index]}
-              type="button"
-              role="tab"
-              id="sidebar-tab-{group.category}"
-              aria-selected={isSelected}
-              aria-controls="sidebar-tools"
-              tabindex={isSelected ? 0 : -1}
-              data-tools={group.modules.map((m) => m.id).join(" ")}
-              class="rounded-md px-2 py-1 text-xs outline-none transition-colors focus-visible:outline-2 focus-visible:outline-accent {isSelected
-                ? 'bg-surface-3 text-ink'
-                : 'text-ink-muted hover:bg-surface-2 hover:text-ink'}"
-              onclick={() => choose(group.category)}
-              onkeydown={(event) => onTabKey(event, index)}
-            >
-              {t(`nav.category.${group.category}`)}
-            </button>
-          {/each}
-        </div>
-      {/if}
-      <ul
-        class="flex flex-col gap-1"
-        id="sidebar-tools"
-        role={groups.length > 1 ? "tabpanel" : undefined}
-        aria-labelledby={groups.length > 1 ? `sidebar-tab-${selected}` : undefined}
-      >
-        {#each shownModules as module (module.id)}
-          {@const href = `/${module.id}`}
+      <ul class="flex flex-col gap-1" aria-label={t("nav.categories")}>
+        {#each groups as group (group.category)}
+          {@const isOpen = openGroups.includes(group.category)}
           <li>
-            <a
-              {href}
-              class="{linkClass} {isActive(href)
-                ? 'bg-surface-3 text-ink'
-                : 'text-ink-muted hover:bg-surface-2 hover:text-ink'}"
-              aria-current={isActive(href) ? "page" : undefined}
+            <button
+              type="button"
+              id="sidebar-group-{group.category}"
+              aria-expanded={isOpen}
+              aria-controls="sidebar-tools-{group.category}"
+              data-tools={group.modules.map((m) => m.id).join(" ")}
+              class="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted outline-none transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => setOpen(group.category, !isOpen)}
             >
-              <ModuleIcon name={module.icon} />
-              {tModuleName(module.id, module.name)}
-            </a>
+              <Icon
+                name="chevron-right"
+                class="size-4 shrink-0 transition-transform {isOpen ? 'rotate-90' : ''}"
+              />
+              <span class="flex-1 text-left">{t(`nav.category.${group.category}`)}</span>
+            </button>
+            {#if isOpen}
+              <ul
+                class="mt-1 flex flex-col gap-1"
+                id="sidebar-tools-{group.category}"
+                transition:reveal
+              >
+                {#each group.modules as module (module.id)}
+                  {@const href = `/${module.id}`}
+                  <li>
+                    <a
+                      {href}
+                      class="{linkClass} {isActive(href)
+                        ? 'bg-surface-3 text-ink'
+                        : 'text-ink-muted hover:bg-surface-2 hover:text-ink'}"
+                      aria-current={isActive(href) ? "page" : undefined}
+                    >
+                      <ModuleIcon name={module.icon} />
+                      {tModuleName(module.id, module.name)}
+                    </a>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
           </li>
         {/each}
       </ul>
