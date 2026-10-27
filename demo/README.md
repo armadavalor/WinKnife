@@ -9,6 +9,8 @@ npm run render:mp4   # out/demo.mp4 (1280x720, 30 fps, h264)
 npm run studio       # live preview
 ```
 
+Agent skills for Remotion are installed locally, not committed: `npx skills add remotion-dev/skills` (lands in `.claude/skills/remotion-*`, gitignored).
+
 The GIF is made from the MP4 with the ffmpeg Remotion bundles (Remotion's own GIF codec gives ~50 MB because the halftone sky moves). This build has no `fps`/`select` filters, so use `-r`:
 
 ```powershell
