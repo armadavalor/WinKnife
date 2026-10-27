@@ -4,7 +4,7 @@
 //! If the protected list lived there, a well-meaning pull request could hand
 //! someone a green "clean" button pointed at `C:\Windows`. The list is compiled
 //! in, checked before any rule is consulted, and re-checked by the executor
-//! (CLAUDE.md hard rules, ARCHITECTURE section 4).
+//! (CONTRIBUTING.md hard rules, ARCHITECTURE section 4).
 //!
 //! Two scopes, and the difference matters:
 //!

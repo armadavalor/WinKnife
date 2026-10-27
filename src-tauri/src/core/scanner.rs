@@ -5,7 +5,7 @@
 //! Writing that three times is how three subtly different bugs appear.
 //!
 //! Read-only by construction — the walker has no way to modify anything, which
-//! is what makes `scan()` honest about being read-only (CLAUDE.md hard rules).
+//! is what makes `scan()` honest about being read-only (CONTRIBUTING.md hard rules).
 //!
 //! # Why `read_dir` and not a parallel crate
 //!
@@ -49,7 +49,7 @@
 //!   drive; it accepts that a file written moments ago may be drawn at its
 //!   previous size until the next scan, which is a rectangle a few pixels wrong
 //!   rather than a wrong decision about a file
-//!   (`docs/DECISIONS-NEEDED.md`, phase 3).
+//!   (phase 3).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -500,7 +500,7 @@ mod tests {
     /// The same guarantee through a **junction**, which any standard user can
     /// create — so unlike the symlink test above, this one asserts on every
     /// developer machine rather than only in CI
-    /// (`docs/DECISIONS-NEEDED.md`, architect resolution before phase 2).
+    /// (architect resolution before phase 2).
     #[cfg(windows)]
     #[test]
     fn junctions_are_never_followed() {

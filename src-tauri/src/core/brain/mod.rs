@@ -170,7 +170,7 @@ impl Brain {
     /// [`ProtectedPaths`] list, while the executor also canonicalised and
     /// re-asked — so a path written in a spelling the list does not recognise
     /// could be rated green at analyze time and then refused at execute time.
-    /// The delete was blocked, but CLAUDE.md's hard rule is that a protected
+    /// The delete was blocked, but CONTRIBUTING.md's hard rule is that a protected
     /// path never receives a Safe rating *or* a delete action, and the rating
     /// half was unenforced (security review H9).
     pub fn path_refusal(&self, path: &Path) -> Option<PathRefusal> {
@@ -268,7 +268,7 @@ impl Brain {
         signals: &Signals,
     ) -> Verdict {
         // Gate 1: protected paths beat everything, including a rule that
-        // claims otherwise. This is the line CLAUDE.md calls a hard rule — and
+        // claims otherwise. This is the line CONTRIBUTING.md calls a hard rule — and
         // it is the *same* gate the executor runs, so the rating the user sees
         // and the decision the executor takes can never disagree about one path
         // (security review H9).
@@ -663,7 +663,7 @@ mod tests {
         }
     }
 
-    /// Security review H9: the *rating* half of CLAUDE.md's hard rule, which
+    /// Security review H9: the *rating* half of CONTRIBUTING.md's hard rule, which
     /// says a protected path can never receive a Safe rating **or** a delete
     /// action.
     ///

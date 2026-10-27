@@ -263,7 +263,7 @@ pub fn parse_pack(pack_name: &str, json: &str) -> Result<RulePackSpec> {
             ));
         }
         // `reason` ships to the UI verbatim, so an empty one would be an
-        // unexplained suggestion — a CLAUDE.md hard-rule violation.
+        // unexplained suggestion — a CONTRIBUTING.md hard-rule violation.
         if rule.reason.trim().is_empty() {
             return Err(invalid(
                 &field("reason"),

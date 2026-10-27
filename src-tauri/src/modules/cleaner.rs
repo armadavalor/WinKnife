@@ -1072,7 +1072,7 @@ mod tests {
     /// is off because its only location is inside `%WINDIR%`, which is protected
     /// in code: the pack can report but never act, so leaving it on by default
     /// would put a permanent "not walked, it is protected" line in front of every
-    /// user (`docs/DECISIONS-NEEDED.md`, phase 2).
+    /// user (phase 2).
     #[test]
     fn the_default_pack_selection_is_the_one_the_module_spec_states() {
         let packs: Vec<_> = rules::load_dir(&repo_rules_dir(), &stock_env())
@@ -1973,7 +1973,7 @@ mod tests {
     /// The same thing through a **junction** rather than a symlink, so it
     /// asserts without Developer Mode. A junction is a reparse point too and
     /// `canonicalize` resolves it identically, which is exactly the property the
-    /// walk-root gate depends on (`docs/DECISIONS-NEEDED.md`, architect
+    /// walk-root gate depends on (architect
     /// resolution before phase 2).
     #[cfg(windows)]
     #[test]

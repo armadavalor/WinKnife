@@ -680,7 +680,7 @@ impl StartupService {
         // Everything under `\Microsoft\Windows\` in the task tree is Windows'
         // own scheduling. Compared as text because it is a name inside the task
         // namespace and not a filesystem path, so `path_compare` has nothing to
-        // resolve (standing rule, `docs/DECISIONS-NEEDED.md`).
+        // resolve (standing rule).
         if source == StartupSource::ScheduledTask
             && key.to_ascii_lowercase().starts_with(r"\microsoft\windows\")
         {

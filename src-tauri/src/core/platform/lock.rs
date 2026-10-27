@@ -63,7 +63,7 @@ pub trait LockProbe: Send + Sync {
 ///
 /// # Why the open does not count as modifying the file
 ///
-/// CLAUDE.md: "All scans are read-only. `scan()` and `analyze()` must not modify
+/// CONTRIBUTING.md: "All scans are read-only. `scan()` and `analyze()` must not modify
 /// the filesystem." Opening a file writes none of its contents — but on a volume
 /// where last-access updates are enabled it moves the file's **last-access
 /// timestamp**, and that timestamp is a signal the scoring pipeline reads

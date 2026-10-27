@@ -86,7 +86,7 @@ pub const OWNER_RUNNING_PENALTY: i16 = -25;
 /// Compared as **component names**, not as paths: the question is "is one of
 /// this path's folders called `Cache`", which is about a name and not about
 /// where two paths point, so it does not go through
-/// [`crate::core::path_compare`] (standing rule, `docs/DECISIONS-NEEDED.md`).
+/// [`crate::core::path_compare`] (standing rule).
 const CACHE_DIR_NAMES: &[&str] = &[
     "cache",
     "cache_data",

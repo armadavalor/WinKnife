@@ -12,7 +12,7 @@
 //! actually looked at. Protected and locked files are shown but never offered.
 //!
 //! v1 reads JPEG, PNG, WebP and GIF (first frame) through the `image` crate.
-//! HEIC/JXL are out (see DECISIONS-NEEDED).
+//! HEIC/JXL are out (deferred).
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

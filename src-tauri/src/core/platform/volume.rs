@@ -64,7 +64,7 @@ pub trait Volumes: Send + Sync {
         // `D:\`. `Path::join` would *replace* rather than append here (the
         // argument starts with a separator), so the trailing separator is
         // appended as text and the comparison itself goes through
-        // `path_compare` (standing rule, `docs/DECISIONS-NEEDED.md`).
+        // `path_compare` (standing rule).
         let prefix = path.components().next()?;
         let mut root = prefix.as_os_str().to_os_string();
         root.push("\\");

@@ -8,7 +8,7 @@ Tauri v2 desktop app. Rust does all filesystem/registry/system work; the WebView
 ```
 /
 ├── CLAUDE.md
-├── docs/                     # specs (this folder) — agent reads, humans read
+├── docs/                     # specs (this folder)
 ├── rules/                    # brain rule packs, JSON (shipped with app, community-editable)
 ├── src/                      # Svelte UI
 │   ├── lib/
