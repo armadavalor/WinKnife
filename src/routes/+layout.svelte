@@ -21,6 +21,8 @@
   import { elevation } from "$lib/stores/elevation.svelte";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { glow } from "$lib/stores/glow.svelte";
+  import { backdrop } from "$lib/stores/backdrop.svelte";
+  import Sky from "$lib/components/Sky.svelte";
   import { hiddenModules } from "$lib/stores/hiddenModules.svelte";
   import { visibleModules } from "$lib/hiddenModules";
   import { motion } from "$lib/stores/motion.svelte";
@@ -43,6 +45,7 @@
     theme.init();
     motion.init();
     glow.init();
+    backdrop.init();
     hiddenModules.init();
     void elevation.init();
     void moduleStore.load();
@@ -104,11 +107,15 @@
 
 <div class="relative isolate flex h-screen w-screen overflow-hidden">
   <!-- Decorative: moving accent light, then film grain. Neither takes clicks or layout. -->
-  <div class="bg-glow pointer-events-none fixed inset-0 -z-10" aria-hidden="true">
-    <span class="glow-a"></span>
-    <span class="glow-b"></span>
-    <span class="glow-cursor"></span>
-  </div>
+  {#if backdrop.value === "light"}
+    <div class="bg-glow pointer-events-none fixed inset-0 -z-10" aria-hidden="true">
+      <span class="glow-a"></span>
+      <span class="glow-b"></span>
+      <span class="glow-cursor"></span>
+    </div>
+  {:else if backdrop.value !== "off"}
+    <Sky mode={backdrop.value} />
+  {/if}
   <svg class="bg-grain pointer-events-none fixed inset-0 -z-10 h-full w-full" aria-hidden="true" focusable="false">
     <defs>
       <filter id="wk-grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">

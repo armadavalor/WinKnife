@@ -8,7 +8,7 @@
   Running bars always carry a little motion so slow work does not read as
   frozen (Polish item 5): a sliding segment when the total is unknown, a
   drifting stripe when it is known. The motion lives in app.css and stops under
-  `prefers-reduced-motion` or `data-animations="off"` on <html>.
+  `data-animations="off"` on <html>.
 -->
 <script lang="ts">
   import { clampPct, progressMode } from "$lib/progress/mode";

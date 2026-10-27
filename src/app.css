@@ -326,8 +326,8 @@ body {
 
 /*
  * Progress motion (Polish item 5). A running bar moves so slow work does not
- * read as frozen. Off under prefers-reduced-motion and when the animations
- * switch (Polish item 8) sets data-animations="off" on <html>.
+ * read as frozen. Off when the animations preference (Polish item 8, which
+ * follows prefers-reduced-motion unless set to On) sets data-animations="off" on <html>.
  */
 @keyframes progress-slide {
   from {
@@ -363,18 +363,6 @@ body {
   );
   background-size: 2rem 100%;
   animation: progress-stripe 0.9s linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .progress-slide,
-  .progress-stripe {
-    animation: none;
-  }
-  /* Without motion a sliding third would look like a stuck value. */
-  .progress-slide {
-    width: 100%;
-    opacity: 0.5;
-  }
 }
 
 :root[data-animations="off"] .progress-slide,

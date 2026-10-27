@@ -2863,3 +2863,23 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
   too.
 - **Decisions.** K-032. HEIC/JXL, thumbnails and a threshold setting deferred
   (DECISIONS-NEEDED).
+
+## Animation preference (system/on/off) and Bliss backdrop
+
+- **Bug.** WebView2 reports `prefers-reduced-motion: reduce` when Windows
+  "show animations" is off, and `app.css` honoured that unconditionally, so
+  animations stayed still on such PCs even with the setting "on". The media
+  query is gone; CSS binds only to `<html data-animations>`. The pref is now
+  `system` (default, follows the OS) / `on` (ignores the OS) / `off`; a legacy
+  saved "on" migrates to `system`. Settings shows a 3-way selector and a hint
+  when the OS reduces motion and System is selected. K-033.
+- **Backdrop.** `Sky.svelte`: one `<canvas>`, procedural clouds over a green
+  hill as a halftone dot raster or ASCII (glyph atlas + `drawImage`), 2
+  parallax cloud layers, 20 fps cap, paused while hidden, one still frame when
+  animations are off, dark and light palettes, drawn at reduced strength so
+  text contrast is unchanged. Settings: Background Halftone / ASCII / Soft
+  light (old glow) / Off (`winknife.backdrop`). Tone math in `sky.ts` (tested).
+- **CPU.** rAF does not tick in the dev browser pane, so this is a replica
+  estimate on a software canvas (conservative): ~4.4 ms/frame halftone at
+  1280x800 (~9% of one core at 20 fps); ASCII ~16 ms worst case. Not measured
+  in the packaged app.
