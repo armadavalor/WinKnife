@@ -2899,3 +2899,9 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
   hidden (`hiddenModules`) still do not render. `winknife.sidebarCategory` is no
   longer read.
 - **e2e.** Headers keep `data-tools`; QA/demo scripts click `nav button[data-tools~=…]`.
+
+## 2026-10-27 — Bliss backdrop: feedback round
+
+- **Clouds.** Puffier cumulus (bigger banks, per-kind alpha: sky 0.3 / cloud 0.6 / hill 0.5, ASCII x1.5), darker dark-theme sky for contrast. Loop/density tests added to `sky.test.ts`.
+- **Sidebar.** Frosted (`bg-surface-1/70 backdrop-blur-xl`) so the backdrop runs underneath; nav pills are solid on hover and active. Bigger logo (48 px), "Restart as admin" is a bordered button, Standard/Admin badge kept.
+- **Dashboard.** Disk-free chips use the card surface (`bg-surface-1` + border).

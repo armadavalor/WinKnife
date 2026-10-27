@@ -15,8 +15,10 @@
   const CELL_ASCII = 14; // fewer, larger glyphs: drawImage per cell dominates the cost
   const FRAME_MS = 1000 / 20; // clouds drift slowly; 20 fps reads smooth and halves the cost
   const STILL_T = 40; // where the clouds sit in the still frame
-  // Calm content area: the whole sky is drawn at reduced strength.
-  const STRENGTH = 0.32;
+  // Clouds carry the picture; the sky between them stays quiet so cards read on top.
+  const ALPHA: Record<CellKind, number> = { sky: 0.3, cloud: 0.6, hill: 0.5 };
+  // Thin glyphs carry less ink than dots, so ASCII needs more strength to read.
+  const ASCII_BOOST = 1.5;
 
   interface Palette {
     ground: string;
@@ -24,7 +26,7 @@
     cloud: string;
     hill: string;
   }
-  const DARK: Palette = { ground: "#0a1424", sky: "#3f78b8", cloud: "#f1e8cf", hill: "#4c9a47" };
+  const DARK: Palette = { ground: "#0a1424", sky: "#2f5f9c", cloud: "#f1e8cf", hill: "#4c9a47" };
   const LIGHT: Palette = { ground: "#d6e8f7", sky: "#6aa6dc", cloud: "#ffffff", hill: "#4f9f4b" };
 
   let canvas: HTMLCanvasElement;
@@ -72,8 +74,7 @@
     ctx.globalAlpha = 1;
     ctx.fillStyle = palette.ground;
     ctx.fillRect(0, 0, width, height);
-    // Thin glyphs carry less ink than dots, so ASCII needs more strength to read.
-    ctx.globalAlpha = mode === "ascii" ? STRENGTH * 1.9 : STRENGTH;
+    const boost = mode === "ascii" ? ASCII_BOOST : 1;
 
     const cell = cellSize();
     const cols = Math.ceil(width / cell);
@@ -90,6 +91,7 @@
       for (let c = 0; c < cols; c++) {
         const tone = toneAt((c + 0.5) / cols, ny, aspect, t);
         if (tone.b <= 0.02) continue;
+        ctx.globalAlpha = Math.min(1, ALPHA[tone.kind] * boost);
         const cx = c * cell + cell / 2;
         const cy = r * cell + cell / 2;
         if (ascii) {

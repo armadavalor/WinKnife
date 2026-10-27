@@ -113,7 +113,7 @@
       {#each drives as drive (drive.root)}
         <a
           href="/treemap"
-          class="rounded-lg border border-surface-2 px-3 py-2 transition-colors hover:border-accent-soft"
+          class="rounded-xl border border-surface-2 bg-surface-1 px-3 py-2 transition-colors hover:border-accent-soft"
         >
           <span class="font-medium text-ink">{drive.root}</span>
           {formatBytes(drive.freeBytes)} {t("dashboard.free")}

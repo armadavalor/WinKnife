@@ -1,7 +1,7 @@
 /** The procedural sky. Run with `npm run test:ui`. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ASCII_RAMP, PERIOD, cloudDensity, hillTop, isBackdrop, rampChar, toneAt } from "./sky.ts";
+import { ASCII_RAMP, LOOP_SECONDS, PERIOD, cloudDensity, hillTop, isBackdrop, rampChar, toneAt } from "./sky.ts";
 
 test("clouds loop: the field repeats exactly every PERIOD along x", () => {
   for (const [u, v] of [[0.3, 1.1], [2.7, 0.4], [5.55, 3.2]] as const) {
@@ -40,6 +40,39 @@ test("there are clouds somewhere in the sky", () => {
     for (let y = 0; y < 0.6; y += 0.02) if (toneAt(x, y, 1.6, 0).kind === "cloud") clouds++;
   }
   assert.ok(clouds > 20, `clouds=${clouds}`);
+});
+
+test("the drift loops: the sky at t and t + LOOP_SECONDS is the same", () => {
+  for (let x = 0.03; x < 1; x += 0.07) {
+    for (let y = 0.05; y < 0.6; y += 0.07) {
+      const a = toneAt(x, y, 1.6, 12);
+      const b = toneAt(x, y, 1.6, 12 + LOOP_SECONDS);
+      assert.equal(a.kind, b.kind);
+      assert.ok(Math.abs(a.b - b.b) < 1e-6);
+    }
+  }
+});
+
+test("clouds are dense and bright, with sparse dark sky between", () => {
+  let cloud = 0;
+  let sum = 0;
+  let sky = 0;
+  let skySum = 0;
+  for (let x = 0; x < 1; x += 0.01) {
+    for (let y = 0; y < 0.6; y += 0.01) {
+      const tone = toneAt(x, y, 1.6, 40);
+      if (tone.kind === "cloud") {
+        cloud++;
+        sum += tone.b;
+      } else if (tone.kind === "sky") {
+        sky++;
+        skySum += tone.b;
+      }
+    }
+  }
+  assert.ok(cloud / (cloud + sky) > 0.12, "clouds cover a visible share of the sky");
+  assert.ok(sum / cloud > 0.5, "cloud fill is dense");
+  assert.ok(skySum / sky < 0.3, "sky between clouds stays dark");
 });
 
 test("the ascii ramp runs from blank to densest", () => {

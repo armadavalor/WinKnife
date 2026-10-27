@@ -101,7 +101,7 @@
 </script>
 
 <nav
-  class="flex w-60 shrink-0 flex-col gap-6 overflow-y-auto border-r border-surface-2 bg-surface-1 p-4"
+  class="flex w-60 shrink-0 flex-col gap-6 overflow-y-auto border-r border-surface-2 bg-surface-1/70 p-4 backdrop-blur-xl"
   aria-label={t("nav.tools")}
 >
   <a
@@ -109,9 +109,9 @@
     class="group flex items-center gap-3 rounded-lg px-1 py-1 outline-none focus-visible:outline-2 focus-visible:outline-accent"
     aria-label={t("app.name")}
   >
-    <KnifeLogo size={32} {loading} />
+    <KnifeLogo size={48} {loading} />
     <div class="min-w-0 leading-tight">
-      <p class="truncate text-base font-semibold tracking-tight text-ink">
+      <p class="truncate text-lg font-semibold tracking-tight text-ink">
         {t("app.name")}
       </p>
       {#if version}
@@ -138,7 +138,7 @@
       {#if !elevation.elevated}
         <button
           type="button"
-          class="rounded-md px-1.5 py-0.5 text-[0.7rem] text-ink-muted outline-none hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60"
+          class="rounded-md px-1.5 py-0.5 text-[0.7rem] text-ink-muted outline-none hover:bg-surface-2 hover:text-ink hover:shadow-sm focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60"
           disabled={elevation.busy}
           onclick={() => void elevation.restart(page.url.pathname)}
         >
@@ -153,8 +153,8 @@
       <a
         href="/dashboard"
         class="{linkClass} {isActive('/dashboard')
-          ? 'bg-surface-3 text-ink'
-          : 'text-ink-muted hover:bg-surface-2 hover:text-ink'}"
+          ? 'bg-surface-3 text-ink shadow-sm'
+          : 'text-ink-muted hover:bg-surface-2 hover:text-ink hover:shadow-sm'}"
         aria-current={isActive("/dashboard") ? "page" : undefined}
       >
         <ModuleIcon name="dashboard" />
@@ -185,7 +185,7 @@
               aria-expanded={isOpen}
               aria-controls="sidebar-tools-{group.category}"
               data-tools={group.modules.map((m) => m.id).join(" ")}
-              class="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted outline-none transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              class="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted outline-none transition-colors hover:bg-surface-2 hover:text-ink hover:shadow-sm focus-visible:outline-2 focus-visible:outline-accent"
               onclick={() => setOpen(group.category, !isOpen)}
             >
               <Icon
@@ -206,8 +206,8 @@
                     <a
                       {href}
                       class="{linkClass} {isActive(href)
-                        ? 'bg-surface-3 text-ink'
-                        : 'text-ink-muted hover:bg-surface-2 hover:text-ink'}"
+                        ? 'bg-surface-3 text-ink shadow-sm'
+                        : 'text-ink-muted hover:bg-surface-2 hover:text-ink hover:shadow-sm'}"
                       aria-current={isActive(href) ? "page" : undefined}
                     >
                       <ModuleIcon name={module.icon} />
@@ -227,8 +227,8 @@
     <a
       href="/settings"
       class="{linkClass} {isActive('/settings')
-        ? 'bg-surface-3 text-ink'
-        : 'text-ink-muted hover:bg-surface-2 hover:text-ink'}"
+        ? 'bg-surface-3 text-ink shadow-sm'
+        : 'text-ink-muted hover:bg-surface-2 hover:text-ink hover:shadow-sm'}"
       aria-current={isActive("/settings") ? "page" : undefined}
     >
       <ModuleIcon name="settings" />
@@ -237,7 +237,7 @@
 
     <button
       type="button"
-      class="{linkClass} w-full text-ink-muted hover:bg-surface-2 hover:text-ink"
+      class="{linkClass} w-full text-ink-muted hover:bg-surface-2 hover:text-ink hover:shadow-sm"
       onclick={() => onopenquarantine?.()}
     >
       <ModuleIcon name="shield" />
