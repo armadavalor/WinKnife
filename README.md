@@ -6,7 +6,7 @@
 
 ### 20+ Windows tools and more to come. Fast, reliable, easy to use.
 
-Clean disks, hunt duplicates, tame startup, unlock files, tweak Windows, and undo all of it.<br>
+Clean disks, hunt duplicates, tame startup, unlock files, tweak Windows, did a mistake? undo all of it with just a click.<br>
 Every finding comes with a reason. Every removal goes to quarantine first.
 
 [![CI](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml/badge.svg)](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml)
