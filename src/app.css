@@ -99,6 +99,38 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Thin themed scrollbars. WebView2 (Chromium) takes the ::-webkit-scrollbar
+   rules, which allow a hover state; the standard properties are only the
+   fallback, because Chromium ignores the pseudo-elements once they are set. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--color-ink) 22%, transparent);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--color-ink) 45%, transparent);
+  background-clip: content-box;
+}
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--color-ink) 30%, transparent) transparent;
+  }
+}
+
 /* Keyboard focus stays visible everywhere; pointer focus does not. */
 :focus-visible {
   outline: 2px solid var(--color-accent);
