@@ -4,7 +4,7 @@
 
 # WinKnife
 
-### 20 Windows tools. One window. Nothing deleted without your yes.
+### 20+ Windows tools and more to come. Fast, reliable, easy to use.
 
 Clean disks, hunt duplicates, tame startup, unlock files, tweak Windows, and undo all of it.<br>
 Every finding comes with a reason. Every removal goes to quarantine first.
