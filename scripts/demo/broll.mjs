@@ -125,6 +125,14 @@ async function main() {
     deviceScaleFactor: SCALE,
     mobile: false,
   });
+  // Stills go over the backdrop that demo/ animates, so capture without it:
+  // transparent page, Sky canvas and glow hidden, panels keep their alpha.
+  await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } });
+  await evaluate(`(() => {
+    const s = document.createElement("style");
+    s.textContent = "html,body{background:transparent!important}canvas.fixed.-z-10,.bg-glow{display:none!important}";
+    document.head.append(s);
+  })()`);
   await waitFor('a[href="/settings"]');
   await goTo("dashboard");
   await sleep(2500);
