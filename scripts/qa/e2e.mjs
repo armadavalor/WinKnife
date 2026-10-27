@@ -106,6 +106,12 @@ async function evaluate(expression) {
   return res.result.value;
 }
 
+// The animated backdrop is on by default and starves a shared CI runner's WebView;
+// the tests are about behaviour, so run them with animations off.
+await evaluate(`localStorage.setItem("winknife.motion", "off")`);
+await cdp.send("Page.reload", {});
+await new Promise((r) => setTimeout(r, 3000));
+
 // Visible element lookup by selector + text. Re-installed after every
 // navigation check, since a full reload would drop it.
 const HELPERS = `
