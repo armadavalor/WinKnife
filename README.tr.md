@@ -6,7 +6,7 @@
 
 ### Sürekli güncellenen 20+ Windows aracı. Hızlı, güvenilir, kullanımı kolay.
 
-Diskleri temizleyin, yinelenen dosyaları bulun, başlangıç öğelerini düzenleyin, dosyaların kilidini açın, Windows'u özelleştirin ve tüm bu değişiklikleri geri alın.
+Diskleri temizleyin, yinelenen dosyaları bulun, başlangıç öğelerini düzenleyin, dosyaların kilidini açın, Windows'u özelleştirin, hata olursa tek tıkta geri alın.
 Her bulgunun bir nedeni vardır. Kaldırılan her dosya önce karantinaya alınır.
 
 [![CI](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml/badge.svg)](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml)
