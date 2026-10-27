@@ -111,8 +111,7 @@ jobs:
           if (-not (Test-Path $run)) { New-Item $run | Out-Null }
           foreach ($app in 'CloudSync', 'ChatBridge', 'PhotoHelper', 'GameLauncher') {
             New-Item -ItemType Directory -Force "$progs\$app" | Out-Null
-            Copy-Item "$env:SystemRoot\System32
-otepad.exe" "$progs\$app\$app.exe"
+            Copy-Item "$env:SystemRoot\System32\notepad.exe" "$progs\$app\$app.exe"
             New-ItemProperty -Force $run -Name $app -Value "`"$progs\$app\$app.exe`" --background" | Out-Null
           }
 
