@@ -132,6 +132,10 @@ const LAYERS: readonly Layer[] = [
   },
 ];
 
+/** A puff's rim radius wobbles between these multiples of its nominal radius. */
+const RIM_MIN = 0.92;
+const RIM_MAX = 1.08;
+
 /** Cumulus coverage at one point: 0 outside every puff, up to 1 deep inside one. */
 function puffField(nx: number, ny: number, aspect: number, t: number): { d: number; shade: number } {
   let best = 0;
@@ -146,8 +150,10 @@ function puffField(nx: number, ny: number, aspect: number, t: number): { d: numb
       for (const puff of bank.puffs) {
         const dx = x - puff.dx;
         const dy = ny - puff.cy;
+        // The wobble below never grows the radius past 1.08x, so most puffs are out before the costly noise.
+        if (dx * dx + dy * dy >= puff.r * puff.r * RIM_MAX * RIM_MAX) continue;
         // A slow wobble of the rim makes the edge lumpy rather than a perfect circle.
-        const r = puff.r * (0.92 + 0.16 * cloudDensity(puff.dx * 40 + (3 * dx) / puff.r, puff.cy * 40 + (3 * dy) / puff.r));
+        const r = puff.r * (RIM_MIN + (RIM_MAX - RIM_MIN) * cloudDensity(puff.dx * 40 + (3 * dx) / puff.r, puff.cy * 40 + (3 * dy) / puff.r));
         const dist = Math.sqrt(dx * dx + dy * dy) / r;
         if (dist >= 1) continue;
         const depth = 1 - dist;

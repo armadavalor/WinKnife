@@ -2906,3 +2906,10 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 - **Sidebar.** Frosted (`bg-surface-1/70 backdrop-blur-xl`) so the backdrop runs underneath; nav pills are solid on hover and active. Bigger logo (48 px), "Restart as admin" is a bordered button, Standard/Admin badge kept.
 - **Dashboard.** Disk-free chips use the card surface (`bg-surface-1` + border).
 - **Dashboard simplified.** One frosted hero card (reclaimable, disk-free chips, quarantine, timer only when armed, one "Scan for junk" button) plus a "Recent" row of 6 icon+name tiles (most recently run first, then a default set; hidden tools respected). The all-tools grid is gone (sidebar stays the full list); `StatCard` removed. Error card and retry unchanged. Old `dashboard.action.*`/`status.*` i18n keys are now unused.
+
+## 2026-10-27 — 0.5.0: pinned tools, opacity sliders, backdrop cost
+
+- **Pinned tools.** The dashboard "Recent" row is now "Pinned tools" (`pinnedModules.ts`, store `winknife.pinnedModules`, default six). "+ Add tool" opens a picker; × unpins. Hidden/unknown ids are dropped on read.
+- **Opacity.** `--sidebar-alpha` / `--panel-alpha` on `<html>` (stores `winknife.sidebarOpacity` 70 / `winknife.panelOpacity` 60, clamp 30–100), used by the sidebar and dashboard cards via `bg-surface-1/[var(--…)]`.
+- **Backdrop cost.** Offline 1920x1080 frame: `toneAt` over the 12 px grid 33.2 -> 7.6 ms (puffs outside the max rim radius are rejected before the noise call; output identical). Canvas scale 0.5/1/2 cost the same, so DPR cap unchanged. Loop now also pauses on window blur/hidden. Real GPU % not measured (hidden Browser pane gets no rAF); backdrop-blur re-blur cost unmeasured.
+- Version bumped to 0.5.0 (not tagged).

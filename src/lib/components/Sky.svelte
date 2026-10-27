@@ -131,6 +131,15 @@
     }
   }
 
+  /** An unfocused window holds its last frame (nobody is watching the drift) and picks up where it left off. */
+  function pause(): void {
+    stop();
+  }
+
+  function resume(): void {
+    if (rafId === 0 && ctx && motion.enabled && !document.hidden) rafId = requestAnimationFrame(frame);
+  }
+
   function resize(): void {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     width = canvas.clientWidth;
@@ -155,11 +164,15 @@
     const themeWatch = new MutationObserver(redraw);
     themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     document.addEventListener("visibilitychange", redraw);
+    window.addEventListener("blur", pause);
+    window.addEventListener("focus", resume);
     return () => {
       stop();
       observer.disconnect();
       themeWatch.disconnect();
       document.removeEventListener("visibilitychange", redraw);
+      window.removeEventListener("blur", pause);
+      window.removeEventListener("focus", resume);
     };
   });
 </script>

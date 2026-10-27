@@ -25,6 +25,8 @@
   import Sky from "$lib/components/Sky.svelte";
   import { hiddenModules } from "$lib/stores/hiddenModules.svelte";
   import { visibleModules } from "$lib/hiddenModules";
+  import { pinnedModulesStore } from "$lib/stores/pinnedModules.svelte";
+  import { panelOpacity } from "$lib/stores/panelOpacity.svelte";
   import { motion } from "$lib/stores/motion.svelte";
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
   import { scanStore } from "$lib/stores/scan.svelte";
@@ -47,6 +49,8 @@
     glow.init();
     backdrop.init();
     hiddenModules.init();
+    pinnedModulesStore.init();
+    panelOpacity.init();
     void elevation.init();
     void moduleStore.load();
     void quarantineStore.reload();

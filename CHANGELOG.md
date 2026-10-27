@@ -6,6 +6,20 @@ live in [docs/CHANGELOG-DEV.md](docs/CHANGELOG-DEV.md).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-27
+
+### Added
+- **Pinned tools** — the dashboard shows the tools you pin instead of the last
+  ones you used. Use "+ Add tool" to pin any tool and × to unpin.
+- **Translucency sliders** — Settings → Appearance sets how see-through the
+  sidebar and the frosted dashboard panels are (30–100 %).
+- Cloud backdrop, frosted sidebar and themed scrollbars; animations are on by
+  default on a fresh install.
+
+### Changed
+- The animated backdrops use about 4× less CPU per frame and stand still while
+  the window is not in focus.
+
 ## [0.4.0] — 2026-10-25
 
 ### Added

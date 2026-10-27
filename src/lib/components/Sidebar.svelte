@@ -101,7 +101,7 @@
 </script>
 
 <nav
-  class="flex w-60 shrink-0 flex-col gap-6 overflow-y-auto border-r border-surface-2 bg-surface-1/70 p-4 backdrop-blur-xl"
+  class="flex w-60 shrink-0 flex-col gap-6 overflow-y-auto border-r border-surface-2 bg-surface-1/[var(--sidebar-alpha,70%)] p-4 backdrop-blur-xl"
   aria-label={t("nav.tools")}
 >
   <a

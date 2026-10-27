@@ -7,6 +7,8 @@
   Rust clamps retention and the duplicate size floor, and the page says so.
 -->
 <script lang="ts">
+  import { panelOpacity } from "$lib/stores/panelOpacity.svelte";
+  import { OPACITY_MAX, OPACITY_MIN } from "$lib/panelOpacity";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import LoadingNote from "$lib/components/LoadingNote.svelte";
   import { onMount } from "svelte";
@@ -290,6 +292,46 @@
           </button>
         {/each}
       </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-surface-2 pt-4">
+      <div class="min-w-0">
+        <p class="text-sm text-ink">{t("settings.sidebarOpacityLabel")}</p>
+        <p class="text-xs text-ink-faint">{t("settings.sidebarOpacityHint")}</p>
+      </div>
+      <label class="flex shrink-0 items-center gap-3 text-xs text-ink-muted">
+        <input
+          type="range"
+          min={OPACITY_MIN}
+          max={OPACITY_MAX}
+          step="5"
+          class="w-40 accent-[var(--color-accent)]"
+          aria-label={t("settings.sidebarOpacityLabel")}
+          value={panelOpacity.sidebar}
+          oninput={(e) => panelOpacity.setSidebar(e.currentTarget.valueAsNumber)}
+        />
+        <span class="w-10 text-right tabular-nums">{panelOpacity.sidebar}%</span>
+      </label>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-surface-2 pt-4">
+      <div class="min-w-0">
+        <p class="text-sm text-ink">{t("settings.panelOpacityLabel")}</p>
+        <p class="text-xs text-ink-faint">{t("settings.panelOpacityHint")}</p>
+      </div>
+      <label class="flex shrink-0 items-center gap-3 text-xs text-ink-muted">
+        <input
+          type="range"
+          min={OPACITY_MIN}
+          max={OPACITY_MAX}
+          step="5"
+          class="w-40 accent-[var(--color-accent)]"
+          aria-label={t("settings.panelOpacityLabel")}
+          value={panelOpacity.panel}
+          oninput={(e) => panelOpacity.setPanel(e.currentTarget.valueAsNumber)}
+        />
+        <span class="w-10 text-right tabular-nums">{panelOpacity.panel}%</span>
+      </label>
     </div>
 
     {#if backdrop.value === "light"}
