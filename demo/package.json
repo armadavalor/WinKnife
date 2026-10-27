@@ -1,0 +1,21 @@
+{
+  "name": "winknife-demo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Remotion project that renders the README demo GIF/MP4. Not part of the app or its bundle.",
+  "scripts": {
+    "studio": "remotion studio",
+    "render:mp4": "remotion render src/index.ts Demo out/demo.mp4 --codec=h264",
+    "render:gif": "remotion render src/index.ts Demo out/demo.gif --codec=gif --every-nth-frame=2 --scale=0.75 --number-of-gif-loops=0"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.539",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "remotion": "4.0.539"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.8",
+    "typescript": "5.8.3"
+  }
+}
