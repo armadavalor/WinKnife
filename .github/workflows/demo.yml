@@ -12,15 +12,26 @@ on:
         description: Release version without the leading v
         required: true
         default: "0.4.0"
+      release_run:
+        description: Release workflow run id to take the installer from instead (draft releases)
+        required: false
+        default: ""
+      script:
+        description: "record (GIF frames) or broll (2x stills for demo/)"
+        required: false
+        default: record
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   record:
     runs-on: windows-latest
     env:
       VERSION: ${{ inputs.version || '0.4.0' }}
+      RELEASE_RUN: ${{ inputs.release_run }}
+      SCRIPT: ${{ inputs.script || 'record' }}
       GH_TOKEN: ${{ github.token }}
       DEMO_HOME: C:\Users\Demo
     steps:
@@ -33,7 +44,12 @@ jobs:
       - name: Download, verify and install
         shell: pwsh
         run: |
-          gh release download "v$env:VERSION" -R $env:GITHUB_REPOSITORY -p "*-setup.exe" -p SHA256SUMS.txt -D dl
+          if ($env:RELEASE_RUN) {
+            gh run download $env:RELEASE_RUN -R $env:GITHUB_REPOSITORY -n winknife-release-candidate -D dl
+            Get-ChildItem -Recurse dl -Include *-setup.exe, SHA256SUMS.txt | Where-Object DirectoryName -ne (Resolve-Path dl).Path | Move-Item -Destination dl -Force
+          } else {
+            gh release download "v$env:VERSION" -R $env:GITHUB_REPOSITORY -p "*-setup.exe" -p SHA256SUMS.txt -D dl
+          }
           $exe = Get-ChildItem dl -Filter *-setup.exe | Select-Object -First 1
           $want = (Select-String -Path dl/SHA256SUMS.txt -Pattern $exe.Name).Line.Split(' ')[0]
           $got = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
@@ -71,6 +87,33 @@ jobs:
           Seed "$env:DEMO_HOME\Downloads" 'driver-pack-2025.zip' 388 210
           Seed "$env:DEMO_HOME\Downloads" 'tool-installer-4.0.exe' 92 240
           (Get-ChildItem -Recurse -File $env:DEMO_HOME | Measure-Object Length -Sum).Sum / 1MB
+          # A made-up data drive for the disk map (mapped to W: in the Record step).
+          $d = 'C:\DemoDrive'
+          Seed "$d\Videos\Holiday 2025" 'beach-day.mp4' 1450 120
+          Seed "$d\Videos\Holiday 2025" 'old-town.mp4' 920 118
+          Seed "$d\Videos\Screen recordings" 'talk-rehearsal.mkv' 610 40
+          1..18 | ForEach-Object { Seed "$d\Photos\2025" ('IMG_{0:d4}.jpg' -f (2100 + $_)) (8 + $_ % 9) 200 }
+          1..10 | ForEach-Object { Seed "$d\Photos\RAW" ('DSC0{0:d4}.arw' -f (3400 + $_)) (48 + $_ % 5) 260 }
+          Seed "$d\Games\Starfield Racer" 'assets.pak' 1800 90
+          Seed "$d\Games\Starfield Racer" 'shaders.cache' 340 9
+          Seed "$d\Games\Puzzle Garden" 'content.pak' 420 300
+          Seed "$d\Projects\website" 'node_modules.tar' 260 30
+          Seed "$d\Projects\thesis" 'figures.zip' 180 60
+          Seed "$d\Projects\thesis" 'draft-v7.docx' 6 2
+          1..14 | ForEach-Object { Seed "$d\Music\Albums" ('track-{0:d2}.flac' -f $_) (28 + $_ % 6) 400 }
+          Seed "$d\Backups" 'phone-backup-2025-09.zip' 1100 50
+          Seed "$d\Backups" 'laptop-image.vhdx' 1600 70
+          Seed "$d\Downloads" 'linux-distro.iso' 980 25
+          # Startup entries for the Startup page: copies of a signed system binary
+          # under the demo profile, so each gets a real rating.
+          $progs = "$la\Programs"
+          $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          if (-not (Test-Path $run)) { New-Item $run | Out-Null }
+          foreach ($app in 'CloudSync', 'ChatBridge', 'PhotoHelper', 'GameLauncher') {
+            New-Item -ItemType Directory -Force "$progs\$app" | Out-Null
+            Copy-Item "$env:SystemRoot\System32\notepad.exe" "$progs\$app\$app.exe"
+            New-ItemProperty -Force $run -Name $app -Value "`"$progs\$app\$app.exe`" --background" | Out-Null
+          }
 
       - name: Record
         shell: pwsh
@@ -89,9 +132,10 @@ jobs:
           $key = 'HKLM:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
           New-Item -Force $key | Out-Null
           New-ItemProperty -Force $key -Name 'winknife.exe' -Value '--remote-debugging-port=9222' | Out-Null
+          subst W: C:\DemoDrive
           $p = Start-Process $env:APP -PassThru
           Start-Sleep 10
-          node scripts/demo/record.mjs frames
+          node "scripts/demo/$env:SCRIPT.mjs" frames
           $code = $LASTEXITCODE
           if ($code -ne 0) {
             "app exited: $($p.HasExited) code: $($p.ExitCode)"

@@ -14,7 +14,7 @@ Bir şey değişince: eski dosya `_arsiv/`e, bu tablo güncellenir, KARARLAR'a s
 | Açık/çözülmüş mimar kararları | docs/DECISIONS-NEEDED.md | |
 | Dev changelog / kullanıcı changelog | docs/CHANGELOG-DEV.md / CHANGELOG.md | |
 | Logo kaynağı | assets/logo.png | GitHub varyantı assets/logo-gh.png |
-| Demo GIF/MP4 kaynağı | demo/ (Remotion) | Çıktı `demo/out/` (gitignore); taslak GIF assets/demo-remotion.gif, README henüz bağlanmadı; yeniden üretim demo/README.md |
+| Demo GIF/MP4 kaynağı | demo/ (Remotion) | Çıktı `assets/demo/demo.gif` (README başı) + `assets/demo/demo.mp4` (GIF bağlantısı); ara çıktı `demo/out/` (gitignore); yeniden üretim demo/README.md |
 | Animasyonlu logo | src/lib/components/KnifeLogo.svelte | assets/logo.png'nin vektör çizimi; logo değişirse elle yeniden çizilir |
 | Uygulama ikonları | src-tauri/icons/ , static/favicon.png | `tauri icon assets/logo.png` ile üretilir, elle düzenlenmez |
 | Temizlik kuralları | rules/*.json | Biçim docs/RULES-FORMAT.md |

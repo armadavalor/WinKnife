@@ -11,7 +11,7 @@ a shutdown timer into one window.
 
 [ Türkçe ](README.tr.md)
 
-![Scan, review, clean up into quarantine, then restore everything](assets/demo.gif)
+[![WinKnife in 15 seconds: scan with reasons, quarantine, restore, every tool](assets/demo/demo.gif)](assets/demo/demo.mp4)
 
 **Status:** thirteen tools implemented; current release v0.4.0. Interface in English and Turkish.
 

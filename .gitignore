@@ -36,3 +36,6 @@ ORKESTRA.md
 # Local agent state: personal settings and session transcripts never ship
 /.claude/settings.local.json
 *.jsonl
+
+# Remotion agent skills: installed locally via `npx skills add remotion-dev/skills`, not vendored
+/.claude/skills/remotion-*/

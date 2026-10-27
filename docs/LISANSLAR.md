@@ -6,12 +6,14 @@
 |---|---|---|---|---|
 | Logo + ikonlar | assets/logo.png (proje sahibi) | MIT (repo) | Evet | Çakı + Windows bayrağı, 2026-08-07 |
 | Demo GIF | assets/demo.gif (kendi kaydımız, `demo.yml` + ffmpeg) | MIT (repo) | Evet | v0.2.0, CI runner'da sahte `C:\Users\Demo` profili, 2026-10-14 |
+| README b-roll | assets/demo/demo.gif + demo.mp4 (kendi kaydımız: `demo.yml -f script=broll` kareleri + Remotion) | MIT (repo) | Evet | v0.5.0 taslak sürüm, CI runner sahte `C:\Users\Demo` profili + `W:` sahte sürücü, 2026-10-27 |
 | Tauri v2 (crate + @tauri-apps/*) | tauri.app | MIT / Apache-2.0 | Evet | |
 | Svelte 5 / SvelteKit | svelte.dev | MIT | Evet | |
 | Tailwind CSS 4 | tailwindcss.com | MIT | Evet | |
 | Lucide ikonları (vendored, `src/lib/icons.ts`) | lucide.dev, lucide-static 1.57.0 | ISC (power/chevron-right/info: Feather MIT) | Evet | 2026-10-15 |
 | actions/attest-build-provenance@v3 | github.com/actions/attest-build-provenance | MIT | Evet | release.yml, yalnız CI adımı; 2026-10-24 |
 | image 0.25 (Rust crate) | github.com/image-rs/image | MIT OR Apache-2.0 | Evet | C18 benzer resimler; yalnız jpeg/png/webp/gif özellikleri, 2026-10-26 |
-| Remotion 4.0.539 (`remotion`, `@remotion/cli`) | remotion.dev | Remotion License: ücretsiz bireyler, ≤3 kişilik ekipler ve kâr amacı gütmeyenler için | Hayır (ücretsiz kapsam; ticari kullanımda ücretli) | `demo/` içinde, yalnız dev; uygulama ve Tauri paketine girmez; `free-license` anahtarı; 2026-10-27 |
+| Remotion 4.0.539 (`remotion`, `@remotion/cli`, `@remotion/transitions`, `@remotion/motion-blur`) | remotion.dev | Remotion License: ücretsiz bireyler, ≤3 kişilik ekipler ve kâr amacı gütmeyenler için | Hayır (ücretsiz kapsam; ticari kullanımda ücretli) | `demo/` içinde, yalnız dev; uygulama ve Tauri paketine girmez; `free-license` anahtarı; 2026-10-27 |
 | React 19.1.0 / react-dom (demo/) | react.dev | MIT | Evet | yalnız `demo/`, 2026-10-27 |
 | demo/public/*.png ekran görüntüleri | WinKnife 0.4.0 CI kaydı (sahte `C:\Users\Demo` profili) | Proje lisansı | Evet | gerçek kullanıcı verisi yok; 2026-10-27 |
+| Remotion agent skills (`.claude/skills/remotion-*`) | github.com/remotion-dev/skills | Belirtilmemiş (repoda LICENSE yok, 2026-10-27) | Belirsiz | Yerelde `npx skills add remotion-dev/skills` ile kurulur, repoya vendor edilmez (`.gitignore`); `skills-lock.json` yalnız sürümü kaydeder; uygulamaya, pakete, demo çıktısına girmez; 2026-10-27 |
