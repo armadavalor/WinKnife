@@ -1,17 +1,30 @@
+<div align="center">
+
+<img width="260" height="260" alt="WinKnife logosu" src="https://github.com/user-attachments/assets/02b97ebe-a96e-4508-9b20-208a2db247a1" />
+
 # WinKnife
 
-[English](README.md)
+### 20 Windows aracı. Tek pencere. Sen onaylamadan hiçbir şey silinmez.
 
-Disk temizliği, aynı dosyaları ve boş klasörleri bulma, disk haritası, başlangıç
-uygulamaları, dosya kilidi açıcı, uyanık tutma, geri yükleme noktası ve kapatma
-zamanlayıcısını tek pencerede sunan açık kaynak Windows aracı.
+Diski temizle, kopyaları bul, başlangıcı toparla, kilitli dosyayı aç, Windows ayarlarını değiştir; hepsini geri al.<br>
+Her bulgunun bir gerekçesi var. Her silme önce karantinaya gider.
 
-**Durum:** On üç araç uygulanmış durumda; güncel sürüm v0.4.0. Arayüz İngilizce ve Türkçe.
+[![CI](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml/badge.svg)](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml)
+[![Son sürüm](https://img.shields.io/github/v/release/armadavalor/WinKnife)](https://github.com/armadavalor/WinKnife/releases/latest)
+[![Lisans: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+[**İndir**](https://github.com/armadavalor/WinKnife/releases/latest) · [English](README.md)
+
+[![15 saniyede WinKnife: gerekçeli tarama, karantina, geri yükleme, tüm araçlar](assets/demo/demo.gif)](assets/demo/demo.mp4)
+
+</div>
+
+**Durum:** Yirmi araç uygulanmış durumda; güncel sürüm v0.5.0. Arayüz İngilizce ve Türkçe.
 
 | Araç | İşlev |
 | --- | --- |
 | Disk temizleyici | Önce tarar; nedenleri ve riskleri gösterir. Seçilen dosyaları karantinaya taşır, önceki taramanın özetini gösterir. |
-| Aynı dosyaları bulma | İçeriği aynı olan kopyaları bulur; seçilen kopyalar onayla karantinaya alınır. |
+| Aynı dosyaları bulma | İçeriği aynı dosyaları, aynı içerikli klasörleri ve benzer görselleri bulur; seçilen kopyalar onayla karantinaya alınır. |
 | Disk haritası | Klasörlerin kullandığı alanı gösterir; alt klasörleri incelemeyi sağlar. |
 | Başlangıç uygulamaları | Desteklenen başlangıç girdilerini inceleme, devre dışı bırakma ve geri açma. Etki puanı bir tahmindir. |
 | Kapatma zamanlayıcısı | Kapatma, yeniden başlatma veya uyku; geri sayım, uyarılar ve iptal. |
@@ -19,6 +32,17 @@ zamanlayıcısını tek pencerede sunan açık kaynak Windows aracı.
 | Dosya kilidi açıcı | Bir dosyayı hangi programın açık tuttuğunu gösterir; kapanmasını isteyebilir. |
 | Uyanık tut | Bilgisayarı (isteğe bağlı ekranı da) 24 saate kadar uyanık tutar. Hiçbir şey kaydedilmez. |
 | Geri yükleme noktası | Sistem Koruması durumunu gösterir, geri yükleme noktası oluşturur (UAC istemi). |
+| Eski paneller | 22 klasik Windows aracını tek sayfadan açar; bulunmayanlar devre dışıdır. |
+| Ayarlar (Tweaks) | Geçerli kullanıcı için 27 geri alınabilir Windows ayarı; eski değer saklanır, Geri al onu koyar. |
+| Bağlam menüsü | Sağ tık menüsü girdilerini sahibi ve yayıncısıyla listeler; bir girdiyi geçerli kullanıcı için geri alınabilir şekilde kapatır. |
+| Hosts dosyası | Hosts dosyasını görüntüler ve düzenler; her kayıttan önce yedek ve fark gösterir (UAC istemi). |
+| Kurulu uygulamalar | Win32 ve Store uygulamalarını yayıncı ve imzacıyla listeler (salt okunur); Windows'un Uygulamalar ayarını açar. |
+| Kaldırma kalıntıları | Hiçbir kurulu programın sahiplenmediği uygulama verisi klasörleri; seçilenler karantinaya taşınır. |
+| Büyük dosya arşivleyici | Uzun süredir dokunulmamış büyük dosyaları seçtiğin klasöre ya da sürücüye taşır. |
+| Zamanlı tarama | Uygulama açıkken salt okunur temizleyici taramasını zamanında çalıştırır; otomatik karantina varsayılan olarak kapalı. |
+| Ortam değişkenleri | Kullanıcı ve sistem değişkenlerini listeler; kullanıcı değişkenlerini fark önizlemesi ve Geri al ile düzenler. |
+| Ağ | Hangi işlemin hangi portu dinlediği ya da kullandığı; DNS önbelleğini temizleme. Gerisi salt okunur. |
+| Onarım kiti | Windows'un kendi SFC ve DISM denetimleri, her biri tek tıkla; tam komut önce gösterilir. |
 
 ## Güvenlik ve gizlilik
 

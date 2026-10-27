@@ -1,24 +1,30 @@
+<div align="center">
+
+<img width="260" height="260" alt="WinKnife logo" src="https://github.com/user-attachments/assets/02b97ebe-a96e-4508-9b20-208a2db247a1" />
+
 # WinKnife
 
-<img width="412" height="412" alt="WinKnife Logo gh" src="https://github.com/user-attachments/assets/02b97ebe-a96e-4508-9b20-208a2db247a1" />
+### 20 Windows tools. One window. Nothing deleted without your yes.
+
+Clean disks, hunt duplicates, tame startup, unlock files, tweak Windows, and undo all of it.<br>
+Every finding comes with a reason. Every removal goes to quarantine first.
 
 [![CI](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml/badge.svg)](https://github.com/armadavalor/WinKnife/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/armadavalor/WinKnife)](https://github.com/armadavalor/WinKnife/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A Windows utility that brings disk cleaning, duplicate and empty-folder finding,
-a disk map, startup management, a file unlocker, keep-awake, restore points and
-a shutdown timer into one window.
-
-[ Türkçe ](README.tr.md)
+[**Download**](https://github.com/armadavalor/WinKnife/releases/latest) · [Türkçe](README.tr.md)
 
 [![WinKnife in 15 seconds: scan with reasons, quarantine, restore, every tool](assets/demo/demo.gif)](assets/demo/demo.mp4)
 
-**Status:** thirteen tools implemented; current release v0.4.0. Interface in English and Turkish.
+</div>
+
+**Status:** twenty tools; current release v0.5.0. Interface in English and Turkish.
 
 | Tool | What works |
 | --- | --- |
 | Disk Cleaner | Read-only scans, reasons and risk buckets, selected cleanup through quarantine, previous scan summary. |
-| Duplicate Finder | Byte-identical duplicate detection and review before quarantining selected copies. |
+| Duplicate Finder | Byte-identical files, folders with the same contents and similar images; review before quarantining selected copies. |
 | Disk map | Folder sizes, drill-down and a treemap to investigate disk usage. |
 | Startup | Review login entries, disable and restore supported entries. Impact is estimated, not a measured boot time. |
 | Shutdown Timer | Schedule shutdown, restart or sleep; countdown, warnings and cancellation. |
@@ -30,6 +36,13 @@ a shutdown timer into one window.
 | Tweaks | 27 reversible current-user Windows settings; the old value is saved and Undo restores it. |
 | Context menu | Lists right-click menu entries with owner and publisher; disables an entry for the current user, reversibly. |
 | Hosts File | View and edit the hosts file with a backup and diff before every save (UAC prompt). |
+| Installed Apps | Read-only list of Win32 and Store apps with publisher and signer; opens Windows' own Apps settings. |
+| Uninstall leftovers | App-data folders no installed program claims; selected ones move to quarantine. |
+| Big-File Archiver | Large files untouched for a long time; moves them to a folder or drive you pick. |
+| Scheduled Scan | Runs the read-only cleaner scan on a schedule while the app is open; auto-quarantine is off by default. |
+| Environment Variables | Lists user and system variables; edits user ones with a diff preview and Undo. |
+| Network | Which process listens on or talks to which port; DNS cache flush. Read-only otherwise. |
+| Repair Kit | Windows' own SFC and DISM checks, one click each; the exact command is shown first. |
 
 ## Safety and privacy
 
