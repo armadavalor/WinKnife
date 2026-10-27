@@ -2863,3 +2863,14 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
   too.
 - **Decisions.** K-032. HEIC/JXL, thumbnails and a threshold setting deferred
   (DECISIONS-NEEDED).
+
+## 2026-10-27 — Sidebar accordion
+
+- **Built.** The sidebar's category tabs became a vertical accordion: each
+  category is a `<button aria-expanded aria-controls>` row with a chevron, tools
+  slide open below it (instant when `motion.enabled` is off). Several groups may
+  be open; the set persists in `winknife.sidebarOpenGroups` (try/catch). Opening
+  a tool's route expands its group once per route. Categories whose tools are all
+  hidden (`hiddenModules`) still do not render. `winknife.sidebarCategory` is no
+  longer read.
+- **e2e.** Headers keep `data-tools`; QA/demo scripts click `nav button[data-tools~=…]`.
