@@ -195,8 +195,8 @@ async function click(sel, text, within) {
 async function goTo(route) {
   const tab = `nav button[data-tools~="${route}"]`;
   // The sidebar groups tools in accordions; open the tool's tab first.
-  if (!(await has(`a[href="/${route}"]`)) && (await has(tab))) await click(tab);
-  await click(`a[href="/${route}"]`);
+  if (!(await has(`nav a[href="/${route}"]`)) && (await has(tab))) await click(tab);
+  await click(`nav a[href="/${route}"]`);
   await sleep(SETTLE_MS);
 }
 
