@@ -92,14 +92,14 @@ jobs:
           Seed "$d\Videos\Holiday 2025" 'beach-day.mp4' 1450 120
           Seed "$d\Videos\Holiday 2025" 'old-town.mp4' 920 118
           Seed "$d\Videos\Screen recordings" 'talk-rehearsal.mkv' 610 40
-          1..18 | ForEach-Object { Seed "$d\Photos5" ('IMG_{0:d4}.jpg' -f (2100 + $_)) (8 + $_ % 9) 200 }
+          1..18 | ForEach-Object { Seed "$d\Photos\2025" ('IMG_{0:d4}.jpg' -f (2100 + $_)) (8 + $_ % 9) 200 }
           1..10 | ForEach-Object { Seed "$d\Photos\RAW" ('DSC0{0:d4}.arw' -f (3400 + $_)) (48 + $_ % 5) 260 }
           Seed "$d\Games\Starfield Racer" 'assets.pak' 1800 90
           Seed "$d\Games\Starfield Racer" 'shaders.cache' 340 9
           Seed "$d\Games\Puzzle Garden" 'content.pak' 420 300
           Seed "$d\Projects\website" 'node_modules.tar' 260 30
-          Seed "$d\Projects	hesis" 'figures.zip' 180 60
-          Seed "$d\Projects	hesis" 'draft-v7.docx' 6 2
+          Seed "$d\Projects\thesis" 'figures.zip' 180 60
+          Seed "$d\Projects\thesis" 'draft-v7.docx' 6 2
           1..14 | ForEach-Object { Seed "$d\Music\Albums" ('track-{0:d2}.flac' -f $_) (28 + $_ % 6) 400 }
           Seed "$d\Backups" 'phone-backup-2025-09.zip' 1100 50
           Seed "$d\Backups" 'laptop-image.vhdx' 1600 70
