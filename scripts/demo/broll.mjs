@@ -17,6 +17,11 @@ const STARTUP_TIMEOUT_MS = 90_000;
 const STEP_TIMEOUT_MS = 180_000;
 const SETTLE_MS = 1500;
 const DEMO_DRIVE = process.env.DEMO_DRIVE ?? "W:\\";
+const TOUR = [
+  "startup", "duplicates", "empty-folders", "hosts", "tweaks", "uninstaller", "apps", "network",
+  "env-vars", "context-menu", "scheduled-scan", "archiver", "file-unlocker", "repair",
+  "restore-point", "keep-awake", "shutdown-timer", "legacy-panels", "settings",
+];
 
 const outDir = process.argv[2] ?? "stills";
 mkdirSync(outDir, { recursive: true });
@@ -162,6 +167,20 @@ async function main() {
   await waitFor("main button.btn-primary");
   await sleep(2500);
   await shot("06-treemap");
+
+  // One still per tool for the fast tour; a page that will not open is skipped.
+  for (const route of TOUR) {
+    try {
+      const tab = `nav button[data-tools~="${route}"]`;
+      if (!(await has(`nav a[href="/${route}"]`)) && (await has(tab))) await click(tab);
+      if (!(await has(`nav a[href="/${route}"]`))) throw new Error("not in the sidebar");
+      await goTo(route);
+      await sleep(1500);
+      await shot(`tour-${route}`);
+    } catch (err) {
+      console.error(`tour ${route}: ${err.message}`);
+    }
+  }
 }
 
 try {
