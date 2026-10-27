@@ -2883,3 +2883,14 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
   estimate on a software canvas (conservative): ~4.4 ms/frame halftone at
   1280x800 (~9% of one core at 20 fps); ASCII ~16 ms worst case. Not measured
   in the packaged app.
+
+## 2026-10-27 — Sidebar accordion
+
+- **Built.** The sidebar's category tabs became a vertical accordion: each
+  category is a `<button aria-expanded aria-controls>` row with a chevron, tools
+  slide open below it (instant when `motion.enabled` is off). Several groups may
+  be open; the set persists in `winknife.sidebarOpenGroups` (try/catch). Opening
+  a tool's route expands its group once per route. Categories whose tools are all
+  hidden (`hiddenModules`) still do not render. `winknife.sidebarCategory` is no
+  longer read.
+- **e2e.** Headers keep `data-tools`; QA/demo scripts click `nav button[data-tools~=…]`.
