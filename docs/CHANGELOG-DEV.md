@@ -2864,6 +2864,11 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 - **Decisions.** K-032. HEIC/JXL, thumbnails and a threshold setting deferred
   (DECISIONS-NEEDED).
 
+## 2026-10-27 — Remotion demo projesi
+
+**Built.** `demo/`: ayrı package.json'lu Remotion projesi (4.0.539, sürümler sabit). `npm run render:gif|mp4` → `demo/out/`. 21 sn, 1280x720@30; GIF 960x540@15, 3.8 MB. Çıktı `assets/demo-remotion.gif`.
+**Decisions.** Mevcut `assets/demo.gif`'e dokunulmadı; README'ye bağlanmadı (yeni tasarım onayı bekliyor). Kareler CI `demo.yml` sahte profil hattından; yeniden üretim `demo/README.md`.
+
 ## 2026-10-27 — Sidebar accordion
 
 - **Built.** The sidebar's category tabs became a vertical accordion: each

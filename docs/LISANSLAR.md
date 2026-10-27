@@ -12,3 +12,6 @@
 | Lucide ikonları (vendored, `src/lib/icons.ts`) | lucide.dev, lucide-static 1.57.0 | ISC (power/chevron-right/info: Feather MIT) | Evet | 2026-10-15 |
 | actions/attest-build-provenance@v3 | github.com/actions/attest-build-provenance | MIT | Evet | release.yml, yalnız CI adımı; 2026-10-24 |
 | image 0.25 (Rust crate) | github.com/image-rs/image | MIT OR Apache-2.0 | Evet | C18 benzer resimler; yalnız jpeg/png/webp/gif özellikleri, 2026-10-26 |
+| Remotion 4.0.539 (`remotion`, `@remotion/cli`) | remotion.dev | Remotion License: ücretsiz bireyler, ≤3 kişilik ekipler ve kâr amacı gütmeyenler için | Hayır (ücretsiz kapsam; ticari kullanımda ücretli) | `demo/` içinde, yalnız dev; uygulama ve Tauri paketine girmez; `free-license` anahtarı; 2026-10-27 |
+| React 19.1.0 / react-dom (demo/) | react.dev | MIT | Evet | yalnız `demo/`, 2026-10-27 |
+| demo/public/*.png ekran görüntüleri | WinKnife 0.4.0 CI kaydı (sahte `C:\Users\Demo` profili) | Proje lisansı | Evet | gerçek kullanıcı verisi yok; 2026-10-27 |
