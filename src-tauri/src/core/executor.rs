@@ -51,7 +51,7 @@ use uuid::Uuid;
 use crate::core::brain::Brain;
 use crate::core::error::Result;
 use crate::core::platform::{EnvResolver, RecycleBin, Registry};
-use crate::core::quarantine::Quarantine;
+use crate::core::quarantine::{PendingLedger, Quarantine};
 use crate::core::scanner::CancellationToken;
 use crate::core::types::{
     Action, ExecItemResult, ExecOutcome, ExecReport, Finding, FindingKind, Justification,
@@ -246,6 +246,8 @@ struct BatchState {
     /// What the move of the item being applied wants the user to know,
     /// handed to that item's result and then cleared (follow-up A).
     warnings: Vec<MoveWarning>,
+    /// Ledger rows of moved items, committed a batch at a time (K-039).
+    pending: PendingLedger,
 }
 
 /// Progress callback so the UI can show which item is being handled.
@@ -298,6 +300,11 @@ pub fn execute(
         } else {
             apply_one(unit, env, options, batch, &mut state)
         };
+        if state.pending.is_full() {
+            // A failed commit leaves the moved files' sidecars for the
+            // startup reconcile; the ledger is unusable, so stop here.
+            state.pending.flush(env.db)?;
+        }
         match &outcome {
             ExecOutcome::Succeeded => tracing::info!(
                 batch = %batch,
@@ -338,6 +345,7 @@ pub fn execute(
 
     // A batch id that never received a file would show up as an empty row in
     // the quarantine drawer, so only report one when something actually moved.
+    state.pending.flush(env.db)?;
     let report = ExecReport::from_items(state.moved_anything.then_some(batch), items);
     tracing::info!(
         batch = %batch,
@@ -463,7 +471,7 @@ fn apply_one(
 
     match env
         .quarantine
-        .take_reporting(env.db, batch, &unit.finding.path)
+        .take_deferred(batch, &unit.finding.path, &mut state.pending)
     {
         Ok(taken) => {
             state.moved_anything = true;

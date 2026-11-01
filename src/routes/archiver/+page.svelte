@@ -135,6 +135,14 @@
     >
       <p class="text-sm" role="status">{t("archiver.moving")}</p>
       <ProgressBar label={t("archiver.moving")} pct={null} />
+      <button
+        type="button"
+        class="self-start btn-ghost px-3! py-1.5!"
+        disabled={store.stoppingMove}
+        onclick={() => store.stopMove()}
+      >
+        {store.stoppingMove ? t("archiver.stopping") : t("archiver.stop")}
+      </button>
     </section>
   {:else if store.step === "done" && store.report}
     <section
@@ -144,6 +152,11 @@
       <p class="text-sm text-ink-muted">
         {t("archiver.doneBody", { count: moved, manifest: store.report.manifestPath })}
       </p>
+      {#if store.report.cancelled}
+        <p class="rounded-xl bg-surface-2/60 p-4 text-sm text-ink-muted" role="status">
+          {t("archiver.archiveCancelled")}
+        </p>
+      {/if}
       {#each store.report.items as item (item.findingId)}
         {#if item.outcome === "archived"}
           {#if item.manifestWarning}
@@ -152,6 +165,11 @@
               {item.manifestWarning}
             </p>
           {/if}
+        {:else if item.outcome === "cancelled"}
+          <p class="text-xs text-ink-faint">
+            <span class="font-mono">{truncatePath(item.path, 48)}</span> —
+            {t("archiver.cancelledItem")}
+          </p>
         {:else}
           <p class="text-xs text-ink-faint">
             <span class="font-mono">{truncatePath(item.path, 48)}</span> —
