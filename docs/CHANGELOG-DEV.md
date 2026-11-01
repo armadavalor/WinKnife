@@ -2918,3 +2918,11 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 
 **Built.** 14.5 s looping b-roll at the top of the README: `assets/demo/demo.gif` (640 px, 8 fps, 64 colours, 7.6 MB) linked to `assets/demo/demo.mp4` (1280x720@30, h264, 14.3 MB). Scenes: dashboard, Disk Cleaner with reasons ("Every suggestion says why."), quarantine → restored ("Quarantine first. Restore in one click."), disk map, an 11-tool whip tour with camera motion blur ("Every tool in one place."), end card with the vector knife logo opening and "Fast. Modular. Useful.". The app's Bliss halftone sky (`demo/src/sky.ts`, port of `src/lib/sky.ts`) drifts under everything and loops seamlessly.
 **Decisions.** Stills are 2x transparent CDP captures from `demo.yml -f script=broll` (`scripts/demo/broll.mjs`) on a throwaway runner: fake `C:\Users\Demo` profile and `W:` mapped to `C:\DemoDrive`; no real profile or names in frame (checked). The Remotion GIF codec gave 54 MB (moving halftone), so the GIF is made from the MP4 with Remotion's bundled ffmpeg palettegen (`demo/README.md`); `render:gif` script removed. Draft `assets/demo-remotion.gif` removed; old `assets/demo.gif` (GIF 1, DEMO-SCRIPT) kept but no longer in the README.
+
+## 2026-11-01 — K-037: translatable brain/cleaner reasons
+
+- **Wire format.** `Recommendation` gains optional `reasonKey` + `reasonParams` (Rust `ReasonKey`/`ReasonParam`, TS mirror). A param is text, a number or a nested key. The English `reason` is always filled and stays the source of truth.
+- **Keys.** `brain.protected` (nested `protected.*`), `brain.leftAlone.*`, `brain.noRule`, `brain.downgraded.*` (rule reason nested as `{rule}`), and `rule.<pack>.<id>` from a new optional `reasonKey` per rule in `rules/*.json` (schema pattern `^rule\.[a-z0-9-]+\.[a-z0-9-]+$`). All 18 shipped rules carry one.
+- **UI.** `src/lib/reason.ts` resolves a key tree; any unknown key (top or nested) falls back to the English `reason`, never to an empty string. `tReason` in `i18n.ts`; `FindingList` uses it. 37 EN + TR entries.
+- **Tests.** `reason.test.ts` (fallbacks); Rust `every_brain_and_cleaner_reason_key_has_an_english_text` checks every emitted key and every rule's `reasonKey` against the `en` table.
+- **Deferred.** Other modules' texts, manifest names, `ExecItemResult` errors and `AppError` codes (DECISIONS-NEEDED, K-022).

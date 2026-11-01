@@ -651,6 +651,7 @@ fn recommend(
         None => Justification::Informational,
     };
 
+    let reason_key = verdict.reason_key;
     match Recommendation::new(
         vec![finding.id],
         verdict.bucket,
@@ -660,7 +661,7 @@ fn recommend(
         savings,
         justification,
     ) {
-        Ok(rec) => Some(rec),
+        Ok(rec) => Some(rec.with_reason_key(reason_key)),
         Err(err) => {
             tracing::error!(
                 path = %finding.path.display(),
@@ -2480,6 +2481,40 @@ mod tests {
         let module = CleanerModule;
         assert_eq!(module.manifest().id, module.id());
         assert_eq!(module.manifest().capabilities, ModuleCapabilities::FULL);
+    }
+
+    #[test]
+    fn every_brain_and_cleaner_reason_key_has_an_english_text() {
+        // K-037: a key missing from the dictionary would show the English fallback forever.
+        let i18n = include_str!("../../../src/lib/i18n.ts");
+        let en = &i18n[i18n.find("const en = {").expect("en table")..];
+        let en = &en[..en.find("} as const;").expect("en table end")];
+        let has = |key: &str| en.contains(&format!("\"{key}\":"));
+
+        let sources = [
+            include_str!("../core/brain/mod.rs"),
+            include_str!("../core/brain/protected.rs"),
+        ];
+        let mut emitted: Vec<String> = sources
+            .iter()
+            .flat_map(|src| src.split('"').skip(1).step_by(2))
+            .filter(|lit| lit.starts_with("brain.") || lit.starts_with("protected."))
+            .map(str::to_owned)
+            .collect();
+        for pack in rules::load_dir(&repo_rules_dir(), &stock_env()).expect("load") {
+            // Packs of other modules: not translated in this round (K-037).
+            if matches!(pack.spec.id.as_str(), "empty-folders" | "uninstaller-leftovers") {
+                continue;
+            }
+            for rule in &pack.spec.rules {
+                let key = rule.reason_key.as_deref();
+                assert!(key.is_some(), "rule {}.{} has no reasonKey", pack.spec.id, rule.id);
+                emitted.extend(key.map(str::to_owned));
+            }
+        }
+        assert!(emitted.len() > 30, "found only {} keys", emitted.len());
+        let missing: Vec<_> = emitted.into_iter().filter(|key| !has(key)).collect();
+        assert!(missing.is_empty(), "keys missing from the en table: {missing:?}");
     }
 
     #[test]

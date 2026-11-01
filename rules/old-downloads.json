@@ -13,6 +13,7 @@
       "match": { "min_age_hours": 4320 },
       "score": { "base": 45, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.old-downloads.untouched-downloads",
       "reason": "Nothing has opened this in your Downloads folder for over 180 days. Downloads are your files, so this is never treated as safe to remove — look before you decide."
     }
   ]

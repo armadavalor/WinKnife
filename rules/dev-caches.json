@@ -13,6 +13,7 @@
       "match": { "min_age_hours": 720 },
       "score": { "base": 60, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.dev-caches.npm-cache",
       "reason": "npm's package cache. Everything here can be downloaded again, but your next install will be slower and will need a network connection."
     },
     {
@@ -21,6 +22,7 @@
       "match": { "min_age_hours": 720 },
       "score": { "base": 60, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.dev-caches.pip-cache",
       "reason": "pip's wheel cache. Everything here can be downloaded again, but your next install will be slower and will need a network connection."
     },
     {
@@ -29,6 +31,7 @@
       "match": { "min_age_hours": 720 },
       "score": { "base": 58, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.dev-caches.cargo-registry-cache",
       "reason": "Cargo's downloaded crate archives. Cargo re-fetches them on the next build that needs them, so this costs build time rather than data."
     },
     {
@@ -37,6 +40,7 @@
       "match": { "min_age_hours": 720 },
       "score": { "base": 55, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.dev-caches.gradle-cache",
       "reason": "Gradle's dependency and build cache. Gradle rebuilds it on the next build, which will take considerably longer than usual."
     }
   ]

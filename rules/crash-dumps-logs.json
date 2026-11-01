@@ -13,6 +13,7 @@
       "match": { "min_age_hours": 24 },
       "score": { "base": 86, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.crash-dumps-logs.crash-dumps",
       "reason": "A crash dump written when a program stopped working. Nothing reads it unless you are debugging that crash."
     },
     {
@@ -24,6 +25,7 @@
       "match": { "min_age_hours": 168 },
       "score": { "base": 86, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.crash-dumps-logs.error-report-archive",
       "reason": "A Windows Error Reporting record for a crash over a week old. It has already been sent or abandoned."
     },
     {
@@ -32,6 +34,7 @@
       "match": { "min_age_hours": 168, "extensions": ["dmp", "mdmp", "hdmp"] },
       "score": { "base": 55, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.crash-dumps-logs.stray-memory-dumps",
       "reason": "A memory dump left in your temp folder over a week ago. These are often large, and they are only useful to whoever was diagnosing that crash."
     }
   ]

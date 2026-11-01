@@ -15,7 +15,7 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import RiskBadge from "$lib/components/RiskBadge.svelte";
   import { formatBytes, truncatePath } from "$lib/format";
-  import { t } from "$lib/i18n";
+  import { t, tReason } from "$lib/i18n";
   import { parseCollapsed, sharedText } from "$lib/listTools";
   import {
     findingMeta,
@@ -136,7 +136,7 @@
     const list = [...byPack.values()];
     for (const group of list) {
       // One reason shared by every row is said once, under the header.
-      group.reason = sharedText(group.rows.map((r) => r.recommendation.reason));
+      group.reason = sharedText(group.rows.map((r) => tReason(r.recommendation)));
     }
     return list.sort((a, b) => a.packName.localeCompare(b.packName));
   });
@@ -254,9 +254,9 @@
                   <span
                     class="mt-1 block text-xs leading-relaxed text-ink-muted"
                     class:truncate={!isOpen}
-                    title={row.recommendation.reason}
+                    title={tReason(row.recommendation)}
                   >
-                    {row.recommendation.reason}
+                    {tReason(row.recommendation)}
                   </span>
                 {/if}
               </button>

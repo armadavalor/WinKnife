@@ -8,6 +8,7 @@
 //! These structs are mirrored by hand in `src/lib/types.ts`. Change one,
 //! change the other in the same commit (CONVENTIONS.md).
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -292,9 +293,91 @@ pub struct Recommendation {
     /// The machine-checkable half of `reason`, re-derived by the executor's
     /// fourth gate before anything happens.
     pub justification: Justification,
+    /// Translation key for `reason`. The UI shows the translated text when it
+    /// knows the key and falls back to the English `reason` when it does not,
+    /// so `reason` stays filled either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_key: Option<String>,
+    /// Values for the `{placeholders}` in the `reason_key` text.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub reason_params: BTreeMap<String, ReasonParam>,
+}
+
+/// A translatable reason: a dictionary key plus the values its text needs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasonKey {
+    /// Dictionary key in `src/lib/i18n.ts`.
+    pub key: String,
+    /// Values for the key's `{placeholders}`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, ReasonParam>,
+}
+
+impl ReasonKey {
+    /// A key whose text has no placeholders.
+    pub fn plain(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            params: BTreeMap::new(),
+        }
+    }
+
+    /// Add one placeholder value.
+    #[must_use]
+    pub fn with(mut self, name: &str, value: impl Into<ReasonParam>) -> Self {
+        self.params.insert(name.to_owned(), value.into());
+        self
+    }
+}
+
+/// One placeholder value: literal text, a number, or another translated reason
+/// (composite reasons such as "protected location: {why}").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ReasonParam {
+    /// Shown as-is (paths, program names).
+    Text(String),
+    /// Shown as-is.
+    Number(i64),
+    /// Translated in turn.
+    Reason(ReasonKey),
+}
+
+impl From<String> for ReasonParam {
+    fn from(value: String) -> Self {
+        Self::Text(value)
+    }
+}
+
+impl From<&str> for ReasonParam {
+    fn from(value: &str) -> Self {
+        Self::Text(value.to_owned())
+    }
+}
+
+impl From<i64> for ReasonParam {
+    fn from(value: i64) -> Self {
+        Self::Number(value)
+    }
+}
+
+impl From<ReasonKey> for ReasonParam {
+    fn from(value: ReasonKey) -> Self {
+        Self::Reason(value)
+    }
 }
 
 impl Recommendation {
+    /// Attach the translation key for `reason`; `None` leaves it untranslated.
+    #[must_use]
+    pub fn with_reason_key(mut self, key: Option<ReasonKey>) -> Self {
+        if let Some(key) = key {
+            self.reason_key = Some(key.key);
+            self.reason_params = key.params;
+        }
+        self
+    }
+
     /// Build a validated recommendation.
     ///
     /// # Errors
@@ -320,6 +403,8 @@ impl Recommendation {
             reason: reason.into(),
             savings_bytes,
             justification,
+            reason_key: None,
+            reason_params: BTreeMap::new(),
         };
         candidate.validate()?;
         Ok(candidate)
@@ -405,6 +490,10 @@ struct RecommendationWire {
     reason: String,
     savings_bytes: u64,
     justification: Justification,
+    #[serde(default)]
+    reason_key: Option<String>,
+    #[serde(default)]
+    reason_params: BTreeMap<String, ReasonParam>,
 }
 
 impl TryFrom<RecommendationWire> for Recommendation {
@@ -420,6 +509,8 @@ impl TryFrom<RecommendationWire> for Recommendation {
             reason: wire.reason,
             savings_bytes: wire.savings_bytes,
             justification: wire.justification,
+            reason_key: wire.reason_key,
+            reason_params: wire.reason_params,
         };
         candidate.validate()?;
         Ok(candidate)

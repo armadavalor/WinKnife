@@ -14,6 +14,7 @@
       "match": { "min_age_hours": 24 },
       "score": { "base": 90, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.windows-temp.user-temp-files",
       "reason": "Temporary file older than 24 hours in your temp folder; applications recreate these as needed."
     },
     {
@@ -23,6 +24,7 @@
       "match": { "min_age_hours": 24 },
       "score": { "base": 90, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.windows-temp.local-app-data-temp",
       "reason": "Temporary file older than 24 hours in the per-user temp folder; safe to remove between sessions."
     }
   ]
