@@ -1,4 +1,4 @@
-//! Repair kit (C6): Windows' own SFC and DISM checks, one click each.
+//! Repair kit (C6): Windows' own SFC, DISM, network and Windows Update repair tools, one click each.
 //!
 //! Nothing runs until the user clicks a tool, and the page shows the exact
 //! command first. The checks (`CheckHealth`, `ScanHealth`,
@@ -29,7 +29,51 @@ const DISM_EXIT_RESTART: i32 = 3010;
 /// DISM: `CBS_E_SOURCE_MISSING` (0x800F081F), no repair source was found.
 const DISM_EXIT_SOURCE_MISSING: i32 = 0x800F_081F_u32 as i32;
 
-/// One of the five tools the page offers.
+/// One command of a tool; a tool with several runs them in order.
+#[derive(Debug, Clone, Copy)]
+struct Step {
+    exe: &'static str,
+    args: &'static [&'static str],
+    /// Whether a non-zero exit fails the tool. Stopping a service that is
+    /// already stopped exits non-zero and is fine.
+    required: bool,
+}
+
+// A macro, not a fn: `&[Step { .. }]` literals are promoted to `'static`.
+macro_rules! step {
+    ($exe:expr, $args:expr, $required:expr $(,)?) => {
+        Step { exe: $exe, args: $args, required: $required }
+    };
+}
+
+const DISM: &str = "dism.exe";
+
+/// Windows Update reset: stop the services, move the two caches aside (never
+/// delete: Windows rebuilds them and the `.old` copies stay recoverable), start
+/// the services again. `cmd` expands `%SystemRoot%` and `%RANDOM%`, so a second
+/// reset gets a fresh name instead of failing on the first one's `.old`.
+const WU_RESET: &[Step] = &[
+    step!("net.exe", &["stop", "wuauserv"], false),
+    step!("net.exe", &["stop", "cryptSvc"], false),
+    step!("net.exe", &["stop", "bits"], false),
+    step!("net.exe", &["stop", "msiserver"], false),
+    step!(
+        "cmd.exe",
+        &["/c", "ren", "%SystemRoot%\\SoftwareDistribution", "SoftwareDistribution.%RANDOM%.old"],
+        true,
+    ),
+    step!(
+        "cmd.exe",
+        &["/c", "ren", "%SystemRoot%\\System32\\catroot2", "catroot2.%RANDOM%.old"],
+        true,
+    ),
+    step!("net.exe", &["start", "wuauserv"], true),
+    step!("net.exe", &["start", "cryptSvc"], true),
+    step!("net.exe", &["start", "bits"], true),
+    step!("net.exe", &["start", "msiserver"], true),
+];
+
+/// One of the eight tools the page offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RepairTool {
@@ -43,16 +87,25 @@ pub enum RepairTool {
     RestoreHealth,
     /// `DISM ... /AnalyzeComponentStore`: reports size and cleanup advice.
     AnalyzeComponentStore,
+    /// `ipconfig /flushdns`: empties the DNS resolver cache.
+    FlushDns,
+    /// `netsh winsock reset`: resets the Winsock catalog (restart needed).
+    WinsockReset,
+    /// Stops the update services, renames the two update caches, restarts them.
+    ResetWindowsUpdate,
 }
 
 impl RepairTool {
     /// Every tool, in page order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 8] = [
         Self::CheckHealth,
         Self::ScanHealth,
         Self::RestoreHealth,
         Self::Sfc,
         Self::AnalyzeComponentStore,
+        Self::FlushDns,
+        Self::WinsockReset,
+        Self::ResetWindowsUpdate,
     ];
 
     fn id(self) -> &'static str {
@@ -62,35 +115,57 @@ impl RepairTool {
             Self::ScanHealth => "scan-health",
             Self::RestoreHealth => "restore-health",
             Self::AnalyzeComponentStore => "analyze-component-store",
+            Self::FlushDns => "flush-dns",
+            Self::WinsockReset => "winsock-reset",
+            Self::ResetWindowsUpdate => "reset-windows-update",
         }
     }
 
-    fn exe(self) -> &'static str {
+    fn steps(self) -> &'static [Step] {
         match self {
-            Self::Sfc => "sfc.exe",
-            _ => "dism.exe",
+            Self::Sfc => &[step!("sfc.exe", &["/scannow"], true)],
+            Self::CheckHealth => &[step!(DISM, &["/Online", "/Cleanup-Image", "/CheckHealth"], true)],
+            Self::ScanHealth => &[step!(DISM, &["/Online", "/Cleanup-Image", "/ScanHealth"], true)],
+            Self::RestoreHealth => &[step!(DISM, &["/Online", "/Cleanup-Image", "/RestoreHealth"], true)],
+            Self::AnalyzeComponentStore => {
+                &[step!(DISM, &["/Online", "/Cleanup-Image", "/AnalyzeComponentStore"], true)]
+            }
+            Self::FlushDns => &[step!("ipconfig.exe", &["/flushdns"], true)],
+            Self::WinsockReset => &[step!("netsh.exe", &["winsock", "reset"], true)],
+            Self::ResetWindowsUpdate => WU_RESET,
         }
     }
 
-    fn args(self) -> &'static [&'static str] {
-        match self {
-            Self::Sfc => &["/scannow"],
-            Self::CheckHealth => &["/Online", "/Cleanup-Image", "/CheckHealth"],
-            Self::ScanHealth => &["/Online", "/Cleanup-Image", "/ScanHealth"],
-            Self::RestoreHealth => &["/Online", "/Cleanup-Image", "/RestoreHealth"],
-            Self::AnalyzeComponentStore => &["/Online", "/Cleanup-Image", "/AnalyzeComponentStore"],
-        }
-    }
-
-    /// The command line exactly as run, for the page and the log.
+    /// The command line exactly as run, for the page and the log. A tool with
+    /// several commands lists them joined by `&&`.
     pub fn command_line(self) -> String {
-        let name = if self == Self::Sfc { "sfc" } else { "DISM" };
-        format!("{name} {}", self.args().join(" "))
+        self.steps()
+            .iter()
+            .map(|s| {
+                let name = if s.exe == DISM { "DISM" } else { s.exe.trim_end_matches(".exe") };
+                format!("{name} {}", s.args.join(" "))
+            })
+            .collect::<Vec<_>>()
+            .join(" && ")
     }
 
-    /// Whether the tool changes system files and needs a confirm first.
+    /// Whether the tool changes the system and needs a confirm first.
     pub fn needs_confirm(self) -> bool {
-        matches!(self, Self::Sfc | Self::RestoreHealth)
+        matches!(
+            self,
+            Self::Sfc | Self::RestoreHealth | Self::WinsockReset | Self::ResetWindowsUpdate
+        )
+    }
+
+    /// Whether the tool may download from Windows Update (DISM's online
+    /// repair); the page labels it. Nothing else here uses the network.
+    pub fn uses_windows_update(self) -> bool {
+        self == Self::RestoreHealth
+    }
+
+    /// The network and update resets succeed on exit code 0 alone.
+    fn is_reset(self) -> bool {
+        matches!(self, Self::FlushDns | Self::WinsockReset | Self::ResetWindowsUpdate)
     }
 }
 
@@ -104,6 +179,8 @@ pub struct RepairToolInfo {
     pub command: String,
     /// Whether the UI must confirm before running it.
     pub needs_confirm: bool,
+    /// Whether it may download repair files from Windows Update.
+    pub uses_windows_update: bool,
 }
 
 /// What a finished run found, in one line.
@@ -128,6 +205,8 @@ pub enum Verdict {
     Failed,
     /// The user cancelled the run.
     Cancelled,
+    /// A reset or flush finished without error.
+    Done,
     /// Finished, but the output was not recognised: see the log.
     Unknown,
 }
@@ -161,6 +240,9 @@ pub fn verdict(tool: RepairTool, transcript: &str, exit_code: Option<i32>) -> Ve
     let Some(code) = exit_code else {
         return Verdict::Cancelled;
     };
+    if tool.is_reset() {
+        return if code == 0 { Verdict::Done } else { Verdict::Failed };
+    }
     let text = transcript.to_lowercase();
     if let Some((_, found)) = PATTERNS.iter().find(|(pattern, _)| text.contains(pattern)) {
         return *found;
@@ -297,6 +379,7 @@ impl RepairService {
                 tool,
                 command: tool.command_line(),
                 needs_confirm: tool.needs_confirm(),
+                uses_windows_update: tool.uses_windows_update(),
             })
             .collect()
     }
@@ -330,15 +413,31 @@ impl RepairService {
                 progress,
             });
         };
-        let result = self.runner.run(tool.exe(), tool.args(), &cancel, &mut |text| {
-            for (line, progress) in splitter.push(text) {
-                deliver(line, progress);
+        // First failing required step's code wins; later steps still run so a
+        // failed rename never leaves the update services stopped.
+        let mut exit_code = Some(0);
+        for step in tool.steps() {
+            let args = step.args.join(" ");
+            deliver(format!("> {} {args}", step.exe), false);
+            let result = self.runner.run(step.exe, step.args, &cancel, &mut |text| {
+                for (line, progress) in splitter.push(text) {
+                    deliver(line, progress);
+                }
+            });
+            if let Some(line) = splitter.finish() {
+                deliver(line, false);
             }
-        });
-        if let Some(line) = splitter.finish() {
-            deliver(line, false);
+            match result? {
+                _ if cancel.is_cancelled() => {
+                    exit_code = None;
+                    break;
+                }
+                Some(code) if code != 0 && step.required && exit_code == Some(0) => {
+                    exit_code = Some(code);
+                }
+                _ => {}
+            }
         }
-        let exit_code = result?.filter(|_| !cancel.is_cancelled());
         let verdict = verdict(tool, &transcript.text(), exit_code);
         let log_path = self
             .write_log(tool, started, &transcript, exit_code, verdict)
@@ -412,7 +511,7 @@ impl ToolModule for RepairModule {
         ModuleManifest {
             id: self.id().to_owned(),
             name: "Repair Kit".to_owned(),
-            description: "Runs Windows' own SFC and DISM checks when you ask, and says what they found."
+            description: "Runs Windows' own SFC, DISM, network and Windows Update repair tools when you ask, and says what they found."
                 .to_owned(),
             icon: "wrench".to_owned(),
             category: ModuleCategory::System,
@@ -553,12 +652,50 @@ mod tests {
     }
 
     #[test]
-    fn only_the_two_repairing_tools_need_a_confirm() {
+    fn only_the_changing_tools_need_a_confirm() {
         let confirmed: Vec<_> = RepairService::tools()
             .into_iter()
             .filter(|t| t.needs_confirm)
-            .map(|t| t.command)
+            .map(|t| t.tool.id())
             .collect();
-        assert_eq!(confirmed, ["DISM /Online /Cleanup-Image /RestoreHealth", "sfc /scannow"]);
+        assert_eq!(confirmed, ["restore-health", "sfc", "winsock-reset", "reset-windows-update"]);
+    }
+
+    #[test]
+    fn only_restore_health_may_use_windows_update() {
+        let online: Vec<_> = RepairTool::ALL.into_iter().filter(|t| t.uses_windows_update()).collect();
+        assert_eq!(online, [RepairTool::RestoreHealth]);
+    }
+
+    #[test]
+    fn the_network_tools_show_their_exact_commands() {
+        assert_eq!(RepairTool::FlushDns.command_line(), "ipconfig /flushdns");
+        assert_eq!(RepairTool::WinsockReset.command_line(), "netsh winsock reset");
+        let wu = RepairTool::ResetWindowsUpdate.command_line();
+        assert!(wu.starts_with("net stop wuauserv && "));
+        assert!(wu.contains("ren %SystemRoot%\\SoftwareDistribution SoftwareDistribution."));
+        assert!(wu.ends_with("net start msiserver"));
+        assert!(!wu.contains("del "), "the caches are renamed, never deleted");
+    }
+
+    #[test]
+    fn resets_are_done_on_exit_zero_and_failed_otherwise() {
+        for tool in [RepairTool::FlushDns, RepairTool::WinsockReset, RepairTool::ResetWindowsUpdate] {
+            assert_eq!(verdict(tool, "anything", Some(0)), Verdict::Done);
+            assert_eq!(verdict(tool, "anything", Some(1)), Verdict::Failed);
+            assert_eq!(verdict(tool, "anything", None), Verdict::Cancelled);
+        }
+    }
+
+    #[test]
+    fn a_multi_step_run_prints_every_command_and_ends_done() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut lines = Vec::new();
+        let outcome = service(true, dir.path())
+            .run(RepairTool::ResetWindowsUpdate, &mut |line| lines.push(line.text))
+            .expect("fake run");
+        assert_eq!(outcome.verdict, Verdict::Done);
+        let started = lines.iter().filter(|l| l.starts_with("> ")).count();
+        assert_eq!(started, RepairTool::ResetWindowsUpdate.steps().len());
     }
 }
