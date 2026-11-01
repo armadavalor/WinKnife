@@ -1616,8 +1616,8 @@ pub struct ArchiveReport {
 /// # Errors
 /// Returns an error for an unknown or non-archiver scan, a refused destination,
 /// or a quarantine that is busy.
-#[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri injects four managed states alongside the request and app handle.
+#[tauri::command]
 pub async fn archive_files<R: Runtime>(
     app: AppHandle<R>,
     scan_id: Uuid,
