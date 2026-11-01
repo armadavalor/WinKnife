@@ -159,7 +159,8 @@ impl Brain {
     /// harmless. Prefer [`Brain::path_refusal`], which resolves the path first
     /// and consults this with the answer.
     pub fn protection_reason(&self, path: &Path) -> Option<String> {
-        self.protection_refusal(path, None).map(|refusal| refusal.reason)
+        self.protection_refusal(path, None)
+            .map(|refusal| refusal.reason)
     }
 
     /// [`Brain::protection_reason`] with its i18n key, as a refusal.
