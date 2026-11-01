@@ -2923,7 +2923,7 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 
 **Built.** Off by default. First launch shows a one-time "Notify me when a new version is out?" (Yes enables, No never asks again); Settings has a toggle with a one-line statement of what is contacted. When enabled, at most once per 24 h the backend does one HTTPS GET to the hard-coded `api.github.com/repos/armadavalor/WinKnife/releases/latest` (`core/update_check.rs`, `ureq` + rustls, 10 s timeout, 1 MiB body cap), skips drafts/prereleases, compares semver and, if newer, the shell shows a banner with Download / Later (7 days) / Skip this version. Download opens the stored release URL in the default browser; the URL must start with `https://github.com/armadavalor/WinKnife/releases/` or it is ignored. Failures are logged only.
 **Decisions.** State lives in its own `update-check` settings blob with its own commands, not in `AppSettings` (that struct is tied to profile import/export; a profile must not flip a network setting). The frontend never supplies a URL. Real requests/spawns are gated by `real_os_effects_armed`, so tests never touch the network. README privacy line updated (EN/TR); `about.never.network` already says "unless you turn on an optional feature".
-**Deferred.** No auto-download/install, no signature check of the release (installer is unsigned), no proxy configuration.
+**Deferred.** No proxy configuration. (In-app install was added in the next entry.)
 
 ## 2026-11-01 — In-app update (opt-in reminder + install on click)
 
@@ -2935,3 +2935,7 @@ release page (`html_url` guard kept). Release workflow signs the installer with
 the updater key after SignPath and `package-release.ps1` emits `.sig` and
 `latest.json`. Deferred: first updater release (maintainer), signed-installer
 end-to-end test (needs a real published release).
+
+## 2026-11-01 — Network: reveal process path (#15)
+
+The Network screen (C14) already listed listening ports and connections with PID, process and path, with filter/search. Added the missing "Show in folder" button per row (reuses `reveal_in_explorer`; EN + TR strings). **Deferred:** per-process traffic (the roadmap's second half) needs ETW or per-connection estats (admin, enable-stats); not attempted here.
