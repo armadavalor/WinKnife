@@ -1484,24 +1484,6 @@ pub async fn start_archiver_scan<R: Runtime>(
         let scan_id = Uuid::new_v4();
         let started_at = Utc::now();
         let cancel = cancels.start(scan_id);
-        let mut throttle = ProgressThrottle::new();
-        let mut emit = |seen: u64, current: &Path| {
-            if !throttle.should_emit() {
-                return;
-            }
-            let payload = ScanProgress {
-                scan_id,
-                module: archiver::MODULE_ID.to_owned(),
-                items_scanned: seen,
-                current_path: Some(current.display().to_string()),
-                pct: None,
-                items_total: None,
-            };
-            if let Err(err) = events::emit_scan_progress(&app, &payload) {
-                tracing::debug!(error = %err, "archiver progress event was not delivered");
-            }
-        };
-
         // Name the scan before the walk starts so Stop has an id right away.
         let initial = ScanProgress {
             scan_id,
@@ -1516,17 +1498,43 @@ pub async fn start_archiver_scan<R: Runtime>(
         }
 
         let thresholds = archiver::Thresholds::default();
-        let output = archiver::scan(
-            &archiver::ScanContext {
-                root: &root,
-                protected: services.brain.protected_paths(),
-                cancel: &cancel,
-                thresholds,
-                now: Utc::now(),
-            },
-            Some(&mut emit),
-        );
-        cancels.finish(scan_id);
+        let brain = services.brain.clone();
+        let scan_root = root.clone();
+        let progress_app = app.clone();
+        let work = tauri::async_runtime::spawn_blocking(move || {
+            let mut throttle = ProgressThrottle::new();
+            let mut emit = |seen: u64, current: &Path| {
+                if !throttle.should_emit() {
+                    return;
+                }
+                let payload = ScanProgress {
+                    scan_id,
+                    module: archiver::MODULE_ID.to_owned(),
+                    items_scanned: seen,
+                    current_path: Some(current.display().to_string()),
+                    pct: None,
+                    items_total: None,
+                };
+                if let Err(err) = events::emit_scan_progress(&progress_app, &payload) {
+                    tracing::debug!(error = %err, "archiver progress event was not delivered");
+                }
+            };
+            archiver::scan(
+                &archiver::ScanContext {
+                    root: &scan_root,
+                    protected: brain.protected_paths(),
+                    cancel: &cancel,
+                    thresholds,
+                    now: Utc::now(),
+                },
+                Some(&mut emit),
+            )
+        })
+        .await;
+        let stop_requested = cancels.finish(scan_id);
+        let output = work
+            .map_err(|err| CoreError::Quarantine(format!("archiver scan did not finish: {err}")))?;
+        let cancelled = output.cancelled || stop_requested;
 
         let recommendations = archiver::analyze(&output.findings, &services.brain);
         let total_bytes = output.findings.iter().map(|f| f.size_bytes).sum();
@@ -1536,7 +1544,7 @@ pub async fn start_archiver_scan<R: Runtime>(
             findings: output.findings.clone(),
             recommendations: recommendations.clone(),
             skipped_rules: Vec::new(),
-            cancelled: false,
+            cancelled,
         });
         remember(
             &db,
@@ -1545,7 +1553,7 @@ pub async fn start_archiver_scan<R: Runtime>(
             started_at,
             output.findings.len() as u64,
             total_bytes,
-            output.cancelled,
+            cancelled,
         );
         let _ = events::emit_scan_done(
             &app,
@@ -1562,7 +1570,7 @@ pub async fn start_archiver_scan<R: Runtime>(
             unreadable: output.unreadable,
             skipped_protected: output.skipped_protected,
             entries_seen: output.entries_seen,
-            cancelled: output.cancelled,
+            cancelled,
             findings: output.findings,
             recommendations,
             min_size_bytes: thresholds.min_size_bytes,
@@ -1597,6 +1605,8 @@ pub struct ArchiveReport {
     pub batch_id: Uuid,
     /// One entry per requested finding.
     pub items: Vec<ArchiveItemReport>,
+    /// Whether cancellation stopped the archive before all chosen files moved.
+    pub cancelled: bool,
 }
 
 /// Move chosen archiver findings to `destination`: copy, verify, then send the
@@ -1606,6 +1616,7 @@ pub struct ArchiveReport {
 /// # Errors
 /// Returns an error for an unknown or non-archiver scan, a refused destination,
 /// or a quarantine that is busy.
+#[allow(clippy::too_many_arguments)] // Tauri injects four managed states alongside the request and app handle.
 #[tauri::command]
 pub async fn archive_files<R: Runtime>(
     app: AppHandle<R>,
@@ -1615,6 +1626,7 @@ pub async fn archive_files<R: Runtime>(
     services: State<'_, Services>,
     store: State<'_, ScanStore>,
     db: State<'_, Arc<Database>>,
+    cancels: State<'_, CancelRegistry>,
 ) -> Result<ArchiveReport, ApiError> {
     guarded_async("archive_files", async {
         let scan = store.get(scan_id)?;
@@ -1627,6 +1639,7 @@ pub async fn archive_files<R: Runtime>(
             .findings
             .iter()
             .filter(|f| finding_ids.contains(&f.id))
+            .cloned()
             .collect();
         let Some(first) = chosen.first() else {
             return Err(invalid_input("no files were chosen".to_owned()).into());
@@ -1641,23 +1654,39 @@ pub async fn archive_files<R: Runtime>(
         )
         .map_err(invalid_input)?;
 
-        let _busy = services.quarantine.begin(Operation::Clean)?;
-        let batch_id = services.quarantine.start_batch();
-        let items = chosen
-            .iter()
-            .map(|finding| ArchiveItemReport {
-                finding_id: finding.id,
-                path: finding.path.clone(),
-                outcome: archiver::archive_one(
-                    &services.quarantine,
-                    &**db,
-                    &services.brain,
-                    batch_id,
-                    &finding.path,
-                    &destination,
-                ),
-            })
-            .collect();
+        let quarantine = services.quarantine.clone();
+        let brain = services.brain.clone();
+        let database = Arc::clone(&db);
+        let worker_destination = destination.clone();
+        let cancel = cancels.start(scan_id);
+        let work = tauri::async_runtime::spawn_blocking(move || {
+            let _busy = quarantine.begin(Operation::Clean)?;
+            let batch_id = quarantine.start_batch();
+            let items: Vec<ArchiveItemReport> = chosen
+                .iter()
+                .map(|finding| ArchiveItemReport {
+                    finding_id: finding.id,
+                    path: finding.path.clone(),
+                    outcome: archiver::archive_one(
+                        &quarantine,
+                        &*database,
+                        &brain,
+                        batch_id,
+                        &finding.path,
+                        &worker_destination,
+                        &cancel,
+                    ),
+                })
+                .collect();
+            Ok::<_, CoreError>((batch_id, items))
+        })
+        .await;
+        cancels.finish(scan_id);
+        let (batch_id, items) =
+            work.map_err(|err| CoreError::Quarantine(format!("archive did not finish: {err}")))??;
+        let cancelled = items.iter().any(|item: &ArchiveItemReport| {
+            matches!(item.outcome, archiver::ArchiveOutcome::Cancelled)
+        });
         notify_quarantine_changed(&app, &services, &db, Some(batch_id));
 
         Ok(ArchiveReport {
@@ -1665,6 +1694,7 @@ pub async fn archive_files<R: Runtime>(
             destination,
             batch_id,
             items,
+            cancelled,
         })
     })
     .await
@@ -3604,6 +3634,34 @@ mod tests {
     use crate::core::platform::{EnvResolver, SystemEnv};
     use crate::core::types::{Action, RiskBucket, StartupSource};
     use crate::modules;
+
+    #[test]
+    fn archiver_cancelled_flags_are_serialized_for_the_ui() {
+        let scan = ArchiverScanResult {
+            scan_id: Uuid::nil(),
+            root: PathBuf::from("C:\\data"),
+            findings: Vec::new(),
+            recommendations: Vec::new(),
+            unreadable: 0,
+            skipped_protected: 0,
+            entries_seen: 1,
+            cancelled: true,
+            min_size_bytes: archiver::MIN_SIZE_BYTES,
+            min_age_days: archiver::MIN_AGE_DAYS,
+        };
+        let archive = ArchiveReport {
+            destination: PathBuf::from("D:\\archive"),
+            manifest_path: PathBuf::from("D:\\archive\\manifest.jsonl"),
+            batch_id: Uuid::nil(),
+            items: Vec::new(),
+            cancelled: true,
+        };
+        assert_eq!(serde_json::to_value(scan).expect("scan")["cancelled"], true);
+        assert_eq!(
+            serde_json::to_value(archive).expect("archive")["cancelled"],
+            true
+        );
+    }
 
     /* --- the treemap zoom gate (security review M17) -------------------- */
 

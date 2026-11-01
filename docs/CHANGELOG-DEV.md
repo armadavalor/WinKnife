@@ -2925,6 +2925,14 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 **Decisions.** Reading is free; apply and revert call the shared `NeedsAdmin` check first, so the existing restart-as-admin flow fires. Adapters are read as JSON from `Get-DnsClientServerAddress` (locale-proof); changes use `Set-DnsClientServerAddress`, with `-ResetServerAddresses` for automatic. Servers are parsed as `Ipv4Addr` before they reach a command line. Every change stores the previous servers in `dns-history.json` (app data, 50 entries) before it is applied. No network calls from the module.
 **Deferred.** IPv6 presets, custom servers, DoH. The PowerShell backend is only unit-tested through a fake; not exercised on a live adapter.
 
+## 2026-11-01 — Bulk clean/restore: batched ledger (K-039)
+
+- **Clean.** The executor takes items with `Quarantine::take_deferred` into a `PendingLedger` and writes ledger rows in one transaction per `LEDGER_BATCH_SIZE` (100) items, plus a final flush. No transaction is held across file moves. `PRAGMA synchronous` is unchanged.
+- **Crash safety.** Before each move, the whole item goes to a sidecar `{batch}/.ledger/{id}.json`, removed only after its row commits. At startup, `reconcile_orphans` runs after `recover_interrupted_restores` and before purge. It reads each sidecar and re-adds the row when the row is missing and the quarantined file exists, then drops the sidecar. It is idempotent, never duplicates a committed row, and rejects sidecars whose id, batch folder or path doesn't match. A crash between a move and its flush leaves the file restorable, never lost.
+- **Restore.** Claims (`restored_at`) and releases go in one transaction per 100 items. Cancel, encrypted-refusal and failure paths release their claims as before.
+- **Timings** (`bulk_ledger_bench`, N=2000, local NVMe, release): take 9.47 s → 7.5–8.6 s, restore 8.51 s → 3.2 s. Take is still dominated by the move plus the sidecar write.
+- **Tests.** Flush at 0/1/100/101 items, a chunked 101-item restore, crash then reconcile, reconcile idempotence, committed-row sidecar skipped, restore after reconcile back to the original path.
+
 ---
 
 ## 2026-11-01 — Repair kit: network and Windows Update resets (#17)
@@ -2936,3 +2944,10 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 ## 2026-11-01 — Network: reveal process path (#15)
 
 The Network screen (C14) already listed listening ports and connections with PID, process and path, with filter/search. Added the missing "Show in folder" button per row (reuses `reveal_in_explorer`; EN + TR strings). **Deferred:** per-process traffic (the roadmap's second half) needs ETW or per-connection estats (admin, enable-stats); not attempted here.
+
+## 2026-11-01 — Archiver: cancel during archiving, free-space check
+
+- **Cancel.** The Stop button now works while archiving, not only while scanning. The file being copied stops between chunks; its new, incomplete destination is removed (`Quarantine::discard_incomplete_archive_copy`, only for a file this call created with `create_new`) and the original stays in place. Files already moved stay in the archive. New outcome `cancelled` per item and `cancelled` on `ArchiveReport`; EN+TR strings.
+- **Space.** Before each copy the destination drive's free space is checked; if it is too small, the file is refused before anything is written.
+- Tests: cancel mid-copy keeps the source and drops the target; a copy failure after creation removes only the target; too little space refuses every file; a cancelled scan reports partial results and changes nothing.
+- Local run: 5 symlink tests fail without Developer Mode (loud by design) and `keep_awake` expiry timed out under load; CI decides.
