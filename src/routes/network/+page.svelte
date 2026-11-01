@@ -5,7 +5,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import { hostsFlushDns, networkList } from "$lib/api";
+  import { hostsFlushDns, networkList, revealInExplorer } from "$lib/api";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import ListToolbar from "$lib/components/ListToolbar.svelte";
@@ -186,13 +186,25 @@
                   <p class="mt-1 text-xs leading-relaxed text-ink-muted">{row.reason}</p>
                 </details>
               </div>
+              <div class="flex shrink-0 flex-col gap-1">
+              {#if row.exePath}
+                {@const exe = row.exePath}
+                <button
+                  type="button"
+                  class="btn-ghost px-3! py-1! text-xs"
+                  onclick={() => revealInExplorer(exe).catch((e) => (error = isApiError(e) ? e.message : String(e)))}
+                >
+                  {t("network.reveal")}
+                </button>
+              {/if}
               <button
                 type="button"
-                class="btn-ghost shrink-0 px-3! py-1! text-xs"
+                class="btn-ghost px-3! py-1! text-xs"
                 onclick={() => copy(row)}
               >
                 {copiedKey === keyOf(row) ? t("network.copied") : t("network.copy")}
               </button>
+              </div>
             </li>
           {/each}
         </ul>
