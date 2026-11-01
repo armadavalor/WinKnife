@@ -3296,6 +3296,50 @@ pub async fn network_list() -> Result<Vec<crate::modules::network::PortRow>, Api
 }
 
 /* -------------------------------------------------------------------------
+ * DNS switcher (#16): applying needs admin, every change is revertible.
+ * ---------------------------------------------------------------------- */
+
+/// Up adapters with their DNS servers, plus the changes that can be reverted.
+///
+/// # Errors
+/// Returns an error when the adapters cannot be read.
+#[tauri::command(async)]
+pub fn dns_state(
+    service: State<'_, Arc<crate::modules::dns::DnsService>>,
+) -> Result<crate::modules::dns::DnsState, ApiError> {
+    guarded("dns_state", || service.state().map_err(ApiError::from))
+}
+
+/// Switch one adapter to a preset, remembering what it had.
+///
+/// # Errors
+/// `needs_admin` when not elevated, or an error when the change fails.
+#[tauri::command(async)]
+pub fn dns_apply(
+    service: State<'_, Arc<crate::modules::dns::DnsService>>,
+    index: u32,
+    preset: crate::modules::dns::Preset,
+) -> Result<crate::modules::dns::DnsChange, ApiError> {
+    guarded("dns_apply", || {
+        service.apply(index, preset).map_err(ApiError::from)
+    })
+}
+
+/// Put an adapter's previous DNS servers back.
+///
+/// # Errors
+/// `needs_admin` when not elevated, or an error when nothing is recorded.
+#[tauri::command(async)]
+pub fn dns_revert(
+    service: State<'_, Arc<crate::modules::dns::DnsService>>,
+    index: u32,
+) -> Result<crate::modules::dns::DnsChange, ApiError> {
+    guarded("dns_revert", || {
+        service.revert(index).map_err(ApiError::from)
+    })
+}
+
+/* -------------------------------------------------------------------------
  * Environment variables
  * ---------------------------------------------------------------------- */
 

@@ -37,6 +37,9 @@ import type {
   HostsBackup,
   HostsDocument,
   PortRow,
+  DnsChange,
+  DnsPreset,
+  DnsState,
   HostsPreview,
   HostsSaveOutcome,
   RepairLine,
@@ -631,6 +634,21 @@ export function hostsFlushDns(): Promise<string> {
 /** Listening ports and open connections with their owning process. Read-only. */
 export function networkList(): Promise<PortRow[]> {
   return invoke<PortRow[]>("network_list");
+}
+
+/** Up adapters with their DNS servers, plus the changes that can be reverted. */
+export function dnsState(): Promise<DnsState> {
+  return invoke<DnsState>("dns_state");
+}
+
+/** Switch one adapter to a preset. Needs administrator rights. */
+export function dnsApply(index: number, preset: DnsPreset): Promise<DnsChange> {
+  return invoke<DnsChange>("dns_apply", { index, preset });
+}
+
+/** Put an adapter's previous DNS servers back. */
+export function dnsRevert(index: number): Promise<DnsChange> {
+  return invoke<DnsChange>("dns_revert", { index });
 }
 
 /* -------------------------------------------------------------------------
