@@ -930,8 +930,10 @@ impl Quarantine {
                     continue;
                 }
                 if !claimed {
-                    let err =
-                        CoreError::UnknownQuarantineItem(format!("{} was already restored", item.id));
+                    let err = CoreError::UnknownQuarantineItem(format!(
+                        "{} was already restored",
+                        item.id
+                    ));
                     report.failed.push((item.id, err.to_string()));
                     continue;
                 }
@@ -1466,7 +1468,11 @@ fn release_restores(db: &dyn DbAccess, ids: &[Uuid]) -> Result<()> {
 
 fn sidecar_path(item: &QuarantineItem) -> Option<PathBuf> {
     let batch_dir = item.quarantine_path.parent()?;
-    Some(batch_dir.join(SIDECAR_DIR).join(format!("{}.json", item.id)))
+    Some(
+        batch_dir
+            .join(SIDECAR_DIR)
+            .join(format!("{}.json", item.id)),
+    )
 }
 
 /// Record `item` next to where it is about to land. Not fsynced: a sidecar
@@ -3743,7 +3749,9 @@ mod tests {
             let rows = h.quarantine.items_in_batch(&h.conn, batch).expect("rows");
             assert_eq!(rows.len(), count, "count {count}");
             assert!(
-                items.iter().all(|i| !sidecar_path(i).expect("sidecar").exists()),
+                items
+                    .iter()
+                    .all(|i| !sidecar_path(i).expect("sidecar").exists()),
                 "committed rows leave no sidecar (count {count})"
             );
             assert!(h.quarantine.sidecars().is_empty(), "count {count}");
@@ -3785,10 +3793,17 @@ mod tests {
 
         assert!(!source.exists());
         assert!(item.quarantine_path.exists());
-        assert!(h.quarantine.find_item(&h.conn, item.id).expect("find").is_none());
+        assert!(h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("find")
+            .is_none());
         assert!(sidecar_path(&item).expect("sidecar").exists());
 
-        assert_eq!(h.quarantine.reconcile_orphans(&h.conn).expect("reconcile"), 1);
+        assert_eq!(
+            h.quarantine.reconcile_orphans(&h.conn).expect("reconcile"),
+            1
+        );
         let row = h
             .quarantine
             .find_item(&h.conn, item.id)
@@ -3813,7 +3828,13 @@ mod tests {
 
         assert_eq!(h.quarantine.reconcile_orphans(&h.conn).expect("first"), 1);
         assert_eq!(h.quarantine.reconcile_orphans(&h.conn).expect("second"), 0);
-        assert_eq!(h.quarantine.items_in_batch(&h.conn, batch).expect("rows").len(), 1);
+        assert_eq!(
+            h.quarantine
+                .items_in_batch(&h.conn, batch)
+                .expect("rows")
+                .len(),
+            1
+        );
     }
 
     /// A sidecar whose row did commit (crash between commit and sidecar
@@ -3831,8 +3852,17 @@ mod tests {
             .item;
         insert_item(&h.conn, &item).expect("row commits, sidecar left behind");
 
-        assert_eq!(h.quarantine.reconcile_orphans(&h.conn).expect("reconcile"), 0);
-        assert_eq!(h.quarantine.items_in_batch(&h.conn, batch).expect("rows").len(), 1);
+        assert_eq!(
+            h.quarantine.reconcile_orphans(&h.conn).expect("reconcile"),
+            0
+        );
+        assert_eq!(
+            h.quarantine
+                .items_in_batch(&h.conn, batch)
+                .expect("rows")
+                .len(),
+            1
+        );
         assert!(!sidecar_path(&item).expect("sidecar").exists());
     }
 
@@ -3850,7 +3880,10 @@ mod tests {
         drop(pending);
         h.quarantine.reconcile_orphans(&h.conn).expect("reconcile");
 
-        let outcome = h.quarantine.restore_item(&h.conn, item.id).expect("restore");
+        let outcome = h
+            .quarantine
+            .restore_item(&h.conn, item.id)
+            .expect("restore");
         assert_eq!(outcome.restored_to, source);
         assert!(!outcome.renamed);
         assert_eq!(fs::read(&source).expect("read"), b"precious");
