@@ -6,6 +6,25 @@ live in [docs/CHANGELOG-DEV.md](docs/CHANGELOG-DEV.md).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-02
+
+### Added
+- **Update reminder** (off by default) — when turned on in Settings, WinKnife
+  checks GitHub once a day and shows a banner. "Update now" downloads the
+  signed installer, verifies it and restarts the app; "Release page" opens
+  the browser instead.
+- **DNS switcher** — pick a DNS provider per network adapter; the previous
+  setting is saved and can be restored.
+- **Repair kit** — network stack and Windows Update reset tools.
+- **Archiver** — archiving can be cancelled, and free space is checked before
+  copying.
+- **Network** — "Show in Explorer" for the process behind a port.
+- Reasons from the scan engine and Cleaner are now translated (Turkish).
+
+### Changed
+- Quarantine writes many items at once in a single batch, so large cleanups
+  finish faster; an interrupted batch is reconciled on next start.
+
 ## [0.5.0] — 2026-10-27
 
 ### Added
@@ -118,6 +137,7 @@ First public release. (0.1.0 was never tagged; its contents ship here.)
 - Content security policy for the app window; unused opener plugin removed.
 - Log folder keeps only the newest 14 daily files.
 
-[Unreleased]: https://github.com/armadavalor/WinKnife/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/armadavalor/WinKnife/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/armadavalor/WinKnife/releases/tag/v0.6.0
 [0.5.0]: https://github.com/armadavalor/WinKnife/releases/tag/v0.5.0
 [0.2.0]: https://github.com/armadavalor/WinKnife/releases/tag/v0.2.0
