@@ -1495,3 +1495,16 @@ export interface ScheduledScanState {
   settings: ScheduledScanSettings;
   lastReport: ScheduledReport | null;
 }
+
+/** A newer release the user has not snoozed or skipped (`core/update_check.rs`). */
+export interface UpdateNotice {
+  version: string;
+  url: string;
+}
+
+export interface UpdateState {
+  enabled: boolean;
+  /** The one-time opt-in question has been answered. */
+  prompted: boolean;
+  notice: UpdateNotice | null;
+}

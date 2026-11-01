@@ -1087,6 +1087,16 @@ const en = {
   "scheduledScan.gone": "This scan is no longer in memory (the app restarted or newer scans replaced it). Run a new scan in the cleaner.",
   "scheduledScan.banner": "Scheduled scan: {safe} safe, {review} to review.",
   "scheduledScan.dismiss": "Dismiss",
+  "update.prompt": "Notify me when a new version of WinKnife is out?",
+  "update.promptYes": "Yes",
+  "update.promptNo": "No",
+  "update.banner": "WinKnife v{version} is available.",
+  "update.download": "Download",
+  "update.later": "Later",
+  "update.skip": "Skip this version",
+  "update.settingsTitle": "Update reminder",
+  "update.settingsLabel": "Tell me when a new version is available",
+  "update.settingsExplain": "About once a day WinKnife asks the GitHub Releases API for armadavalor/WinKnife for the latest version. Nothing is sent except the request itself. It never downloads or installs anything.",
 } as const;
 
 /** Turkish overrides. Missing keys fall back to English. */
@@ -2075,6 +2085,16 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "scheduledScan.gone": "Bu tarama artık bellekte değil (uygulama yeniden başladı ya da yeni taramalar yerini aldı). Temizleyicide yeni bir tarama çalıştır.",
   "scheduledScan.banner": "Zamanlanmış tarama: {safe} güvenli, {review} incelenecek.",
   "scheduledScan.dismiss": "Kapat",
+  "update.prompt": "WinKnife'ın yeni sürümü çıkınca haber verelim mi?",
+  "update.promptYes": "Evet",
+  "update.promptNo": "Hayır",
+  "update.banner": "WinKnife v{version} yayında.",
+  "update.download": "İndir",
+  "update.later": "Sonra",
+  "update.skip": "Bu sürümü atla",
+  "update.settingsTitle": "Güncelleme hatırlatıcısı",
+  "update.settingsLabel": "Yeni sürüm çıkınca haber ver",
+  "update.settingsExplain": "WinKnife günde en fazla bir kez GitHub Releases API'sinden armadavalor/WinKnife'ın son sürümünü sorar. İsteğin kendisi dışında hiçbir şey gönderilmez. Hiçbir şey indirmez veya kurmaz.",
 };
 
 /** Every key the dictionary knows. */

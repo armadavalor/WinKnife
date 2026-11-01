@@ -58,6 +58,8 @@ Mevcut uygulama yerel kurallarla çalışır. İsteğe bağlı LLM desteği plan
 henüz uygulanmamıştır. WinKnife bir kayıt defteri temizleyicisi, sürücü güncelleyici,
 antivirüs ya da FPS artışı vaadi değildir.
 
+**Ağ:** WinKnife başka sistemlere bilgi göndermez. Tek istisna isteğe bağlı güncelleme hatırlatıcısıdır; sen açana kadar kapalıdır. Açıksa günde en fazla bir kez GitHub Releases API'sinden `armadavalor/WinKnife` için son sürümü sorar ve bu isteğin dışında hiçbir şey göndermez. Hiçbir şey indirmez veya kurmaz.
+
 ## Geliştirme ve katkı
 
 Windows, Rust stable/MSVC, Visual Studio C++ Build Tools, Node.js 24 ve WebView2

@@ -1971,6 +1971,130 @@ pub fn reveal_in_explorer(path: PathBuf) -> Result<(), ApiError> {
 }
 
 /* -------------------------------------------------------------------------
+ * Update reminder (opt-in; see core/update_check.rs)
+ * ---------------------------------------------------------------------- */
+
+use crate::core::update_check::{self, UpdateSettings, UpdateState};
+
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn update_load(db: &Database) -> crate::core::error::Result<UpdateSettings> {
+    Ok(db
+        .with(|conn| settings::get_module(conn, update_check::SETTINGS_ID))?
+        .unwrap_or_default())
+}
+
+/// Save `next` and return the view the UI renders.
+fn update_save(db: &Database, next: &UpdateSettings) -> crate::core::error::Result<UpdateState> {
+    db.with(|conn| settings::set_module(conn, update_check::SETTINGS_ID, next))?;
+    Ok(update_check::state(
+        next,
+        APP_VERSION,
+        Utc::now().timestamp_millis(),
+    ))
+}
+
+/// Where the update reminder stands. Never touches the network.
+///
+/// # Errors
+/// Returns an error if the settings could not be read.
+#[tauri::command(async)]
+pub fn update_check_state(db: State<'_, Arc<Database>>) -> Result<UpdateState, ApiError> {
+    guarded("update_check_state", || {
+        let current = update_load(&db)?;
+        Ok(update_check::state(
+            &current,
+            APP_VERSION,
+            Utc::now().timestamp_millis(),
+        ))
+    })
+}
+
+/// Run the daily check if the user opted in and one is due. A failed request
+/// is logged and otherwise ignored.
+///
+/// # Errors
+/// Returns an error only if the settings could not be read or saved.
+#[tauri::command(async)]
+pub fn update_check_run(db: State<'_, Arc<Database>>) -> Result<UpdateState, ApiError> {
+    guarded("update_check_run", || {
+        let current = update_load(&db)?;
+        let now = Utc::now().timestamp_millis();
+        if !current.enabled || !update_check::check_due(current.last_check_ms, now) {
+            return Ok(update_check::state(&current, APP_VERSION, now));
+        }
+        let found = match update_check::fetch_latest() {
+            Ok(found) => found,
+            Err(err) => {
+                tracing::info!(error = %err, "update check failed");
+                None
+            }
+        };
+        Ok(update_save(
+            &db,
+            &update_check::after_check(&current, now, found),
+        )?)
+    })
+}
+
+/// Answer the opt-in question (also marks it as asked).
+///
+/// # Errors
+/// Returns an error if the settings could not be saved.
+#[tauri::command(async)]
+pub fn update_check_set_enabled(
+    enabled: bool,
+    db: State<'_, Arc<Database>>,
+) -> Result<UpdateState, ApiError> {
+    guarded("update_check_set_enabled", || {
+        let current = update_load(&db)?;
+        Ok(update_save(
+            &db,
+            &update_check::with_enabled(&current, enabled),
+        )?)
+    })
+}
+
+/// "Later": hide the banner for a week.
+///
+/// # Errors
+/// Returns an error if the settings could not be saved.
+#[tauri::command(async)]
+pub fn update_check_snooze(db: State<'_, Arc<Database>>) -> Result<UpdateState, ApiError> {
+    guarded("update_check_snooze", || {
+        let current = update_load(&db)?;
+        let now = Utc::now().timestamp_millis();
+        Ok(update_save(&db, &update_check::snoozed(&current, now))?)
+    })
+}
+
+/// "Skip this version".
+///
+/// # Errors
+/// Returns an error if the settings could not be saved.
+#[tauri::command(async)]
+pub fn update_check_skip(db: State<'_, Arc<Database>>) -> Result<UpdateState, ApiError> {
+    guarded("update_check_skip", || {
+        let current = update_load(&db)?;
+        Ok(update_save(&db, &update_check::skipped(&current))?)
+    })
+}
+
+/// Open the stored release page in the default browser. The UI never passes a
+/// URL; only the one this module saved (and re-validated) is opened.
+///
+/// # Errors
+/// Returns an error if there is nothing to open or the browser could not start.
+#[tauri::command(async)]
+pub fn update_check_open(db: State<'_, Arc<Database>>) -> Result<(), ApiError> {
+    guarded("update_check_open", || {
+        let current = update_load(&db)?;
+        let url = current.latest_url.unwrap_or_default();
+        update_check::open_release_page(&url).map_err(Into::into)
+    })
+}
+
+/* -------------------------------------------------------------------------
  * Startup manager
  * ---------------------------------------------------------------------- */
 

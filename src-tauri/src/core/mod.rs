@@ -23,6 +23,7 @@ pub mod state;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod types;
+pub mod update_check;
 pub mod window_state;
 
 pub use error::{ApiError, CoreError, Result};
