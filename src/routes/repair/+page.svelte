@@ -1,9 +1,9 @@
 <!--
   Repair kit (C6).
 
-  A page of buttons for Windows' own SFC and DISM. Nothing runs until a click;
-  each tool shows its exact command line, and the two that replace system files
-  (sfc, RestoreHealth) confirm first. Unelevated runs come back `needs_admin`,
+  A page of buttons for Windows' own SFC, DISM and network/Windows Update
+  resets. Nothing runs until a click; each tool shows its exact command line and
+  why, and the ones that change the system confirm first. Unelevated runs come back `needs_admin`,
   which raises the app's "Restart as administrator" banner (K-021).
 -->
 <script lang="ts">
@@ -13,13 +13,21 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import LoadingNote from "$lib/components/LoadingNote.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
-  import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { t, tModuleDescription, tModuleName, type TranslationKey } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { isApiError, type RepairOutcome, type RepairTool, type RepairToolInfo } from "$lib/types";
 
   const MODULE_ID = "repair";
   /** Lines kept on screen; the full output is in the saved log. */
   const MAX_LINES = 500;
+
+  /** Tools that confirm first, and their dialog text. */
+  const CONFIRM_KEY: Partial<Record<RepairTool, TranslationKey>> = {
+    sfc: "repair.confirm.sfc",
+    "restore-health": "repair.confirm.restore-health",
+    "winsock-reset": "repair.confirm.winsock-reset",
+    "reset-windows-update": "repair.confirm.reset-windows-update",
+  };
 
   const manifest = $derived(moduleStore.find(MODULE_ID));
 
@@ -91,6 +99,7 @@
   function verdictTone(result: RepairOutcome): string {
     switch (result.verdict) {
       case "no-problems":
+      case "done":
       case "repaired":
       case "cleanup-not-needed":
         return "border-risk-safe/30 text-risk-safe";
@@ -126,6 +135,12 @@
             <div class="flex min-w-0 flex-1 flex-col gap-1">
               <span class="text-sm font-medium">{t(`repair.tool.${info.tool}`)}</span>
               <span class="text-xs leading-relaxed text-ink-muted">{t(`repair.tool.${info.tool}.hint`)}</span>
+              <span class="text-xs leading-relaxed text-ink-muted">
+                {t("repair.reasonLabel")} {t(`repair.tool.${info.tool}.reason`)}
+              </span>
+              {#if info.usesWindowsUpdate}
+                <span class="text-xs font-medium text-risk-review">{t("repair.usesWindowsUpdate")}</span>
+              {/if}
               <code class="select-text self-start rounded bg-surface-0 px-2 py-1 font-mono text-xs">{info.command}</code>
             </div>
             <button
@@ -177,7 +192,7 @@
 <ConfirmDialog
   open={confirmTool !== null}
   title={t("repair.confirmTitle", { name: confirmTool ? t(`repair.tool.${confirmTool.tool}`) : "" })}
-  message={confirmTool?.tool === "sfc" ? t("repair.confirm.sfc") : t("repair.confirm.restore-health")}
+  message={confirmTool ? t(CONFIRM_KEY[confirmTool.tool] ?? "repair.confirm.sfc") : ""}
   detail={confirmTool?.command}
   confirmLabel={t("repair.confirmRun")}
   onconfirm={() => {
