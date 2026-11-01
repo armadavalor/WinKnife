@@ -244,6 +244,65 @@ pub struct TakeOutcome {
     pub left_behind_bytes: u64,
 }
 
+/// How many ledger rows a bulk clean or restore writes per transaction (K-039).
+///
+/// Each transaction is one fsync; one per item made a 5000-file clean take a
+/// minute. `PRAGMA synchronous` is left alone: batching changes how often we
+/// pay for durability, not whether a committed row is durable.
+pub const LEDGER_BATCH_SIZE: usize = 100;
+
+/// Per-batch folder holding the sidecars of rows not yet committed.
+///
+/// # How a crash between move and commit is recovered
+///
+/// [`Quarantine::take_deferred`] writes `{batch}/.ledger/{item}.json` (the
+/// whole [`QuarantineItem`]) *before* it moves the file, and
+/// [`PendingLedger::flush`] deletes it only *after* the row is committed. So a
+/// file moved into the store without a row always has a sidecar.
+/// [`Quarantine::reconcile_orphans`] runs at startup and inserts the row from
+/// each sidecar whose file is in the store: the same "every held file has a
+/// row" guarantee the per-item ledger gave, at a hundredth of the fsyncs.
+const SIDECAR_DIR: &str = ".ledger";
+
+/// Items already moved into the quarantine whose ledger rows are written
+/// together, [`LEDGER_BATCH_SIZE`] at a time, by [`Self::flush`].
+#[derive(Debug, Default)]
+pub struct PendingLedger {
+    items: Vec<QuarantineItem>,
+}
+
+impl PendingLedger {
+    /// Whether a flush is due.
+    pub fn is_full(&self) -> bool {
+        self.items.len() >= LEDGER_BATCH_SIZE
+    }
+
+    /// Commit every pending row in one transaction, then drop their sidecars.
+    /// Returns how many rows were written. On error nothing is lost: the items
+    /// stay pending and their sidecars stay on disk for the startup reconcile.
+    ///
+    /// # Errors
+    /// Returns an error if the transaction cannot be committed.
+    pub fn flush(&mut self, db: &dyn DbAccess) -> Result<usize> {
+        if self.items.is_empty() {
+            return Ok(0);
+        }
+        with_db(db, |conn| {
+            let tx = conn.unchecked_transaction()?;
+            for item in &self.items {
+                insert_item(&tx, item)?;
+            }
+            tx.commit()?;
+            Ok(())
+        })?;
+        let written = std::mem::take(&mut self.items);
+        for item in &written {
+            remove_sidecar(item);
+        }
+        Ok(written.len())
+    }
+}
+
 /// What a purge removed.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -393,27 +452,10 @@ impl Quarantine {
         Uuid::new_v4()
     }
 
-    /// Move `path` into `batch`, recording it in the ledger first.
-    ///
-    /// # Errors
-    /// Returns [`CoreError::Quarantine`] if the path does not exist or cannot
-    /// be moved, and [`CoreError::VerifyFailed`] if a cross-volume copy did not
-    /// match the source (in which case the original is still there).
-    pub fn take(&self, db: &dyn DbAccess, batch: Uuid, path: &Path) -> Result<QuarantineItem> {
-        self.take_reporting(db, batch, path).map(|taken| taken.item)
-    }
-
-    /// [`Self::take`], also returning what the move left the user to know
-    /// about, so the executor can show it (adversarial review follow-up A).
-    ///
-    /// # Errors
-    /// As [`Self::take`].
-    pub fn take_reporting(
-        &self,
-        db: &dyn DbAccess,
-        batch: Uuid,
-        path: &Path,
-    ) -> Result<TakeOutcome> {
+    /// Everything [`Self::take_reporting`] checks and builds before it moves
+    /// anything: the symlink refusal, the size, the batch directory and a
+    /// destination proven to be inside the quarantine root.
+    fn prepare_take(&self, batch: Uuid, path: &Path) -> Result<QuarantineItem> {
         let metadata = fs::symlink_metadata(path).map_err(|err| {
             CoreError::Quarantine(format!("cannot inspect `{}`: {err}", path.display()))
         })?;
@@ -469,17 +511,43 @@ impl Quarantine {
 
         let now = Utc::now();
         let purge_after = now + Duration::days(self.policy.retention_days);
-        let item = QuarantineItem {
+        Ok(QuarantineItem {
             id: item_id,
             batch_id: batch,
             original_path: path.to_path_buf(),
-            quarantine_path: destination.clone(),
+            quarantine_path: destination,
             size_bytes,
             quarantined_at: now,
             purge_after,
             restored_at: None,
             restore_refused_at: None,
-        };
+        })
+    }
+
+    /// Move `path` into `batch`, recording it in the ledger first.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::Quarantine`] if the path does not exist or cannot
+    /// be moved, and [`CoreError::VerifyFailed`] if a cross-volume copy did not
+    /// match the source (in which case the original is still there).
+    pub fn take(&self, db: &dyn DbAccess, batch: Uuid, path: &Path) -> Result<QuarantineItem> {
+        self.take_reporting(db, batch, path).map(|taken| taken.item)
+    }
+
+    /// [`Self::take`], also returning what the move left the user to know
+    /// about, so the executor can show it (adversarial review follow-up A).
+    ///
+    /// # Errors
+    /// As [`Self::take`].
+    pub fn take_reporting(
+        &self,
+        db: &dyn DbAccess,
+        batch: Uuid,
+        path: &Path,
+    ) -> Result<TakeOutcome> {
+        let item = self.prepare_take(batch, path)?;
+        let item_id = item.id;
+        let destination = item.quarantine_path.clone();
 
         // Ledger first: if the move succeeds and the process then dies, the row
         // already knows where the file came from. A row without a file is
@@ -515,7 +583,7 @@ impl Quarantine {
             item = %item_id,
             batch = %batch,
             original = %path.display(),
-            size_bytes,
+            size_bytes = item.size_bytes,
             "quarantined"
         );
         Ok(TakeOutcome {
@@ -523,6 +591,124 @@ impl Quarantine {
             warnings: moved.warnings,
             left_behind_bytes: moved.left_bytes,
         })
+    }
+
+    /// [`Self::take_reporting`] for bulk clean: the row is not committed here
+    /// but pushed onto `pending` and written with up to [`LEDGER_BATCH_SIZE`]
+    /// others by [`PendingLedger::flush`] (K-039). A sidecar written before
+    /// the move keeps the file recoverable until then; see [`SIDECAR_DIR`].
+    ///
+    /// # Errors
+    /// As [`Self::take`], plus a sidecar that cannot be written, in which case
+    /// nothing was moved.
+    pub fn take_deferred(
+        &self,
+        batch: Uuid,
+        path: &Path,
+        pending: &mut PendingLedger,
+    ) -> Result<TakeOutcome> {
+        let item = self.prepare_take(batch, path)?;
+        write_sidecar(&item)?;
+        let moved = match move_path_reporting(path, &item.quarantine_path) {
+            Ok(moved) => moved,
+            Err(failure) => {
+                // Nothing moved, so nothing needs the sidecar.
+                remove_sidecar(&item);
+                return Err(failure.into_error(path, &item.quarantine_path));
+            }
+        };
+
+        tracing::info!(
+            item = %item.id,
+            batch = %batch,
+            original = %path.display(),
+            size_bytes = item.size_bytes,
+            "quarantined"
+        );
+        pending.items.push(item.clone());
+        Ok(TakeOutcome {
+            item,
+            warnings: moved.warnings,
+            left_behind_bytes: moved.left_bytes,
+        })
+    }
+
+    /// Put back into the ledger every quarantined file a crash left without a
+    /// row. Called once at app start, before the startup purge. Returns how
+    /// many rows were re-added.
+    ///
+    /// Walks `{root}/*/.ledger/*.json`. A sidecar whose row exists is spent; a
+    /// sidecar whose file is in the store gets its row inserted; a sidecar
+    /// whose file is not there is from a crash before the move. In all three
+    /// cases only the sidecar is removed. User data is never moved or deleted
+    /// here, a sidecar that does not describe a path inside its own batch
+    /// folder is left alone, and a second run finds nothing to do.
+    ///
+    /// # Errors
+    /// Returns an error only if the ledger cannot be read or written.
+    pub fn reconcile_orphans(&self, db: &dyn DbAccess) -> Result<usize> {
+        let mut readded = 0;
+        for sidecar in self.sidecars() {
+            let Some(item) = self.read_sidecar(&sidecar) else {
+                continue;
+            };
+            let added = with_db(db, |conn| {
+                if self.find_item(conn, item.id)?.is_some()
+                    || fs::symlink_metadata(&item.quarantine_path).is_err()
+                {
+                    return Ok(false);
+                }
+                insert_item(conn, &item)?;
+                Ok(true)
+            })?;
+            if added {
+                readded += 1;
+                tracing::warn!(
+                    item = %item.id,
+                    original = %item.original_path.display(),
+                    "a crash left a quarantined file without a ledger row; it is held again"
+                );
+            }
+            remove_sidecar(&item);
+        }
+        Ok(readded)
+    }
+
+    /// Every sidecar file under the quarantine root.
+    fn sidecars(&self) -> Vec<PathBuf> {
+        let Ok(batches) = fs::read_dir(&self.root) else {
+            return Vec::new();
+        };
+        batches
+            .flatten()
+            .filter_map(|batch| fs::read_dir(batch.path().join(SIDECAR_DIR)).ok())
+            .flat_map(|entries| entries.flatten().map(|entry| entry.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect()
+    }
+
+    /// The item a sidecar describes, if it is well formed and its name, batch
+    /// folder and quarantine path all agree.
+    fn read_sidecar(&self, sidecar: &Path) -> Option<QuarantineItem> {
+        let parsed = fs::read(sidecar)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<QuarantineItem>(&bytes).ok());
+        let Some(item) = parsed else {
+            tracing::warn!(path = %sidecar.display(), "an unreadable ledger sidecar was left alone");
+            return None;
+        };
+        let batch_dir = self.root.join(item.batch_id.to_string());
+        let consistent = sidecar.file_stem().and_then(|s| s.to_str())
+            == Some(item.id.to_string().as_str())
+            && sidecar.parent().and_then(Path::parent) == Some(batch_dir.as_path())
+            && !path_compare::has_traversal(&item.quarantine_path)
+            && path_compare::is_inside(&batch_dir, &item.quarantine_path)
+            && item.restored_at.is_none();
+        if !consistent {
+            tracing::warn!(path = %sidecar.display(), "a ledger sidecar that does not match its folder was left alone");
+            return None;
+        }
+        Some(item)
     }
 
     /// Put one item back where it came from.
@@ -717,21 +903,88 @@ impl Quarantine {
         let total = held.len() as u64;
         let mut report = BatchRestore::default();
 
-        for (index, item) in held.iter().enumerate() {
-            if let Some(sink) = progress.as_deref_mut() {
-                sink(index as u64, total, &item.original_path);
-            }
-            if cancel.is_some_and(CancellationToken::is_cancelled) {
-                report.cancelled = true;
-                tracing::info!(%batch, done = index, total, "restore stopped by the user");
-                break;
-            }
-            match self.restore_item(db, item.id) {
-                Ok(outcome) => report.restored.push(outcome),
+        // Claims and releases are written LEDGER_BATCH_SIZE rows per
+        // transaction (K-039). A crash after a claim and before its move
+        // leaves a row marked restored whose file is still held, which
+        // `recover_interrupted_restores` puts back at the next start.
+        let mut index = 0usize;
+        for chunk in held.chunks(LEDGER_BATCH_SIZE) {
+            let claims = match claim_restores(db, chunk) {
+                Ok(claims) => claims,
                 Err(err) => {
-                    tracing::warn!(item = %item.id, error = %err, "restore failed");
-                    report.failed.push((item.id, err.to_string()));
+                    for item in chunk {
+                        report.failed.push((item.id, err.to_string()));
+                    }
+                    index += chunk.len();
+                    continue;
                 }
+            };
+            let mut release = Vec::new();
+            let mut refused = Vec::new();
+            for (item, claimed) in chunk.iter().zip(claims) {
+                if let Some(sink) = progress.as_deref_mut() {
+                    sink(index as u64, total, &item.original_path);
+                }
+                if !report.cancelled && cancel.is_some_and(CancellationToken::is_cancelled) {
+                    report.cancelled = true;
+                    tracing::info!(%batch, done = index, total, "restore stopped by the user");
+                }
+                index += 1;
+                if report.cancelled {
+                    if claimed {
+                        release.push(item.id);
+                    }
+                    continue;
+                }
+                if !claimed {
+                    let err = CoreError::UnknownQuarantineItem(format!(
+                        "{} was already restored",
+                        item.id
+                    ));
+                    report.failed.push((item.id, err.to_string()));
+                    continue;
+                }
+                match self.move_out(item) {
+                    Ok(moved) => {
+                        tracing::info!(
+                            item = %item.id,
+                            restored_to = %moved.target.display(),
+                            renamed = moved.renamed,
+                            "restored from quarantine"
+                        );
+                        report.restored.push(RestoreOutcome {
+                            item_id: item.id,
+                            restored_to: moved.target,
+                            renamed: moved.renamed,
+                            warnings: moved.warnings,
+                        });
+                    }
+                    Err(MoveOutFailure::Encrypted(err)) => {
+                        release.push(item.id);
+                        refused.push((*item, err));
+                    }
+                    Err(MoveOutFailure::Other(err)) => {
+                        release.push(item.id);
+                        tracing::warn!(item = %item.id, error = %err, "restore failed");
+                        report.failed.push((item.id, err.to_string()));
+                    }
+                }
+            }
+            if let Err(err) = release_restores(db, &release) {
+                // The startup recovery puts these rows back to held.
+                tracing::error!(error = %err, count = release.len(), "could not release restore claims");
+            }
+            // After the release: decision b keeps an item whose encrypted
+            // restore was refused out of the automatic purge.
+            for (item, err) in refused {
+                let marked =
+                    with_db(db, |conn| Ok(mark_restore_refused(conn, item.id))).unwrap_or(false);
+                let err = encrypted_restore_refused(item, &err, marked);
+                tracing::warn!(item = %item.id, error = %err, "restore failed");
+                report.failed.push((item.id, err.to_string()));
+            }
+            if report.cancelled {
+                break;
             }
         }
         if let (Some(sink), Some(last)) = (progress, held.last()) {
@@ -1151,6 +1404,8 @@ impl Quarantine {
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            // An empty sidecar folder is bookkeeping, not data.
+            let _ = fs::remove_dir(path.join(SIDECAR_DIR));
             if path.is_dir() && fs::read_dir(&path).is_ok_and(|mut e| e.next().is_none()) {
                 if let Err(err) = fs::remove_dir(&path) {
                     tracing::debug!(
@@ -1176,6 +1431,92 @@ fn remove_quarantined(path: &Path) -> std::io::Result<()> {
         // Already gone (manual cleanup, previous half-finished purge).
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
+    }
+}
+
+/// Mark every item of `chunk` restored in one transaction, only where still
+/// held (audit issue #37). Returns which rows this call claimed.
+fn claim_restores(db: &dyn DbAccess, chunk: &[&QuarantineItem]) -> Result<Vec<bool>> {
+    let now = timestamp(Utc::now());
+    with_db(db, |conn| {
+        let tx = conn.unchecked_transaction()?;
+        let claims = chunk
+            .iter()
+            .map(|item| {
+                tx.execute(
+                    "UPDATE quarantine SET restored_at = ?2 WHERE id = ?1 AND restored_at IS NULL",
+                    rusqlite::params![item.id.to_string(), now],
+                )
+                .map(|changed| changed > 0)
+            })
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        tx.commit()?;
+        Ok(claims)
+    })
+}
+
+/// Put claimed rows whose move did not happen back to held, in one transaction.
+fn release_restores(db: &dyn DbAccess, ids: &[Uuid]) -> Result<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    with_db(db, |conn| {
+        let tx = conn.unchecked_transaction()?;
+        for id in ids {
+            tx.execute(
+                "UPDATE quarantine SET restored_at = NULL WHERE id = ?1",
+                [id.to_string()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+fn sidecar_path(item: &QuarantineItem) -> Option<PathBuf> {
+    let batch_dir = item.quarantine_path.parent()?;
+    Some(
+        batch_dir
+            .join(SIDECAR_DIR)
+            .join(format!("{}.json", item.id)),
+    )
+}
+
+/// Record `item` next to where it is about to land. Not fsynced: a sidecar
+/// lost to a power cut goes with a rename that was not durable either.
+fn write_sidecar(item: &QuarantineItem) -> Result<()> {
+    let path = sidecar_path(item)
+        .ok_or_else(|| CoreError::Quarantine("a quarantine path has no folder".to_owned()))?;
+    let unwritable = |err: std::io::Error| {
+        CoreError::Quarantine(format!(
+            "cannot write the ledger sidecar `{}`: {err}",
+            path.display()
+        ))
+    };
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(unwritable)?;
+    }
+    let bytes = serde_json::to_vec(item)
+        .map_err(|err| CoreError::Quarantine(format!("cannot encode a ledger sidecar: {err}")))?;
+    fs::write(&path, bytes).map_err(unwritable)
+}
+
+/// Drop a sidecar whose row is committed or whose file never moved, and its
+/// folder once empty. Best effort: a leftover is re-checked by the next
+/// startup reconcile.
+#[allow(clippy::disallowed_methods)]
+fn remove_sidecar(item: &QuarantineItem) {
+    let Some(path) = sidecar_path(item) else {
+        return;
+    };
+    if let Err(err) = fs::remove_file(&path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            tracing::debug!(path = %path.display(), error = %err, "a ledger sidecar could not be removed");
+        }
+    }
+    if let Some(dir) = path.parent() {
+        // Fails while other sidecars are still there, which is the point.
+        let _ = fs::remove_dir(dir);
     }
 }
 
@@ -3341,6 +3682,219 @@ mod tests {
             work,
             _dir: dir,
         }
+    }
+
+    /// Timing probe for the bulk clean/restore path (K-039); run with
+    /// `cargo test --release --lib bulk_ledger_bench -- --ignored --nocapture`.
+    /// `PERF_N` overrides the item count.
+    #[test]
+    #[ignore]
+    fn bulk_ledger_bench() {
+        let count: usize = std::env::var("PERF_N")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2000);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).expect("work");
+        let conn = db::open(&dir.path().join("app")).expect("db");
+        let q = Quarantine::with_root(dir.path().join("quarantine"), RetentionPolicy::default());
+        let files: Vec<PathBuf> = (0..count)
+            .map(|i| write(&work, &format!("f{i}.tmp"), b"x"))
+            .collect();
+        let batch = Uuid::new_v4();
+        let t = std::time::Instant::now();
+        let mut pending = PendingLedger::default();
+        for f in &files {
+            q.take_deferred(batch, f, &mut pending).expect("take");
+            if pending.is_full() {
+                pending.flush(&conn).expect("flush");
+            }
+        }
+        pending.flush(&conn).expect("flush");
+        let take = t.elapsed();
+        let t = std::time::Instant::now();
+        let (ok, failed) = q.restore_batch(&conn, batch).expect("restore");
+        let restore = t.elapsed();
+        assert_eq!((ok.len(), failed.len()), (count, 0));
+        eprintln!("bulk_ledger_bench: n={count} take={take:?} restore={restore:?}");
+    }
+
+    /// Take `count` files deferred, flushing whenever the batch fills, as the
+    /// executor does, and report how many rows each flush wrote.
+    fn take_bulk(h: &Harness, batch: Uuid, count: usize) -> (Vec<QuarantineItem>, Vec<usize>) {
+        let mut pending = PendingLedger::default();
+        let mut items = Vec::new();
+        let mut flushes = Vec::new();
+        for i in 0..count {
+            let source = write(&h.work, &format!("bulk{i}.tmp"), b"x");
+            let outcome = h
+                .quarantine
+                .take_deferred(batch, &source, &mut pending)
+                .expect("take");
+            items.push(outcome.item);
+            if pending.is_full() {
+                flushes.push(pending.flush(&h.conn).expect("flush"));
+            }
+        }
+        flushes.push(pending.flush(&h.conn).expect("flush"));
+        (items, flushes)
+    }
+
+    #[test]
+    fn ledger_batches_flush_at_the_batch_size() {
+        for (count, expected) in [
+            (0, vec![0]),
+            (1, vec![1]),
+            (100, vec![100, 0]),
+            (101, vec![100, 1]),
+        ] {
+            let h = harness(RetentionPolicy::default());
+            let batch = h.quarantine.start_batch();
+            let (items, flushes) = take_bulk(&h, batch, count);
+            assert_eq!(flushes, expected, "count {count}");
+            let rows = h.quarantine.items_in_batch(&h.conn, batch).expect("rows");
+            assert_eq!(rows.len(), count, "count {count}");
+            assert!(
+                items
+                    .iter()
+                    .all(|i| !sidecar_path(i).expect("sidecar").exists()),
+                "committed rows leave no sidecar (count {count})"
+            );
+            assert!(h.quarantine.sidecars().is_empty(), "count {count}");
+        }
+    }
+
+    #[test]
+    fn a_101_item_batch_restores_in_chunks() {
+        let h = harness(RetentionPolicy::default());
+        let batch = h.quarantine.start_batch();
+        let (items, _) = take_bulk(&h, batch, 101);
+        let (ok, failed) = h.quarantine.restore_batch(&h.conn, batch).expect("restore");
+        assert_eq!((ok.len(), failed.len()), (101, 0));
+        for item in &items {
+            assert!(item.original_path.exists());
+        }
+        assert!(h
+            .quarantine
+            .items_in_batch(&h.conn, batch)
+            .expect("rows")
+            .iter()
+            .all(|i| i.restored_at.is_some()));
+    }
+
+    /// A crash after the move but before the flush: the file sits in the
+    /// quarantine with no row. Reconcile finds its sidecar and writes the row.
+    #[test]
+    fn reconcile_re_ledgers_a_file_whose_batch_never_committed() {
+        let h = harness(RetentionPolicy::default());
+        let source = write(&h.work, "orphan.tmp", b"precious");
+        let batch = h.quarantine.start_batch();
+        let mut pending = PendingLedger::default();
+        let item = h
+            .quarantine
+            .take_deferred(batch, &source, &mut pending)
+            .expect("take")
+            .item;
+        drop(pending); // the crash: the batch is never flushed
+
+        assert!(!source.exists());
+        assert!(item.quarantine_path.exists());
+        assert!(h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("find")
+            .is_none());
+        assert!(sidecar_path(&item).expect("sidecar").exists());
+
+        assert_eq!(
+            h.quarantine.reconcile_orphans(&h.conn).expect("reconcile"),
+            1
+        );
+        let row = h
+            .quarantine
+            .find_item(&h.conn, item.id)
+            .expect("find")
+            .expect("row re-added");
+        assert_eq!(row.original_path, item.original_path);
+        assert_eq!(row.quarantine_path, item.quarantine_path);
+        assert!(row.is_held());
+        assert!(!sidecar_path(&item).expect("sidecar").exists());
+    }
+
+    #[test]
+    fn reconcile_is_idempotent() {
+        let h = harness(RetentionPolicy::default());
+        let source = write(&h.work, "orphan.tmp", b"x");
+        let batch = h.quarantine.start_batch();
+        let mut pending = PendingLedger::default();
+        h.quarantine
+            .take_deferred(batch, &source, &mut pending)
+            .expect("take");
+        drop(pending);
+
+        assert_eq!(h.quarantine.reconcile_orphans(&h.conn).expect("first"), 1);
+        assert_eq!(h.quarantine.reconcile_orphans(&h.conn).expect("second"), 0);
+        assert_eq!(
+            h.quarantine
+                .items_in_batch(&h.conn, batch)
+                .expect("rows")
+                .len(),
+            1
+        );
+    }
+
+    /// A sidecar whose row did commit (crash between commit and sidecar
+    /// removal) must not produce a duplicate row.
+    #[test]
+    fn reconcile_skips_a_sidecar_whose_row_committed() {
+        let h = harness(RetentionPolicy::default());
+        let source = write(&h.work, "done.tmp", b"x");
+        let batch = h.quarantine.start_batch();
+        let mut pending = PendingLedger::default();
+        let item = h
+            .quarantine
+            .take_deferred(batch, &source, &mut pending)
+            .expect("take")
+            .item;
+        insert_item(&h.conn, &item).expect("row commits, sidecar left behind");
+
+        assert_eq!(
+            h.quarantine.reconcile_orphans(&h.conn).expect("reconcile"),
+            0
+        );
+        assert_eq!(
+            h.quarantine
+                .items_in_batch(&h.conn, batch)
+                .expect("rows")
+                .len(),
+            1
+        );
+        assert!(!sidecar_path(&item).expect("sidecar").exists());
+    }
+
+    #[test]
+    fn restore_after_reconcile_returns_the_file_to_its_original_path() {
+        let h = harness(RetentionPolicy::default());
+        let source = write(&h.work, "nested/orphan.tmp", b"precious");
+        let batch = h.quarantine.start_batch();
+        let mut pending = PendingLedger::default();
+        let item = h
+            .quarantine
+            .take_deferred(batch, &source, &mut pending)
+            .expect("take")
+            .item;
+        drop(pending);
+        h.quarantine.reconcile_orphans(&h.conn).expect("reconcile");
+
+        let outcome = h
+            .quarantine
+            .restore_item(&h.conn, item.id)
+            .expect("restore");
+        assert_eq!(outcome.restored_to, source);
+        assert!(!outcome.renamed);
+        assert_eq!(fs::read(&source).expect("read"), b"precious");
+        assert!(!item.quarantine_path.exists());
     }
 
     fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {

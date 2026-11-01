@@ -287,6 +287,14 @@ pub fn manage_state<R: tauri::Runtime>(
         Err(err) => tracing::error!(error = %err, "interrupted restore recovery failed"),
     }
 
+    // A clean killed between a move and its batched ledger commit left a
+    // sidecar; the file is held again before the purge looks (K-039).
+    match quarantine.reconcile_orphans(&connection) {
+        Ok(0) => {}
+        Ok(readded) => tracing::warn!(readded, "orphaned quarantine files re-ledgered"),
+        Err(err) => tracing::error!(error = %err, "quarantine reconcile failed"),
+    }
+
     // Retention runs at start, before anything can add to the pile.
     match quarantine.purge(&connection, chrono::Utc::now()) {
         Ok(report) if !report.is_empty() => tracing::info!(
