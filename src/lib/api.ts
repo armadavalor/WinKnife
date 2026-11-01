@@ -63,6 +63,7 @@ import type {
   ScheduledReport,
   ScheduledScanSettings,
   ScheduledScanState,
+  UpdateProgress,
   UpdateState,
   KeepAwakeStatus,
   ShutdownTick,
@@ -143,6 +144,7 @@ export const EVENTS = {
   launchNavigate: "launch:navigate",
   keepAwakeChanged: "keep-awake:changed",
   repairOutput: "repair:output",
+  updateProgress: "update:progress",
 } as const;
 
 /* -------------------------------------------------------------------------
@@ -575,6 +577,18 @@ export function updateCheckSkip(): Promise<UpdateState> {
 /** Open the stored release page in the default browser (the backend picks the URL). */
 export function updateCheckOpen(): Promise<void> {
   return invoke<void>("update_check_open");
+}
+
+/** Download, verify and install the update; the installer restarts the app. */
+export function updateInstall(): Promise<void> {
+  return invoke<void>("update_install");
+}
+
+/** Subscribe to the update download's progress. */
+export function onUpdateProgress(
+  handler: (payload: UpdateProgress) => void,
+): Promise<UnlistenFn> {
+  return subscribe(EVENTS.updateProgress, handler);
 }
 
 /* -------------------------------------------------------------------------

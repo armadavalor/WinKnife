@@ -84,7 +84,7 @@ gh attestation verify .\WinKnife_<version>_x64-setup.exe --repo armadavalor/WinK
 
 Attestations start with the first release built after they were added; older releases only have `SHA256SUMS.txt`. The installer is unsigned, so Windows will still show SmartScreen.
 
-Privacy: WinKnife does not transfer any information to other networked systems. The one exception is the optional update reminder, off until you opt in: about once a day it asks the GitHub Releases API for `armadavalor/WinKnife` for the latest version and sends nothing but that request. It never downloads or installs anything.
+Privacy: WinKnife does not transfer any information to other networked systems. The one exception is the optional update reminder, off until you opt in: about once a day it asks the GitHub Releases API for `armadavalor/WinKnife` for the latest version and sends nothing but that request. Nothing is downloaded or installed unless you click "Update now" and confirm; the download is then checked against WinKnife's update signature (not Authenticode) before it runs.
 
 ## Build and run
 

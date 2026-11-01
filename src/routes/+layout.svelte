@@ -236,30 +236,85 @@
         role="status"
         data-testid="update-banner"
       >
-        <p class="min-w-0 flex-1">
-          {t("update.banner", { version: updateCheck.state.notice.version })}
-        </p>
-        <button
-          type="button"
-          class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent"
-          onclick={() => void updateCheck.download()}
-        >
-          {t("update.download")}
-        </button>
-        <button
-          type="button"
-          class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-          onclick={() => void updateCheck.snooze()}
-        >
-          {t("update.later")}
-        </button>
-        <button
-          type="button"
-          class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-          onclick={() => void updateCheck.skip()}
-        >
-          {t("update.skip")}
-        </button>
+        {#if updateCheck.phase === "installing"}
+          <p class="min-w-0 flex-1">
+            {t("update.installing", { version: updateCheck.state.notice.version })}
+            {#if updateCheck.fraction !== null}
+              {Math.round(updateCheck.fraction * 100)}%
+            {/if}
+          </p>
+          <progress
+            class="w-40"
+            max="1"
+            value={updateCheck.fraction ?? undefined}
+            aria-label={t("update.progress")}
+          ></progress>
+        {:else}
+          <p class="min-w-0 flex-1">
+            {#if updateCheck.phase === "confirming"}
+              {t("update.confirm", { version: updateCheck.state.notice.version })}
+            {:else if updateCheck.phase === "failed"}
+              {t("update.failed", { error: updateCheck.error ?? "" })}
+            {:else}
+              {t("update.banner", { version: updateCheck.state.notice.version })}
+            {/if}
+          </p>
+          {#if updateCheck.phase === "confirming"}
+            <button
+              type="button"
+              class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => void updateCheck.install()}
+            >
+              {t("update.confirmYes")}
+            </button>
+            <button
+              type="button"
+              class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => void updateCheck.download()}
+            >
+              {t("update.notes")}
+            </button>
+            <button
+              type="button"
+              class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => updateCheck.cancel()}
+            >
+              {t("update.cancel")}
+            </button>
+          {:else}
+            {#if updateCheck.phase === "failed"}
+              <button
+                type="button"
+                class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent"
+                onclick={() => void updateCheck.download()}
+              >
+                {t("update.openPage")}
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent"
+                onclick={() => updateCheck.confirm()}
+              >
+                {t("update.now")}
+              </button>
+            {/if}
+            <button
+              type="button"
+              class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => void updateCheck.snooze()}
+            >
+              {t("update.later")}
+            </button>
+            <button
+              type="button"
+              class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => void updateCheck.skip()}
+            >
+              {t("update.skip")}
+            </button>
+          {/if}
+        {/if}
       </div>
     {/if}
     {@render children()}

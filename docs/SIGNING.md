@@ -24,7 +24,7 @@ now (see "Known gaps").
 | Functionality described on the download page | Met. README.md lists every tool. |
 | Own project, own binaries, own build scripts | Met. Built from this repository by `.github/workflows/release.yml`. |
 | Not a hacking / vulnerability-scanning tool | Met. WinKnife is a cleaner and system-tools utility. |
-| Does not compromise privacy; no undisclosed network traffic | Met. No network calls; the LLM layer is not implemented. |
+| Does not compromise privacy; no undisclosed network traffic | Met. The only network traffic is the opt-in update check (off by default) and an update download the user starts; the LLM layer is not implemented. |
 | No system changes without warnings | Met. Startup edits, recycle-bin emptying and restore points are user-initiated with confirmation dialogs. |
 | Uninstall provided with the installer | Met. NSIS uninstaller. |
 | Builds are automated on GitHub-hosted runners (origin verification) | Met. The release workflow runs on `windows-latest`. |
@@ -55,7 +55,7 @@ strengthen the application.
 > promise is "analyze first, never delete without consent, everything
 > reversible": cleaned files go to a local quarantine and can be restored,
 > protected system paths are refused in code, and every recommendation carries a
-> human-readable reason. The app makes no network calls. Built with Tauri v2
+> human-readable reason. The only network use is the opt-in update check and a user-started update download. Built with Tauri v2
 > (Rust) and Svelte.
 >
 > **Released:** v0.2.0 is public on GitHub Releases as an NSIS installer and a

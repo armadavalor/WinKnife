@@ -27,6 +27,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_BODY_BYTES: u64 = 1 << 20;
 /// Module id under which the state is stored (`module.update-check`).
 pub const SETTINGS_ID: &str = "update-check";
+/// Event carrying `{ downloaded, total }` while an update downloads.
+pub const PROGRESS_EVENT: &str = "update:progress";
 
 /// Everything persisted for the reminder.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

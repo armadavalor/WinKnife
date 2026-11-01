@@ -1502,6 +1502,12 @@ export interface UpdateNotice {
   url: string;
 }
 
+/** `update:progress` payload; `total` is null when the server sends no length. */
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
+
 export interface UpdateState {
   enabled: boolean;
   /** The one-time opt-in question has been answered. */

@@ -38,5 +38,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/armadavalor/WinKnife/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM0MjcxNkEyRDI5RUY5MTUKUldRVitaN1NvaFluTkxSQnZoTHcyZjVZbVpFcXFMdU03dm9NcGErYmFMVCtvT3BFR3h2cktxOW4K",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
