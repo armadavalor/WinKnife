@@ -19,7 +19,7 @@
 
   const manifest = $derived(moduleStore.find(MODULE_ID));
 
-  let state = $state<DnsState | null>(null);
+  let dns = $state<DnsState | null>(null);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let report = $state<string | null>(null);
@@ -35,13 +35,13 @@
 
   /** Newest history entry for an adapter, which is what Undo restores. */
   const lastChange = (index: number): DnsChange | undefined =>
-    state?.history.findLast((c) => c.index === index);
+    dns?.history.findLast((c) => c.index === index);
 
   async function load(): Promise<void> {
     busy = true;
     error = null;
     try {
-      state = await dnsState();
+      dns = await dnsState();
     } catch (err: unknown) {
       error = message(err);
     } finally {
@@ -96,7 +96,7 @@
     </p>
   {/if}
 
-  {#if !state}
+  {#if !dns}
     {#if !error}<LoadingNote text={t("dns.loading")} />{/if}
   {:else}
     <div class="flex flex-col gap-3">
@@ -107,11 +107,11 @@
         </button>
       </div>
 
-      {#if state.adapters.length === 0}
+      {#if dns.adapters.length === 0}
         <EmptyState message={t("dns.empty")} />
       {:else}
         <ul class="flex flex-col gap-2">
-          {#each state.adapters as adapter (adapter.index)}
+          {#each dns.adapters as adapter (adapter.index)}
             {@const last = lastChange(adapter.index)}
             <li class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-4">
               <div class="min-w-0">

@@ -2924,3 +2924,7 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 **Built.** `modules/dns.rs` + `/dns` page: lists up adapters with their IPv4 DNS, switches one to Cloudflare / Google / Quad9 / automatic, and undoes the last change per adapter.
 **Decisions.** Reading is free; apply and revert call the shared `NeedsAdmin` check first, so the existing restart-as-admin flow fires. Adapters are read as JSON from `Get-DnsClientServerAddress` (locale-proof); changes use `Set-DnsClientServerAddress`, with `-ResetServerAddresses` for automatic. Servers are parsed as `Ipv4Addr` before they reach a command line. Every change stores the previous servers in `dns-history.json` (app data, 50 entries) before it is applied. No network calls from the module.
 **Deferred.** IPv6 presets, custom servers, DoH. The PowerShell backend is only unit-tested through a fake; not exercised on a live adapter.
+
+## 2026-11-01 — Network: reveal process path (#15)
+
+The Network screen (C14) already listed listening ports and connections with PID, process and path, with filter/search. Added the missing "Show in folder" button per row (reuses `reveal_in_explorer`; EN + TR strings). **Deferred:** per-process traffic (the roadmap's second half) needs ETW or per-connection estats (admin, enable-stats); not attempted here.
