@@ -3290,7 +3290,9 @@ pub fn dns_apply(
     index: u32,
     preset: crate::modules::dns::Preset,
 ) -> Result<crate::modules::dns::DnsChange, ApiError> {
-    guarded("dns_apply", || service.apply(index, preset).map_err(ApiError::from))
+    guarded("dns_apply", || {
+        service.apply(index, preset).map_err(ApiError::from)
+    })
 }
 
 /// Put an adapter's previous DNS servers back.
@@ -3302,7 +3304,9 @@ pub fn dns_revert(
     service: State<'_, Arc<crate::modules::dns::DnsService>>,
     index: u32,
 ) -> Result<crate::modules::dns::DnsChange, ApiError> {
-    guarded("dns_revert", || service.revert(index).map_err(ApiError::from))
+    guarded("dns_revert", || {
+        service.revert(index).map_err(ApiError::from)
+    })
 }
 
 /* -------------------------------------------------------------------------
