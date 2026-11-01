@@ -2,9 +2,10 @@
 //!
 //! WinKnife makes no network calls unless the user turns this on. When on, it
 //! asks GitHub's Releases API for the latest release of this one repository at
-//! most once a day, compares the version, and lets the UI show a banner. It
-//! never downloads or installs anything: the banner opens the release page in
-//! the default browser and the user takes it from there.
+//! most once a day, compares the version, and lets the UI show a banner. This
+//! module never downloads anything itself: the banner's "Update now" button
+//! calls `commands::update_install`, which fetches and verifies the signed
+//! installer through `tauri-plugin-updater`; "Release page" opens the browser.
 //!
 //! The URL is a constant and the UI never supplies one. Any failure (offline,
 //! rate limit, bad JSON) is logged and otherwise ignored.
