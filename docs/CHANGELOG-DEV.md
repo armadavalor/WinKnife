@@ -2926,3 +2926,7 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 - **Restore.** Claims (`restored_at`) and releases go in one transaction per 100 items. Cancel, encrypted-refusal and failure paths release their claims as before.
 - **Timings** (`bulk_ledger_bench`, N=2000, local NVMe, release): take 9.47 s → 7.5–8.6 s, restore 8.51 s → 3.2 s. Take is still dominated by the move plus the sidecar write.
 - **Tests.** Flush at 0/1/100/101 items, a chunked 101-item restore, crash then reconcile, reconcile idempotence, committed-row sidecar skipped, restore after reconcile back to the original path.
+
+## 2026-11-01 — Network: reveal process path (#15)
+
+The Network screen (C14) already listed listening ports and connections with PID, process and path, with filter/search. Added the missing "Show in folder" button per row (reuses `reveal_in_explorer`; EN + TR strings). **Deferred:** per-process traffic (the roadmap's second half) needs ETW or per-connection estats (admin, enable-stats); not attempted here.
