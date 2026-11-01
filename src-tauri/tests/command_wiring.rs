@@ -305,6 +305,36 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "take_launch_route",
             args: json!({}),
         },
+        // Update reminder: off by default, so `run` returns state without a request;
+        // `open` has no stored URL and `install` refuses unless effects are armed.
+        Probe {
+            command: "update_check_state",
+            args: json!({}),
+        },
+        Probe {
+            command: "update_check_run",
+            args: json!({}),
+        },
+        Probe {
+            command: "update_check_set_enabled",
+            args: json!({ "enabled": false }),
+        },
+        Probe {
+            command: "update_check_snooze",
+            args: json!({}),
+        },
+        Probe {
+            command: "update_check_skip",
+            args: json!({}),
+        },
+        Probe {
+            command: "update_check_open",
+            args: json!({}),
+        },
+        Probe {
+            command: "update_install",
+            args: json!({}),
+        },
         // Read-only: the registry is only read.
         Probe {
             command: "restore_point_status",

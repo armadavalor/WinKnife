@@ -2935,6 +2935,13 @@ release page (`html_url` guard kept). Release workflow signs the installer with
 the updater key after SignPath and `package-release.ps1` emits `.sig` and
 `latest.json`. Deferred: first updater release (maintainer), signed-installer
 end-to-end test (needs a real published release).
+---
+
+## 2026-11-01 — Repair kit: network and Windows Update resets (#17)
+
+**Built.** Extended the existing `repair` module (SFC and DISM already shipped in C6) with three tools: `flush-dns` (`ipconfig /flushdns`), `winsock-reset` (`netsh winsock reset`) and `reset-windows-update`. A tool is now a list of steps (`Step`), orchestrated in `RepairService::run`; the `RepairRunner` trait is unchanged. Each tool shows its exact command (steps joined by `&&`), a plain-language "use it when" reason, and RestoreHealth is labelled as using Windows Update. New `done` verdict for the reset tools.
+**Decisions.** The Windows Update reset stops wuauserv/cryptSvc/bits/msiserver, renames `SoftwareDistribution` and `System32\catroot2` to `.old` (never deletes, so it stays reversible) and restarts the services; a failed rename still restarts them. Winsock and Windows Update resets confirm first; flush-dns does not.
+**Not verified.** The `cmd /c ren %SystemRoot%\...` step relies on cmd expanding the variable; unit-tested through the fake runner only, not on a real elevated run.
 
 ## 2026-11-01 — Network: reveal process path (#15)
 

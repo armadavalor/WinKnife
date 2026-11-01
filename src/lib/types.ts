@@ -1110,10 +1110,14 @@ export type RepairTool =
   | "check-health"
   | "scan-health"
   | "restore-health"
-  | "analyze-component-store";
+  | "analyze-component-store"
+  | "flush-dns"
+  | "winsock-reset"
+  | "reset-windows-update";
 
 export type RepairVerdict =
   | "no-problems"
+  | "done"
   | "repaired"
   | "could-not-repair"
   | "restart-needed"
@@ -1129,6 +1133,8 @@ export interface RepairToolInfo {
   /** The exact command line run. */
   command: string;
   needsConfirm: boolean;
+  /** True only when the tool downloads through Windows Update (DISM RestoreHealth). */
+  usesWindowsUpdate: boolean;
 }
 
 export interface RepairOutcome {
