@@ -2936,6 +2936,12 @@ the updater key after SignPath and `package-release.ps1` emits `.sig` and
 `latest.json`. Deferred: first updater release (maintainer), signed-installer
 end-to-end test (needs a real published release).
 
+## 2026-11-01 — DNS switcher (#16)
+
+**Built.** `modules/dns.rs` + `/dns` page: lists up adapters with their IPv4 DNS, switches one to Cloudflare / Google / Quad9 / automatic, and undoes the last change per adapter.
+**Decisions.** Reading is free; apply and revert call the shared `NeedsAdmin` check first, so the existing restart-as-admin flow fires. Adapters are read as JSON from `Get-DnsClientServerAddress` (locale-proof); changes use `Set-DnsClientServerAddress`, with `-ResetServerAddresses` for automatic. Servers are parsed as `Ipv4Addr` before they reach a command line. Every change stores the previous servers in `dns-history.json` (app data, 50 entries) before it is applied. No network calls from the module.
+**Deferred.** IPv6 presets, custom servers, DoH. The PowerShell backend is only unit-tested through a fake; not exercised on a live adapter.
+
 ## 2026-11-01 — Bulk clean/restore: batched ledger (K-039)
 
 - **Clean.** The executor takes items with `Quarantine::take_deferred` into a `PendingLedger` and writes ledger rows in one transaction per `LEDGER_BATCH_SIZE` (100) items, plus a final flush. No transaction is held across file moves. `PRAGMA synchronous` is unchanged.
@@ -2962,3 +2968,11 @@ The Network screen (C14) already listed listening ports and connections with PID
 - **Space.** Before each copy the destination drive's free space is checked; if it is too small, the file is refused before anything is written.
 - Tests: cancel mid-copy keeps the source and drops the target; a copy failure after creation removes only the target; too little space refuses every file; a cancelled scan reports partial results and changes nothing.
 - Local run: 5 symlink tests fail without Developer Mode (loud by design) and `keep_awake` expiry timed out under load; CI decides.
+
+## 2026-11-01 — K-037: translatable brain/cleaner reasons
+
+- **Wire format.** `Recommendation` gains optional `reasonKey` + `reasonParams` (Rust `ReasonKey`/`ReasonParam`, TS mirror). A param is text, a number or a nested key. The English `reason` is always filled and stays the source of truth.
+- **Keys.** `brain.protected` (nested `protected.*`), `brain.leftAlone.*`, `brain.noRule`, `brain.downgraded.*` (rule reason nested as `{rule}`), and `rule.<pack>.<id>` from a new optional `reasonKey` per rule in `rules/*.json` (schema pattern `^rule\.[a-z0-9-]+\.[a-z0-9-]+$`). All 18 shipped rules carry one.
+- **UI.** `src/lib/reason.ts` resolves a key tree; any unknown key (top or nested) falls back to the English `reason`, never to an empty string. `tReason` in `i18n.ts`; `FindingList` uses it. 37 EN + TR entries.
+- **Tests.** `reason.test.ts` (fallbacks); Rust `every_brain_and_cleaner_reason_key_has_an_english_text` checks every emitted key and every rule's `reasonKey` against the `en` table.
+- **Deferred.** Other modules' texts, manifest names, `ExecItemResult` errors and `AppError` codes (DECISIONS-NEEDED, K-022).

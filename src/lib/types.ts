@@ -128,7 +128,17 @@ export interface Recommendation {
   savingsBytes: number;
   /** What Rust re-verifies before it acts. */
   justification: Justification;
+  /** i18n key for `reason`; unknown or missing keys fall back to `reason`. */
+  reasonKey?: string;
+  /** Values for the `{placeholders}` in the `reasonKey` text. */
+  reasonParams?: Record<string, ReasonParam>;
 }
+
+/** A placeholder value: literal text, a number, or a nested translated reason. */
+export type ReasonParam =
+  | string
+  | number
+  | { key: string; params?: Record<string, ReasonParam> };
 
 /** Outcome of applying one recommendation to one finding. */
 export type ExecOutcome =
@@ -166,6 +176,35 @@ export interface MoveWarning {
   path: string;
   /** Plain-English reason, written by Rust. */
   reason: string;
+}
+
+/* -------------------------------------------------------------------------
+ * modules/dns.rs
+ * ---------------------------------------------------------------------- */
+
+export type DnsPreset = "cloudflare" | "google" | "quad9" | "automatic";
+
+/** One network adapter that is up (`dns_state`). */
+export interface DnsAdapter {
+  index: number;
+  name: string;
+  servers: string[];
+  /** True when the servers come from DHCP. */
+  automatic: boolean;
+}
+
+/** What an adapter had before a change; enough to undo it. */
+export interface DnsChange {
+  index: number;
+  name: string;
+  previous: string[];
+  previousAutomatic: boolean;
+}
+
+export interface DnsState {
+  adapters: DnsAdapter[];
+  history: DnsChange[];
+  elevated: boolean;
 }
 
 /** What an execute run actually did. */

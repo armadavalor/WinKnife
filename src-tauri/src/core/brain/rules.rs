@@ -103,6 +103,9 @@ pub struct RuleSpec {
     pub action: RuleAction,
     /// User-facing justification, shipped to the UI verbatim.
     pub reason: String,
+    /// i18n key for `reason`; the UI shows `reason` when it is absent or unknown.
+    #[serde(rename = "reasonKey", default, skip_serializing_if = "Option::is_none")]
+    pub reason_key: Option<String>,
     /// Whether the rule needs elevation. Required for absolute paths outside
     /// the user profile (RULES-FORMAT.md).
     #[serde(default)]

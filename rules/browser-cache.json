@@ -17,6 +17,7 @@
       "match": { "min_age_hours": 24, "owner_process_absent": "chrome.exe" },
       "score": { "base": 88, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.browser-cache.chrome-web-cache",
       "reason": "Chrome's web cache. Chrome refills it as you browse; your history, cookies and saved passwords live elsewhere and are not touched."
     },
     {
@@ -29,6 +30,7 @@
       "match": { "min_age_hours": 24, "owner_process_absent": "msedge.exe" },
       "score": { "base": 88, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.browser-cache.edge-web-cache",
       "reason": "Edge's web cache. Edge refills it as you browse; your history, cookies and saved passwords live elsewhere and are not touched."
     },
     {
@@ -41,6 +43,7 @@
       "match": { "min_age_hours": 24, "owner_process_absent": "brave.exe" },
       "score": { "base": 88, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.browser-cache.brave-web-cache",
       "reason": "Brave's web cache. Brave refills it as you browse; your history, cookies and saved passwords live elsewhere and are not touched."
     },
     {
@@ -49,6 +52,7 @@
       "match": { "min_age_hours": 24, "owner_process_absent": "firefox.exe" },
       "score": { "base": 88, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.browser-cache.firefox-web-cache",
       "reason": "Firefox's web cache. Firefox refills it as you browse; your profile, bookmarks and logins live elsewhere and are not touched."
     }
   ]

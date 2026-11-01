@@ -16,6 +16,7 @@
       },
       "score": { "base": 55, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.installer-leftovers.stale-temp-installers",
       "reason": "An installer left in your temp folder over 30 days ago. Removing it uninstalls nothing, but you would have to download it again to repair or reinstall that program."
     }
   ]

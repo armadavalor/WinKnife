@@ -2798,6 +2798,8 @@ mod tests {
             reason: "no recorded reasoning at all".to_owned(),
             savings_bytes: 4,
             justification: Justification::Informational,
+            reason_key: None,
+            reason_params: Default::default(),
         };
 
         let report = execute(

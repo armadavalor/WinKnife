@@ -62,6 +62,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::path_compare::{self, CanonicalPath};
 use crate::core::platform::EnvResolver;
+use crate::core::types::ReasonKey;
 
 /// Why a path that climbs with `..` is refused outright.
 const TRAVERSAL_REASON: &str =
@@ -74,6 +75,37 @@ const TRAVERSAL_REASON: &str =
 /// exactly which shape was seen.
 const UNJUDGEABLE_REASON: &str =
     "not a plain local drive-letter path — a UNC share, a device or NT-namespace path, or a relative one — so it cannot be compared with the protected list and is never treated as cleanable";
+
+const WINDOWS_REASON: &str =
+    "the Windows directory: removing anything here can stop the system booting";
+const PROGRAMS_REASON: &str =
+    "an installed-programs directory: use the app's own uninstaller instead";
+const SHARED_REASON: &str = "shared application data used by installed programs";
+const APP_DATA_REASON: &str = "this app's own data directory";
+const QUARANTINE_REASON: &str = "the quarantine: this is what makes cleaning reversible";
+const PROFILE_REASON: &str = "your user profile folder itself";
+const DRIVE_ROOT_REASON: &str = "a drive root";
+const VOLUME_META_REASON: &str = "volume metadata managed by Windows";
+
+/// The i18n key for a reason [`ProtectedPaths::reason_for`] returned, so the UI
+/// can show it in the user's language. `None` for a reason this list did not
+/// write itself (a test fixture's), which the UI then shows in English.
+pub fn reason_key(reason: &str) -> Option<ReasonKey> {
+    let key = match reason {
+        TRAVERSAL_REASON => "protected.traversal",
+        UNJUDGEABLE_REASON => "protected.unjudgeable",
+        WINDOWS_REASON => "protected.windows",
+        PROGRAMS_REASON => "protected.programs",
+        SHARED_REASON => "protected.shared",
+        APP_DATA_REASON => "protected.appData",
+        QUARANTINE_REASON => "protected.quarantine",
+        PROFILE_REASON => "protected.profile",
+        DRIVE_ROOT_REASON => "protected.driveRoot",
+        VOLUME_META_REASON => "protected.volumeMeta",
+        _ => return None,
+    };
+    Some(ReasonKey::plain(key))
+}
 
 /// How far a protected entry reaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,12 +189,6 @@ impl ProtectedPaths {
     pub fn from_env(env: &dyn EnvResolver, app_data_dir: &Path, quarantine_root: &Path) -> Self {
         let mut entries = Vec::new();
 
-        let windows_reason =
-            "the Windows directory: removing anything here can stop the system booting";
-        let programs_reason =
-            "an installed-programs directory: use the app's own uninstaller instead";
-        let shared_reason = "shared application data used by installed programs";
-
         let mut tree = |value: Option<String>, reason: &str| {
             if let Some(value) = value {
                 let path = PathBuf::from(value);
@@ -179,29 +205,29 @@ impl ProtectedPaths {
         // The compiled-in floor. These are the stock locations on every
         // Windows install; a machine that has moved them still gets them from
         // the variables below.
-        tree(Some("C:\\Windows".to_owned()), windows_reason);
-        tree(Some("C:\\Program Files".to_owned()), programs_reason);
-        tree(Some("C:\\Program Files (x86)".to_owned()), programs_reason);
-        tree(Some("C:\\ProgramData".to_owned()), shared_reason);
+        tree(Some("C:\\Windows".to_owned()), WINDOWS_REASON);
+        tree(Some("C:\\Program Files".to_owned()), PROGRAMS_REASON);
+        tree(Some("C:\\Program Files (x86)".to_owned()), PROGRAMS_REASON);
+        tree(Some("C:\\ProgramData".to_owned()), SHARED_REASON);
 
         tree(
             env.var("WINDIR").or_else(|| env.var("SystemRoot")),
-            windows_reason,
+            WINDOWS_REASON,
         );
-        tree(env.var("ProgramFiles"), programs_reason);
-        tree(env.var("ProgramFiles(x86)"), programs_reason);
-        tree(env.var("ProgramW6432"), programs_reason);
-        tree(env.var("ProgramData"), shared_reason);
+        tree(env.var("ProgramFiles"), PROGRAMS_REASON);
+        tree(env.var("ProgramFiles(x86)"), PROGRAMS_REASON);
+        tree(env.var("ProgramW6432"), PROGRAMS_REASON);
+        tree(env.var("ProgramData"), SHARED_REASON);
 
         entries.push(ProtectedEntry {
             path: normalise(app_data_dir),
             scope: Scope::Tree,
-            reason: "this app's own data directory".to_owned(),
+            reason: APP_DATA_REASON.to_owned(),
         });
         entries.push(ProtectedEntry {
             path: normalise(quarantine_root),
             scope: Scope::Tree,
-            reason: "the quarantine: this is what makes cleaning reversible".to_owned(),
+            reason: QUARANTINE_REASON.to_owned(),
         });
 
         // The profile root itself, but not what is inside it — Downloads and
@@ -210,7 +236,7 @@ impl ProtectedPaths {
             entries.push(ProtectedEntry {
                 path: normalise(Path::new(&profile)),
                 scope: Scope::Exact,
-                reason: "your user profile folder itself".to_owned(),
+                reason: PROFILE_REASON.to_owned(),
             });
         }
 
@@ -219,7 +245,7 @@ impl ProtectedPaths {
             entries.push(ProtectedEntry {
                 path: PathBuf::from(format!("{letter}:")),
                 scope: Scope::Exact,
-                reason: "a drive root".to_owned(),
+                reason: DRIVE_ROOT_REASON.to_owned(),
             });
         }
 
@@ -228,7 +254,7 @@ impl ProtectedPaths {
         entries.push(ProtectedEntry {
             path: PathBuf::from("system volume information"),
             scope: Scope::Tree,
-            reason: "volume metadata managed by Windows".to_owned(),
+            reason: VOLUME_META_REASON.to_owned(),
         });
 
         Self::new(entries)
