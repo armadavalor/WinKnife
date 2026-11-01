@@ -1120,10 +1120,14 @@ export type RepairTool =
   | "check-health"
   | "scan-health"
   | "restore-health"
-  | "analyze-component-store";
+  | "analyze-component-store"
+  | "flush-dns"
+  | "winsock-reset"
+  | "reset-windows-update";
 
 export type RepairVerdict =
   | "no-problems"
+  | "done"
   | "repaired"
   | "could-not-repair"
   | "restart-needed"
@@ -1139,6 +1143,8 @@ export interface RepairToolInfo {
   /** The exact command line run. */
   command: string;
   needsConfirm: boolean;
+  /** True only when the tool downloads through Windows Update (DISM RestoreHealth). */
+  usesWindowsUpdate: boolean;
 }
 
 export interface RepairOutcome {
@@ -1260,6 +1266,7 @@ export type ArchiveOutcome =
   | { outcome: "archived"; entry: ArchiveManifestEntry; manifestWarning: string | null }
   | { outcome: "refused"; reason: string }
   | { outcome: "copyFailed"; reason: string }
+  | { outcome: "cancelled" }
   | { outcome: "quarantineFailed"; archivedPath: string; reason: string };
 
 /** One file of an archive run. */
@@ -1271,6 +1278,7 @@ export interface ArchiveReport {
   manifestPath: string;
   batchId: string;
   items: ArchiveItemReport[];
+  cancelled: boolean;
 }
 
 /* -------------------------------------------------------------------------

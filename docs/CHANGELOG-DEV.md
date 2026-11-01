@@ -2919,9 +2919,24 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 **Built.** 14.5 s looping b-roll at the top of the README: `assets/demo/demo.gif` (640 px, 8 fps, 64 colours, 7.6 MB) linked to `assets/demo/demo.mp4` (1280x720@30, h264, 14.3 MB). Scenes: dashboard, Disk Cleaner with reasons ("Every suggestion says why."), quarantine → restored ("Quarantine first. Restore in one click."), disk map, an 11-tool whip tour with camera motion blur ("Every tool in one place."), end card with the vector knife logo opening and "Fast. Modular. Useful.". The app's Bliss halftone sky (`demo/src/sky.ts`, port of `src/lib/sky.ts`) drifts under everything and loops seamlessly.
 **Decisions.** Stills are 2x transparent CDP captures from `demo.yml -f script=broll` (`scripts/demo/broll.mjs`) on a throwaway runner: fake `C:\Users\Demo` profile and `W:` mapped to `C:\DemoDrive`; no real profile or names in frame (checked). The Remotion GIF codec gave 54 MB (moving halftone), so the GIF is made from the MP4 with Remotion's bundled ffmpeg palettegen (`demo/README.md`); `render:gif` script removed. Draft `assets/demo-remotion.gif` removed; old `assets/demo.gif` (GIF 1, DEMO-SCRIPT) kept but no longer in the README.
 
+---
+
+## 2026-11-01 — Repair kit: network and Windows Update resets (#17)
+
+**Built.** Extended the existing `repair` module (SFC and DISM already shipped in C6) with three tools: `flush-dns` (`ipconfig /flushdns`), `winsock-reset` (`netsh winsock reset`) and `reset-windows-update`. A tool is now a list of steps (`Step`), orchestrated in `RepairService::run`; the `RepairRunner` trait is unchanged. Each tool shows its exact command (steps joined by `&&`), a plain-language "use it when" reason, and RestoreHealth is labelled as using Windows Update. New `done` verdict for the reset tools.
+**Decisions.** The Windows Update reset stops wuauserv/cryptSvc/bits/msiserver, renames `SoftwareDistribution` and `System32\catroot2` to `.old` (never deletes, so it stays reversible) and restarts the services; a failed rename still restarts them. Winsock and Windows Update resets confirm first; flush-dns does not.
+**Not verified.** The `cmd /c ren %SystemRoot%\...` step relies on cmd expanding the variable; unit-tested through the fake runner only, not on a real elevated run.
+
 ## 2026-11-01 — Network: reveal process path (#15)
 
 The Network screen (C14) already listed listening ports and connections with PID, process and path, with filter/search. Added the missing "Show in folder" button per row (reuses `reveal_in_explorer`; EN + TR strings). **Deferred:** per-process traffic (the roadmap's second half) needs ETW or per-connection estats (admin, enable-stats); not attempted here.
+
+## 2026-11-01 — Archiver: cancel during archiving, free-space check
+
+- **Cancel.** The Stop button now works while archiving, not only while scanning. The file being copied stops between chunks; its new, incomplete destination is removed (`Quarantine::discard_incomplete_archive_copy`, only for a file this call created with `create_new`) and the original stays in place. Files already moved stay in the archive. New outcome `cancelled` per item and `cancelled` on `ArchiveReport`; EN+TR strings.
+- **Space.** Before each copy the destination drive's free space is checked; if it is too small, the file is refused before anything is written.
+- Tests: cancel mid-copy keeps the source and drops the target; a copy failure after creation removes only the target; too little space refuses every file; a cancelled scan reports partial results and changes nothing.
+- Local run: 5 symlink tests fail without Developer Mode (loud by design) and `keep_awake` expiry timed out under load; CI decides.
 
 ## 2026-11-01 — K-037: translatable brain/cleaner reasons
 

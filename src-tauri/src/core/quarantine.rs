@@ -339,6 +339,13 @@ pub struct Quarantine {
 }
 
 impl Quarantine {
+    /// Remove an incomplete archive destination that the current call created
+    /// with `create_new`. The caller must never pass a source or pre-existing file.
+    #[allow(clippy::disallowed_methods)] // This is the quarantine-owned cleanup of a new incomplete copy.
+    pub(crate) fn discard_incomplete_archive_copy(&self, target: &Path) -> std::io::Result<()> {
+        fs::remove_file(target)
+    }
+
     /// A quarantine rooted at `{app_data}/quarantine`.
     ///
     /// The policy is re-validated here whatever the caller did, because this is
