@@ -50,7 +50,7 @@ privacy controls; those have not been implemented. Do not advertise them.
 
 The Release candidate workflow can run manually to produce reviewable artifacts.
 A pushed `v*` tag must match package versions and runs all checks before building.
-It attaches the NSIS installer, portable ZIP and SHA256SUMS.txt to a **draft**
+It attaches the NSIS installer, its updater `.sig`, `latest.json`, the portable ZIP and SHA256SUMS.txt to a **draft**
 GitHub Release. A failure must be investigated; do not force a tag or overwrite
 an existing release to make a rerun appear clean.
 
@@ -58,3 +58,20 @@ The maintainer reviews the draft, adds fresh-VM evidence, known limitations,
 VirusTotal links and checksums to the notes, then explicitly publishes it.
 No tag, push, release publication or external file upload is performed by the
 local packaging script.
+
+## In-app updater
+
+The app's "Update now" button downloads `latest.json` from
+`releases/latest/download/` and verifies the installer with the Ed25519 public
+key in `src-tauri/tauri.conf.json`. This is separate from Authenticode.
+
+- The build merges `src-tauri/tauri.release.conf.json` (`createUpdaterArtifacts`)
+  and needs repo secrets `TAURI_SIGNING_PRIVATE_KEY` and
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. `ci.yml` builds without them.
+- The workflow re-signs the installer after the optional SignPath step, so the
+  `.sig` always matches the shipped bytes.
+- `latest.json` appears only once the draft is **published** (the `latest`
+  endpoint ignores drafts). Publishing it is what rolls the update out.
+- Key location: `%USERPROFILE%\.tauri\winknife-updater.key`, password in
+  `winknife-updater.password` beside it. Losing the key means installs already
+  in the field can no longer verify updates; they would need a manual reinstall.

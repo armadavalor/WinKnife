@@ -30,6 +30,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 # File Unlocker: native file/folder picker (open dialog only).
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
@@ -51,6 +52,8 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 dunce = "1.0.5"
 # This app deletes things: every executed item gets an audit line.
 tracing = "0.1"
+# Opt-in update reminder: one small blocking HTTPS GET (core/update_check.rs).
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 

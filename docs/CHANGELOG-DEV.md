@@ -2919,6 +2919,23 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 **Built.** 14.5 s looping b-roll at the top of the README: `assets/demo/demo.gif` (640 px, 8 fps, 64 colours, 7.6 MB) linked to `assets/demo/demo.mp4` (1280x720@30, h264, 14.3 MB). Scenes: dashboard, Disk Cleaner with reasons ("Every suggestion says why."), quarantine → restored ("Quarantine first. Restore in one click."), disk map, an 11-tool whip tour with camera motion blur ("Every tool in one place."), end card with the vector knife logo opening and "Fast. Modular. Useful.". The app's Bliss halftone sky (`demo/src/sky.ts`, port of `src/lib/sky.ts`) drifts under everything and loops seamlessly.
 **Decisions.** Stills are 2x transparent CDP captures from `demo.yml -f script=broll` (`scripts/demo/broll.mjs`) on a throwaway runner: fake `C:\Users\Demo` profile and `W:` mapped to `C:\DemoDrive`; no real profile or names in frame (checked). The Remotion GIF codec gave 54 MB (moving halftone), so the GIF is made from the MP4 with Remotion's bundled ffmpeg palettegen (`demo/README.md`); `render:gif` script removed. Draft `assets/demo-remotion.gif` removed; old `assets/demo.gif` (GIF 1, DEMO-SCRIPT) kept but no longer in the README.
 
+## 2026-11-01 — Opt-in update reminder
+
+**Built.** Off by default. First launch shows a one-time "Notify me when a new version is out?" (Yes enables, No never asks again); Settings has a toggle with a one-line statement of what is contacted. When enabled, at most once per 24 h the backend does one HTTPS GET to the hard-coded `api.github.com/repos/armadavalor/WinKnife/releases/latest` (`core/update_check.rs`, `ureq` + rustls, 10 s timeout, 1 MiB body cap), skips drafts/prereleases, compares semver and, if newer, the shell shows a banner with Download / Later (7 days) / Skip this version. Download opens the stored release URL in the default browser; the URL must start with `https://github.com/armadavalor/WinKnife/releases/` or it is ignored. Failures are logged only.
+**Decisions.** State lives in its own `update-check` settings blob with its own commands, not in `AppSettings` (that struct is tied to profile import/export; a profile must not flip a network setting). The frontend never supplies a URL. Real requests/spawns are gated by `real_os_effects_armed`, so tests never touch the network. README privacy line updated (EN/TR); `about.never.network` already says "unless you turn on an optional feature".
+**Deferred.** No proxy configuration. (In-app install was added in the next entry.)
+
+## 2026-11-01 — In-app update (opt-in reminder + install on click)
+
+Opt-in reminder (off by default, one-time prompt, at most one check per 24 h,
+Later = 7-day snooze, Skip) now installs in-app via `tauri-plugin-updater`
+(Rust-only, `update_install`). Install happens only after "Update now" and a
+confirm; progress is shown; any failure shows the error and falls back to the
+release page (`html_url` guard kept). Release workflow signs the installer with
+the updater key after SignPath and `package-release.ps1` emits `.sig` and
+`latest.json`. Deferred: first updater release (maintainer), signed-installer
+end-to-end test (needs a real published release).
+
 ## 2026-11-01 — DNS switcher (#16)
 
 **Built.** `modules/dns.rs` + `/dns` page: lists up adapters with their IPv4 DNS, switches one to Cloudflare / Google / Quad9 / automatic, and undoes the last change per adapter.

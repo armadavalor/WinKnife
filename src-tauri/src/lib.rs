@@ -446,6 +446,13 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::treemap_cached,
         commands::treemap_propose,
         commands::reveal_in_explorer,
+        commands::update_check_state,
+        commands::update_check_run,
+        commands::update_check_set_enabled,
+        commands::update_check_snooze,
+        commands::update_check_skip,
+        commands::update_check_open,
+        commands::update_install,
         commands::startup_scan,
         commands::startup_enable,
         commands::tweaks_scan,
@@ -581,6 +588,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let app_data_dir = app
                 .path()

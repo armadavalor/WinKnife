@@ -47,7 +47,11 @@ jobs:
           WINKNIFE_EFS_TESTS: "1"
       - run: npm run check
       - run: npm run test:ui
-      - run: npm run tauri build -- --bundles nsis
+      # The updater config is merged here only, so ci.yml builds need no signing key.
+      - run: npm run tauri build -- --bundles nsis --config src-tauri/tauri.release.conf.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       # Optional SignPath signing (docs/SIGNING.md). Every step below is skipped
       # unless the SIGNPATH_API_TOKEN secret exists, so without it the workflow
       # packages the unsigned installer exactly as before. Signing happens before
@@ -97,6 +101,19 @@ jobs:
           if ($target.Count -ne 1) { throw 'Expected exactly one unsigned installer to replace.' }
           Copy-Item -LiteralPath $signed[0].FullName -Destination $target[0].FullName -Force
           "Signed: $($signature.SignerCertificate.Subject)"
+      # The in-app updater verifies this Ed25519 signature, not Authenticode. Sign
+      # again here: SignPath changes the installer bytes after the build signed it.
+      - name: Sign installer for the in-app updater
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $setup = @(Get-ChildItem src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' -File)
+          if ($setup.Count -ne 1) { throw 'Expected exactly one installer to sign.' }
+          Remove-Item -LiteralPath "$($setup[0].FullName).sig" -ErrorAction SilentlyContinue
+          npx tauri signer sign $setup[0].FullName
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath "$($setup[0].FullName).sig")) { throw 'Updater signature was not produced.' }
       - name: Package portable app, installer and checksums
         shell: pwsh
         run: ./scripts/package-release.ps1 -Version $env:WINKNIFE_VERSION

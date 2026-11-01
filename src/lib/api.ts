@@ -66,6 +66,8 @@ import type {
   ScheduledReport,
   ScheduledScanSettings,
   ScheduledScanState,
+  UpdateProgress,
+  UpdateState,
   KeepAwakeStatus,
   ShutdownTick,
   StartupScanResult,
@@ -145,6 +147,7 @@ export const EVENTS = {
   launchNavigate: "launch:navigate",
   keepAwakeChanged: "keep-awake:changed",
   repairOutput: "repair:output",
+  updateProgress: "update:progress",
 } as const;
 
 /* -------------------------------------------------------------------------
@@ -543,6 +546,52 @@ export function scheduledScanSet(settings: ScheduledScanSettings): Promise<Sched
 /** Run the scan if a slot is due; `null` when nothing was due (or one is already running). */
 export function scheduledScanRunDue(): Promise<ScheduledReport | null> {
   return invoke<ScheduledReport | null>("scheduled_scan_run_due");
+}
+
+/* -------------------------------------------------------------------------
+ * Commands — update reminder (opt-in; backend does the one GitHub request)
+ * ---------------------------------------------------------------------- */
+
+/** Saved opt-in answer and the pending notice, if any. No network. */
+export function updateCheckState(): Promise<UpdateState> {
+  return invoke<UpdateState>("update_check_state");
+}
+
+/** Check GitHub if enabled and a day has passed; otherwise just returns the state. */
+export function updateCheckRun(): Promise<UpdateState> {
+  return invoke<UpdateState>("update_check_run");
+}
+
+/** Answer the first-run question / flip the Settings toggle. */
+export function updateCheckSetEnabled(enabled: boolean): Promise<UpdateState> {
+  return invoke<UpdateState>("update_check_set_enabled", { enabled });
+}
+
+/** Hide the notice for 7 days. */
+export function updateCheckSnooze(): Promise<UpdateState> {
+  return invoke<UpdateState>("update_check_snooze");
+}
+
+/** Never show the notice for this version again. */
+export function updateCheckSkip(): Promise<UpdateState> {
+  return invoke<UpdateState>("update_check_skip");
+}
+
+/** Open the stored release page in the default browser (the backend picks the URL). */
+export function updateCheckOpen(): Promise<void> {
+  return invoke<void>("update_check_open");
+}
+
+/** Download, verify and install the update; the installer restarts the app. */
+export function updateInstall(): Promise<void> {
+  return invoke<void>("update_install");
+}
+
+/** Subscribe to the update download's progress. */
+export function onUpdateProgress(
+  handler: (payload: UpdateProgress) => void,
+): Promise<UnlistenFn> {
+  return subscribe(EVENTS.updateProgress, handler);
 }
 
 /* -------------------------------------------------------------------------

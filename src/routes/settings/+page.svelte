@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import { panelOpacity } from "$lib/stores/panelOpacity.svelte";
+  import { updateCheck } from "$lib/stores/updateCheck.svelte";
   import { OPACITY_MAX, OPACITY_MIN } from "$lib/panelOpacity";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import LoadingNote from "$lib/components/LoadingNote.svelte";
@@ -406,6 +407,26 @@
         </li>
       {/each}
     </ul>
+  </section>
+
+  <section class="flex flex-col gap-4 rounded-xl border border-surface-2 bg-surface-1 p-6">
+    <div>
+      <h2 class="text-sm font-medium">{t("update.settingsTitle")}</h2>
+      <p class="mt-1 text-xs leading-relaxed text-ink-muted">
+        {t("update.settingsExplain")}
+      </p>
+    </div>
+    <div class="flex items-center gap-3">
+      <input
+        id="update-check"
+        type="checkbox"
+        class="size-4 shrink-0 accent-[var(--color-accent)]"
+        checked={updateCheck.state?.enabled ?? false}
+        disabled={updateCheck.state === null}
+        onchange={(e) => void updateCheck.setEnabled(e.currentTarget.checked)}
+      />
+      <label for="update-check" class="text-sm text-ink">{t("update.settingsLabel")}</label>
+    </div>
   </section>
 
   <section class="flex flex-col gap-3 rounded-xl border border-surface-2 bg-surface-1 p-6">

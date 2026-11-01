@@ -2001,6 +2001,176 @@ pub fn reveal_in_explorer(path: PathBuf) -> Result<(), ApiError> {
 }
 
 /* -------------------------------------------------------------------------
+ * Update reminder (opt-in; see core/update_check.rs)
+ * ---------------------------------------------------------------------- */
+
+use crate::core::update_check::{self, UpdateSettings, UpdateState};
+
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn update_load(db: &Database) -> crate::core::error::Result<UpdateSettings> {
+    Ok(db
+        .with(|conn| settings::get_module(conn, update_check::SETTINGS_ID))?
+        .unwrap_or_default())
+}
+
+/// Save `next` and return the view the UI renders.
+fn update_save(db: &Database, next: &UpdateSettings) -> crate::core::error::Result<UpdateState> {
+    db.with(|conn| settings::set_module(conn, update_check::SETTINGS_ID, next))?;
+    Ok(update_check::state(
+        next,
+        APP_VERSION,
+        Utc::now().timestamp_millis(),
+    ))
+}
+
+/// Where the update reminder stands. Never touches the network.
+///
+/// # Errors
+/// Returns an error if the settings could not be read.
+#[tauri::command(async)]
+pub fn update_check_state(db: State<'_, Arc<Database>>) -> Result<UpdateState, ApiError> {
+    guarded("update_check_state", || {
+        let current = update_load(&db)?;
+        Ok(update_check::state(
+            &current,
+            APP_VERSION,
+            Utc::now().timestamp_millis(),
+        ))
+    })
+}
+
+/// Run the daily check if the user opted in and one is due. A failed request
+/// is logged and otherwise ignored.
+///
+/// # Errors
+/// Returns an error only if the settings could not be read or saved.
+#[tauri::command(async)]
+pub fn update_check_run(db: State<'_, Arc<Database>>) -> Result<UpdateState, ApiError> {
+    guarded("update_check_run", || {
+        let current = update_load(&db)?;
+        let now = Utc::now().timestamp_millis();
+        if !current.enabled || !update_check::check_due(current.last_check_ms, now) {
+            return Ok(update_check::state(&current, APP_VERSION, now));
+        }
+        let found = match update_check::fetch_latest() {
+            Ok(found) => found,
+            Err(err) => {
+                tracing::info!(error = %err, "update check failed");
+                None
+            }
+        };
+        Ok(update_save(
+            &db,
+            &update_check::after_check(&current, now, found),
+        )?)
+    })
+}
+
+/// Answer the opt-in question (also marks it as asked).
+///
+/// # Errors
+/// Returns an error if the settings could not be saved.
+#[tauri::command(async)]
+pub fn update_check_set_enabled(
+    enabled: bool,
+    db: State<'_, Arc<Database>>,
+) -> Result<UpdateState, ApiError> {
+    guarded("update_check_set_enabled", || {
+        let current = update_load(&db)?;
+        Ok(update_save(
+            &db,
+            &update_check::with_enabled(&current, enabled),
+        )?)
+    })
+}
+
+/// "Later": hide the banner for a week.
+///
+/// # Errors
+/// Returns an error if the settings could not be saved.
+#[tauri::command(async)]
+pub fn update_check_snooze(db: State<'_, Arc<Database>>) -> Result<UpdateState, ApiError> {
+    guarded("update_check_snooze", || {
+        let current = update_load(&db)?;
+        let now = Utc::now().timestamp_millis();
+        Ok(update_save(&db, &update_check::snoozed(&current, now))?)
+    })
+}
+
+/// "Skip this version".
+///
+/// # Errors
+/// Returns an error if the settings could not be saved.
+#[tauri::command(async)]
+pub fn update_check_skip(db: State<'_, Arc<Database>>) -> Result<UpdateState, ApiError> {
+    guarded("update_check_skip", || {
+        let current = update_load(&db)?;
+        Ok(update_save(&db, &update_check::skipped(&current))?)
+    })
+}
+
+/// Open the stored release page in the default browser. The UI never passes a
+/// URL; only the one this module saved (and re-validated) is opened.
+///
+/// # Errors
+/// Returns an error if there is nothing to open or the browser could not start.
+#[tauri::command(async)]
+pub fn update_check_open(db: State<'_, Arc<Database>>) -> Result<(), ApiError> {
+    guarded("update_check_open", || {
+        let current = update_load(&db)?;
+        let url = current.latest_url.unwrap_or_default();
+        update_check::open_release_page(&url).map_err(Into::into)
+    })
+}
+
+/// Download, verify (Ed25519, key in `tauri.conf.json`) and install the
+/// release the updater endpoint advertises. Only the banner's "Update now"
+/// button calls this; the installer closes the app and starts it again.
+/// Progress goes out as [`update_check::PROGRESS_EVENT`].
+///
+/// # Errors
+/// Returns an error when the update cannot be fetched, verified or installed;
+/// the UI then offers the release page instead.
+#[tauri::command]
+pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Result<(), ApiError> {
+    guarded_async("update_install", async move {
+        use tauri::Emitter;
+        use tauri_plugin_updater::UpdaterExt;
+
+        if !crate::core::platform::real_os_effects_armed() {
+            return Err(CoreError::Network("updates are disabled in this process".into()).into());
+        }
+        let fail = |err: tauri_plugin_updater::Error| CoreError::Network(err.to_string());
+        let update = app
+            .updater()
+            .map_err(fail)?
+            .check()
+            .await
+            .map_err(fail)?
+            .ok_or_else(|| CoreError::Network("no update is available".into()))?;
+
+        let mut done: u64 = 0;
+        let events = app.clone();
+        update
+            .download_and_install(
+                move |chunk, total| {
+                    done += chunk as u64;
+                    let _ = events.emit(
+                        update_check::PROGRESS_EVENT,
+                        serde_json::json!({ "downloaded": done, "total": total }),
+                    );
+                },
+                || {},
+            )
+            .await
+            .map_err(fail)?;
+        Ok(())
+    })
+    .await
+}
+
+/* -------------------------------------------------------------------------
  * Startup manager
  * ---------------------------------------------------------------------- */
 

@@ -31,6 +31,7 @@
   import { quarantineStore } from "$lib/stores/quarantine.svelte";
   import { scanStore } from "$lib/stores/scan.svelte";
   import { scheduledScanStore } from "$lib/stores/scheduledScan.svelte";
+  import { updateCheck } from "$lib/stores/updateCheck.svelte";
   import { formatBytes } from "$lib/format";
   import { locale } from "$lib/stores/locale.svelte";
   import { theme } from "$lib/stores/theme.svelte";
@@ -53,6 +54,7 @@
     panelOpacity.init();
     void elevation.init();
     void moduleStore.load();
+    void updateCheck.init();
     void quarantineStore.reload();
     void openLaunchRoute();
     // On start (a slot missed while closed) and then every few minutes (K-021).
@@ -204,6 +206,115 @@
         >
           {t("scheduledScan.dismiss")}
         </button>
+      </div>
+    {/if}
+    {#if updateCheck.askFirst}
+      <div
+        class="mx-6 mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-surface-3 bg-surface-2 px-4 py-3 text-sm text-ink"
+        role="status"
+        data-testid="update-prompt"
+      >
+        <p class="min-w-0 flex-1">{t("update.prompt")}</p>
+        <button
+          type="button"
+          class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent"
+          onclick={() => void updateCheck.setEnabled(true)}
+        >
+          {t("update.promptYes")}
+        </button>
+        <button
+          type="button"
+          class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          onclick={() => void updateCheck.setEnabled(false)}
+        >
+          {t("update.promptNo")}
+        </button>
+      </div>
+    {:else if updateCheck.state?.notice}
+      <div
+        class="mx-6 mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-surface-3 bg-surface-2 px-4 py-3 text-sm text-ink"
+        role="status"
+        data-testid="update-banner"
+      >
+        {#if updateCheck.phase === "installing"}
+          <p class="min-w-0 flex-1">
+            {t("update.installing", { version: updateCheck.state.notice.version })}
+            {#if updateCheck.fraction !== null}
+              {Math.round(updateCheck.fraction * 100)}%
+            {/if}
+          </p>
+          <progress
+            class="w-40"
+            max="1"
+            value={updateCheck.fraction ?? undefined}
+            aria-label={t("update.progress")}
+          ></progress>
+        {:else}
+          <p class="min-w-0 flex-1">
+            {#if updateCheck.phase === "confirming"}
+              {t("update.confirm", { version: updateCheck.state.notice.version })}
+            {:else if updateCheck.phase === "failed"}
+              {t("update.failed", { error: updateCheck.error ?? "" })}
+            {:else}
+              {t("update.banner", { version: updateCheck.state.notice.version })}
+            {/if}
+          </p>
+          {#if updateCheck.phase === "confirming"}
+            <button
+              type="button"
+              class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => void updateCheck.install()}
+            >
+              {t("update.confirmYes")}
+            </button>
+            <button
+              type="button"
+              class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => void updateCheck.download()}
+            >
+              {t("update.notes")}
+            </button>
+            <button
+              type="button"
+              class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => updateCheck.cancel()}
+            >
+              {t("update.cancel")}
+            </button>
+          {:else}
+            {#if updateCheck.phase === "failed"}
+              <button
+                type="button"
+                class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent"
+                onclick={() => void updateCheck.download()}
+              >
+                {t("update.openPage")}
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-accent hover:text-on-accent outline-none focus-visible:outline-2 focus-visible:outline-accent"
+                onclick={() => updateCheck.confirm()}
+              >
+                {t("update.now")}
+              </button>
+            {/if}
+            <button
+              type="button"
+              class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => void updateCheck.snooze()}
+            >
+              {t("update.later")}
+            </button>
+            <button
+              type="button"
+              class="rounded-md px-2 py-1.5 text-sm text-ink-muted outline-none hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              onclick={() => void updateCheck.skip()}
+            >
+              {t("update.skip")}
+            </button>
+          {/if}
+        {/if}
       </div>
     {/if}
     {@render children()}
