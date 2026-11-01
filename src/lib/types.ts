@@ -128,7 +128,17 @@ export interface Recommendation {
   savingsBytes: number;
   /** What Rust re-verifies before it acts. */
   justification: Justification;
+  /** i18n key for `reason`; unknown or missing keys fall back to `reason`. */
+  reasonKey?: string;
+  /** Values for the `{placeholders}` in the `reasonKey` text. */
+  reasonParams?: Record<string, ReasonParam>;
 }
+
+/** A placeholder value: literal text, a number, or a nested translated reason. */
+export type ReasonParam =
+  | string
+  | number
+  | { key: string; params?: Record<string, ReasonParam> };
 
 /** Outcome of applying one recommendation to one finding. */
 export type ExecOutcome =

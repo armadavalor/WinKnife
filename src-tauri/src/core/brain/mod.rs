@@ -27,11 +27,11 @@ pub mod protected;
 pub mod rules;
 pub mod score;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::core::platform::{AlwaysUnlocked, LockProbe, LockState, ProcessProbe, StubProcessProbe};
-use crate::core::types::{Action, Finding, FindingKind, RiskBucket};
+use crate::core::types::{Action, Finding, FindingKind, ReasonKey, RiskBucket};
 
 pub use protected::{gate_path, GateVerdict, ProtectedEntry, ProtectedPaths, Scope};
 pub use rules::{CompiledRule, MaxBucket, RuleAction, RulePack, RuleSpec};
@@ -66,6 +66,8 @@ pub struct Verdict {
     pub action: Action,
     /// Plain-language justification, shown verbatim next to the item.
     pub reason: String,
+    /// The i18n key for `reason`, when every part of it has one.
+    pub reason_key: Option<ReasonKey>,
     /// Which gate or rule decided.
     pub source: VerdictSource,
     /// Pack and rule that matched, when one did.
@@ -87,6 +89,8 @@ impl Verdict {
 pub struct PathRefusal {
     /// Plain-language justification, shown to the user verbatim.
     pub reason: String,
+    /// The i18n key for `reason`, when it has one.
+    pub reason_key: Option<ReasonKey>,
     /// The spelling the path really resolves to, when the gate could work one
     /// out and it was that form which turned out to be protected. For the log —
     /// "`C:\PROGRA~1\x` resolves into `C:\Program Files`" is the interesting
@@ -155,9 +159,19 @@ impl Brain {
     /// harmless. Prefer [`Brain::path_refusal`], which resolves the path first
     /// and consults this with the answer.
     pub fn protection_reason(&self, path: &Path) -> Option<String> {
-        self.protected
-            .reason_for(path)
-            .map(|reason| format!("protected location, not cleanable: {reason}"))
+        self.protection_refusal(path, None)
+            .map(|refusal| refusal.reason)
+    }
+
+    /// [`Brain::protection_reason`] with its i18n key, as a refusal.
+    fn protection_refusal(&self, path: &Path, canonical: Option<PathBuf>) -> Option<PathRefusal> {
+        let why = self.protected.reason_for(path)?;
+        Some(PathRefusal {
+            reason: format!("protected location, not cleanable: {why}"),
+            reason_key: protected::reason_key(why)
+                .map(|why| ReasonKey::plain("brain.protected").with("why", why)),
+            canonical,
+        })
     }
 
     /// Why the hard path gates refuse `path`, or `None` when they do not.
@@ -177,28 +191,27 @@ impl Brain {
         // The lexical list first: it answers for paths that are not on disk,
         // and it is the defence-in-depth layer for the spellings the gate
         // refuses outright.
-        if let Some(reason) = self.protection_reason(path) {
-            return Some(PathRefusal {
-                reason,
-                canonical: None,
-            });
+        if let Some(refusal) = self.protection_refusal(path, None) {
+            return Some(refusal);
         }
 
         match gate_path(path) {
             // `C:\PROGRA~1\…`, a junction and a symlink all name one place while
             // spelling it as another. Only the resolved form answers that.
             GateVerdict::Local(canonical) => {
-                self.protection_reason(&canonical)
-                    .map(|reason| PathRefusal {
-                        reason,
-                        canonical: Some(canonical),
-                    })
+                self.protection_refusal(&canonical.clone(), Some(canonical))
             }
             // Nothing is there to protect: a walk finds nothing and a move
             // reports the miss honestly.
             GateVerdict::Missing => None,
+            // The gate's own sentence names the OS error or the exact shape;
+            // the translated one says only that the path could not be judged.
             GateVerdict::Refused(why) => Some(PathRefusal {
                 reason: format!("left alone: {why}"),
+                reason_key: Some(
+                    ReasonKey::plain("brain.leftAlone.unjudgeable")
+                        .with("path", path.display().to_string()),
+                ),
                 canonical: None,
             }),
         }
@@ -278,6 +291,7 @@ impl Brain {
                 confidence: GATE_CONFIDENCE,
                 action: Action::InfoOnly,
                 reason: refusal.reason,
+                reason_key: refusal.reason_key,
                 source: VerdictSource::ProtectedPath,
                 rule: matched.map(|rule| (rule.pack_id.clone(), rule.spec.id.clone())),
                 scored: None,
@@ -292,6 +306,10 @@ impl Brain {
                 confidence: GATE_CONFIDENCE,
                 action: Action::InfoOnly,
                 reason: format!("left alone: {}", lock.reason()),
+                reason_key: Some(ReasonKey::plain(match lock {
+                    LockState::InUse => "brain.leftAlone.inUse",
+                    _ => "brain.leftAlone.inaccessible",
+                })),
                 source: VerdictSource::Locked,
                 rule: matched.map(|rule| (rule.pack_id.clone(), rule.spec.id.clone())),
                 scored: None,
@@ -333,6 +351,7 @@ impl Brain {
                     confidence: GATE_CONFIDENCE,
                     action: Action::InfoOnly,
                     reason: refusal.reason,
+                    reason_key: refusal.reason_key,
                     source: VerdictSource::ProtectedPath,
                     rule: matched.map(|rule| (rule.pack_id.clone(), rule.spec.id.clone())),
                     scored: None,
@@ -353,6 +372,7 @@ impl Brain {
                 confidence: GATE_CONFIDENCE,
                 action: Action::InfoOnly,
                 reason: "no rule recognises this location, so it is left alone".to_owned(),
+                reason_key: Some(ReasonKey::plain("brain.noRule")),
                 source: VerdictSource::Unknown,
                 rule: None,
                 scored: None,
@@ -391,6 +411,7 @@ impl Brain {
             },
             action,
             reason: reason_for(rule, &scored),
+            reason_key: reason_key_for(rule, &scored),
             source: VerdictSource::Rule,
             rule: Some((rule.pack_id.clone(), rule.spec.id.clone())),
             scored: Some(scored),
@@ -429,6 +450,28 @@ fn reason_for(rule: &CompiledRule, scored: &Scored) -> String {
     };
 
     format!("{}{note}", rule.spec.reason)
+}
+
+/// The i18n key for [`reason_for`]'s sentence; `None` when the rule has no
+/// `reasonKey`, so the UI falls back to the English rule text.
+fn reason_key_for(rule: &CompiledRule, scored: &Scored) -> Option<ReasonKey> {
+    let base = ReasonKey::plain(rule.spec.reason_key.clone()?);
+    if !scored.was_downgraded() {
+        return Some(base);
+    }
+    let wrapped = if scored.fired(score::OWNER_RUNNING_LABEL) {
+        match rule.spec.match_.owner_process_absent.as_deref() {
+            Some(process) => {
+                ReasonKey::plain("brain.downgraded.ownerRunning").with("process", process)
+            }
+            None => ReasonKey::plain("brain.downgraded.ownerRunningUnnamed"),
+        }
+    } else if scored.fired("idle:fresh") {
+        ReasonKey::plain("brain.downgraded.idleFresh")
+    } else {
+        ReasonKey::plain("brain.downgraded.lowScore").with("score", i64::from(scored.score))
+    };
+    Some(wrapped.with("rule", base))
 }
 
 /// Assembles a [`Brain`]. Everything is injectable so a test never depends on

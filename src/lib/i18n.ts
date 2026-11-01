@@ -8,6 +8,7 @@
  * all this app needs.
  */
 import { APP_NAME, APP_TAGLINE } from "$lib/branding";
+import { resolveReason } from "$lib/reason";
 
 /** Locales the app knows about. */
 export type Locale = "en" | "tr";
@@ -1109,6 +1110,43 @@ const en = {
   "scheduledScan.gone": "This scan is no longer in memory (the app restarted or newer scans replaced it). Run a new scan in the cleaner.",
   "scheduledScan.banner": "Scheduled scan: {safe} safe, {review} to review.",
   "scheduledScan.dismiss": "Dismiss",
+  "brain.protected": "protected location, not cleanable: {why}",
+  "brain.leftAlone.unjudgeable": "left alone: {path} cannot be checked against the protected list, so it is treated as protected",
+  "brain.leftAlone.inUse": "left alone: in use by a running program",
+  "brain.leftAlone.inaccessible": "left alone: not accessible with the current permissions",
+  "brain.noRule": "no rule recognises this location, so it is left alone",
+  "brain.downgraded.ownerRunning": "{rule} {process} is running right now, so this is left for you to decide rather than treated as safe.",
+  "brain.downgraded.ownerRunningUnnamed": "{rule} The program that owns this data is running, so this needs your review.",
+  "brain.downgraded.idleFresh": "{rule} Something used this in the last day, so it needs your review first.",
+  "brain.downgraded.lowScore": "{rule} Scored {score} out of 100 here, which is below the bar for removing it automatically.",
+  "protected.traversal": "this path climbs out of its own folder with `..`, which can land anywhere, so it is never treated as cleanable",
+  "protected.unjudgeable": "not a plain local drive-letter path — a UNC share, a device or NT-namespace path, or a relative one — so it cannot be compared with the protected list and is never treated as cleanable",
+  "protected.windows": "the Windows directory: removing anything here can stop the system booting",
+  "protected.programs": "an installed-programs directory: use the app's own uninstaller instead",
+  "protected.shared": "shared application data used by installed programs",
+  "protected.appData": "this app's own data directory",
+  "protected.quarantine": "the quarantine: this is what makes cleaning reversible",
+  "protected.profile": "your user profile folder itself",
+  "protected.driveRoot": "a drive root",
+  "protected.volumeMeta": "volume metadata managed by Windows",
+  "rule.browser-cache.chrome-web-cache": "Chrome's web cache. Chrome refills it as you browse; your history, cookies and saved passwords live elsewhere and are not touched.",
+  "rule.browser-cache.edge-web-cache": "Edge's web cache. Edge refills it as you browse; your history, cookies and saved passwords live elsewhere and are not touched.",
+  "rule.browser-cache.brave-web-cache": "Brave's web cache. Brave refills it as you browse; your history, cookies and saved passwords live elsewhere and are not touched.",
+  "rule.browser-cache.firefox-web-cache": "Firefox's web cache. Firefox refills it as you browse; your profile, bookmarks and logins live elsewhere and are not touched.",
+  "rule.crash-dumps-logs.crash-dumps": "A crash dump written when a program stopped working. Nothing reads it unless you are debugging that crash.",
+  "rule.crash-dumps-logs.error-report-archive": "A Windows Error Reporting record for a crash over a week old. It has already been sent or abandoned.",
+  "rule.crash-dumps-logs.stray-memory-dumps": "A memory dump left in your temp folder over a week ago. These are often large, and they are only useful to whoever was diagnosing that crash.",
+  "rule.dev-caches.npm-cache": "npm's package cache. Everything here can be downloaded again, but your next install will be slower and will need a network connection.",
+  "rule.dev-caches.pip-cache": "pip's wheel cache. Everything here can be downloaded again, but your next install will be slower and will need a network connection.",
+  "rule.dev-caches.cargo-registry-cache": "Cargo's downloaded crate archives. Cargo re-fetches them on the next build that needs them, so this costs build time rather than data.",
+  "rule.dev-caches.gradle-cache": "Gradle's dependency and build cache. Gradle rebuilds it on the next build, which will take considerably longer than usual.",
+  "rule.installer-leftovers.stale-temp-installers": "An installer left in your temp folder over 30 days ago. Removing it uninstalls nothing, but you would have to download it again to repair or reinstall that program.",
+  "rule.old-downloads.untouched-downloads": "Nothing has opened this in your Downloads folder for over 180 days. Downloads are your files, so this is never treated as safe to remove — look before you decide.",
+  "rule.recycle-bin.recycle-bin-contents": "Already in your recycle bin, so you have deleted these once. Emptying is final and does not go to quarantine.",
+  "rule.thumbnail-icon-cache.explorer-cache-databases": "Explorer thumbnail or icon cache; Windows rebuilds it automatically, at the cost of previews loading once more slowly.",
+  "rule.windows-temp.user-temp-files": "Temporary file older than 24 hours in your temp folder; applications recreate these as needed.",
+  "rule.windows-temp.local-app-data-temp": "Temporary file older than 24 hours in the per-user temp folder; safe to remove between sessions.",
+  "rule.windows-update-leftovers.software-distribution-download": "Windows Update kept the installer it downloaded here, and the size shown on this row is space you could get back. It sits inside the Windows directory, which WinKnife reports on and never removes anything from — so this is information, not a suggestion, and there is no button. Windows' own tools will clear it: Settings → System → Storage → Temporary files, or Disk Cleanup with \"Windows Update Cleanup\" ticked.",
 } as const;
 
 /** Turkish overrides. Missing keys fall back to English. */
@@ -2119,6 +2157,43 @@ const tr: Partial<Record<TranslationKey, string>> = {
   "scheduledScan.gone": "Bu tarama artık bellekte değil (uygulama yeniden başladı ya da yeni taramalar yerini aldı). Temizleyicide yeni bir tarama çalıştır.",
   "scheduledScan.banner": "Zamanlanmış tarama: {safe} güvenli, {review} incelenecek.",
   "scheduledScan.dismiss": "Kapat",
+  "brain.protected": "korumalı konum, temizlenemez: {why}",
+  "brain.leftAlone.unjudgeable": "dokunulmadı: {path} korumalı listeyle karşılaştırılamıyor, bu yüzden korumalı sayılıyor",
+  "brain.leftAlone.inUse": "dokunulmadı: çalışan bir program kullanıyor",
+  "brain.leftAlone.inaccessible": "dokunulmadı: mevcut izinlerle erişilemiyor",
+  "brain.noRule": "bu konumu tanıyan bir kural yok, bu yüzden dokunulmadı",
+  "brain.downgraded.ownerRunning": "{rule} {process} şu anda çalışıyor, bu yüzden güvenli sayılmak yerine karar sana bırakıldı.",
+  "brain.downgraded.ownerRunningUnnamed": "{rule} Bu verinin sahibi olan program çalışıyor, bu yüzden incelemen gerekiyor.",
+  "brain.downgraded.idleFresh": "{rule} Son bir gün içinde bir şey bunu kullandı, bu yüzden önce incelemen gerekiyor.",
+  "brain.downgraded.lowScore": "{rule} Burada 100 üzerinden {score} puan aldı; bu, otomatik kaldırma eşiğinin altında.",
+  "protected.traversal": "bu yol `..` ile kendi klasöründen dışarı çıkıyor ve her yere varabilir, bu yüzden asla temizlenebilir sayılmaz",
+  "protected.unjudgeable": "düz bir yerel sürücü harfi yolu değil (UNC paylaşımı, aygıt ya da NT ad alanı yolu veya göreli bir yol), bu yüzden korumalı listeyle karşılaştırılamaz ve asla temizlenebilir sayılmaz",
+  "protected.windows": "Windows klasörü: buradan bir şey silmek sistemin açılmasını engelleyebilir",
+  "protected.programs": "yüklü programlar klasörü: bunun yerine uygulamanın kendi kaldırıcısını kullan",
+  "protected.shared": "yüklü programların kullandığı ortak uygulama verisi",
+  "protected.appData": "bu uygulamanın kendi veri klasörü",
+  "protected.quarantine": "karantina: temizliği geri alınabilir kılan şey bu",
+  "protected.profile": "kullanıcı profil klasörünün kendisi",
+  "protected.driveRoot": "bir sürücü kökü",
+  "protected.volumeMeta": "Windows'un yönettiği birim meta verisi",
+  "rule.browser-cache.chrome-web-cache": "Chrome'un web önbelleği. Chrome sen gezindikçe onu yeniden doldurur; geçmişin, çerezlerin ve kayıtlı parolaların başka yerde durur ve bunlara dokunulmaz.",
+  "rule.browser-cache.edge-web-cache": "Edge'in web önbelleği. Edge sen gezindikçe onu yeniden doldurur; geçmişin, çerezlerin ve kayıtlı parolaların başka yerde durur ve bunlara dokunulmaz.",
+  "rule.browser-cache.brave-web-cache": "Brave'in web önbelleği. Brave sen gezindikçe onu yeniden doldurur; geçmişin, çerezlerin ve kayıtlı parolaların başka yerde durur ve bunlara dokunulmaz.",
+  "rule.browser-cache.firefox-web-cache": "Firefox'un web önbelleği. Firefox sen gezindikçe onu yeniden doldurur; profilin, yer imlerin ve girişlerin başka yerde durur ve bunlara dokunulmaz.",
+  "rule.crash-dumps-logs.crash-dumps": "Bir program çalışmayı bıraktığında yazılan bir çökme dökümü. O çökmeyi ayıklamıyorsan hiçbir şey onu okumaz.",
+  "rule.crash-dumps-logs.error-report-archive": "Bir haftadan eski bir çökmenin Windows Hata Bildirimi kaydı. Zaten gönderildi ya da bırakıldı.",
+  "rule.crash-dumps-logs.stray-memory-dumps": "Bir haftadan uzun süre önce temp klasörüne bırakılmış bir bellek dökümü. Bunlar çoğu zaman büyüktür ve yalnızca o çökmeyi teşhis eden kişinin işine yarar.",
+  "rule.dev-caches.npm-cache": "npm'in paket önbelleği. Buradaki her şey yeniden indirilebilir, ama bir sonraki kurulum daha yavaş olur ve ağ bağlantısı gerektirir.",
+  "rule.dev-caches.pip-cache": "pip'in wheel önbelleği. Buradaki her şey yeniden indirilebilir, ama bir sonraki kurulum daha yavaş olur ve ağ bağlantısı gerektirir.",
+  "rule.dev-caches.cargo-registry-cache": "Cargo'nun indirdiği crate arşivleri. Cargo onları gereken bir sonraki derlemede yeniden indirir; bedeli veri değil, derleme süresidir.",
+  "rule.dev-caches.gradle-cache": "Gradle'ın bağımlılık ve derleme önbelleği. Gradle onu bir sonraki derlemede yeniden kurar ve o derleme her zamankinden epey uzun sürer.",
+  "rule.installer-leftovers.stale-temp-installers": "30 günden uzun süre önce temp klasörüne bırakılmış bir yükleyici. Silmek hiçbir programı kaldırmaz, ama o programı onarmak ya da yeniden kurmak için yükleyiciyi yeniden indirmen gerekir.",
+  "rule.old-downloads.untouched-downloads": "İndirilenler klasöründeki bu öğeyi 180 günü aşkın süredir hiçbir şey açmadı. İndirilenler senin dosyalarındır, bu yüzden asla silinmesi güvenli sayılmaz — karar vermeden önce bir bak.",
+  "rule.recycle-bin.recycle-bin-contents": "Zaten geri dönüşüm kutunda, yani bunları bir kez sildin. Boşaltmak kalıcıdır ve karantinaya gitmez.",
+  "rule.thumbnail-icon-cache.explorer-cache-databases": "Explorer küçük resim ya da simge önbelleği; Windows onu kendiliğinden yeniden kurar, bedeli önizlemelerin bir kez daha yavaş yüklenmesidir.",
+  "rule.windows-temp.user-temp-files": "Temp klasöründe 24 saatten eski geçici dosya; uygulamalar bunları gerektikçe yeniden oluşturur.",
+  "rule.windows-temp.local-app-data-temp": "Kullanıcıya özel temp klasöründe 24 saatten eski geçici dosya; oturumlar arasında silmek güvenlidir.",
+  "rule.windows-update-leftovers.software-distribution-download": "Windows Update indirdiği yükleyiciyi burada tuttu; bu satırda görünen boyut geri kazanabileceğin alandır. Windows klasörünün içinde durur ve WinKnife orayı yalnızca raporlar, oradan hiçbir şey silmez — bu yüzden bu bir öneri değil bilgidir ve düğmesi yoktur. Windows'un kendi araçları temizler: Ayarlar → Sistem → Depolama → Geçici dosyalar ya da \"Windows Update Temizleme\" işaretli Disk Temizleme.",
 };
 
 /** Every key the dictionary knows. */
@@ -2195,4 +2270,9 @@ export function tModuleName(id: string, fallback: string): string {
 /** Translated description for a module manifest. */
 export function tModuleDescription(id: string, fallback: string): string {
   return tDynamic(`module.${id}.description`, fallback);
+}
+
+/** Translated reason for a recommendation; the English `reason` when its key is unknown. */
+export function tReason(rec: Parameters<typeof resolveReason>[0]): string {
+  return resolveReason(rec, lookup);
 }

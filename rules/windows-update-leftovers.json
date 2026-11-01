@@ -13,6 +13,7 @@
       "match": { "min_age_hours": 720 },
       "score": { "base": 60, "max_bucket": "do_not_delete" },
       "action": "info_only",
+      "reasonKey": "rule.windows-update-leftovers.software-distribution-download",
       "reason": "Windows Update kept the installer it downloaded here, and the size shown on this row is space you could get back. It sits inside the Windows directory, which WinKnife reports on and never removes anything from — so this is information, not a suggestion, and there is no button. Windows' own tools will clear it: Settings → System → Storage → Temporary files, or Disk Cleanup with \"Windows Update Cleanup\" ticked.",
       "requires_admin": true
     }

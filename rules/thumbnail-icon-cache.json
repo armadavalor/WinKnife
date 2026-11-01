@@ -13,6 +13,7 @@
       "match": { "min_age_hours": 24 },
       "score": { "base": 88, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.thumbnail-icon-cache.explorer-cache-databases",
       "reason": "Explorer thumbnail or icon cache; Windows rebuilds it automatically, at the cost of previews loading once more slowly."
     }
   ]

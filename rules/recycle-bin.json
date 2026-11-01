@@ -12,6 +12,7 @@
       "paths": ["shell:RecycleBinFolder"],
       "score": { "base": 95, "max_bucket": "safe" },
       "action": "empty_recycle_bin",
+      "reasonKey": "rule.recycle-bin.recycle-bin-contents",
       "reason": "Already in your recycle bin, so you have deleted these once. Emptying is final and does not go to quarantine."
     }
   ]
