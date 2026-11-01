@@ -2104,37 +2104,40 @@ pub fn update_check_open(db: State<'_, Arc<Database>>) -> Result<(), ApiError> {
 /// the UI then offers the release page instead.
 #[tauri::command]
 pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Result<(), ApiError> {
-    use tauri::Emitter;
-    use tauri_plugin_updater::UpdaterExt;
+    guarded_async("update_install", async move {
+        use tauri::Emitter;
+        use tauri_plugin_updater::UpdaterExt;
 
-    if !crate::core::platform::real_os_effects_armed() {
-        return Err(CoreError::Network("updates are disabled in this process".into()).into());
-    }
-    let fail = |err: tauri_plugin_updater::Error| CoreError::Network(err.to_string());
-    let update = app
-        .updater()
-        .map_err(fail)?
-        .check()
-        .await
-        .map_err(fail)?
-        .ok_or_else(|| CoreError::Network("no update is available".into()))?;
+        if !crate::core::platform::real_os_effects_armed() {
+            return Err(CoreError::Network("updates are disabled in this process".into()).into());
+        }
+        let fail = |err: tauri_plugin_updater::Error| CoreError::Network(err.to_string());
+        let update = app
+            .updater()
+            .map_err(fail)?
+            .check()
+            .await
+            .map_err(fail)?
+            .ok_or_else(|| CoreError::Network("no update is available".into()))?;
 
-    let mut done: u64 = 0;
-    let events = app.clone();
-    update
-        .download_and_install(
-            move |chunk, total| {
-                done += chunk as u64;
-                let _ = events.emit(
-                    update_check::PROGRESS_EVENT,
-                    serde_json::json!({ "downloaded": done, "total": total }),
-                );
-            },
-            || {},
-        )
-        .await
-        .map_err(fail)?;
-    Ok(())
+        let mut done: u64 = 0;
+        let events = app.clone();
+        update
+            .download_and_install(
+                move |chunk, total| {
+                    done += chunk as u64;
+                    let _ = events.emit(
+                        update_check::PROGRESS_EVENT,
+                        serde_json::json!({ "downloaded": done, "total": total }),
+                    );
+                },
+                || {},
+            )
+            .await
+            .map_err(fail)?;
+        Ok(())
+    })
+    .await
 }
 
 /* -------------------------------------------------------------------------
