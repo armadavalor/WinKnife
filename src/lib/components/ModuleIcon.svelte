@@ -39,6 +39,7 @@
     menu: "list",
     apps: "layout-grid",
     network: "globe",
+    dns: "globe",
     env: "list",
     leftovers: "folder",
     archive: "folder-search",

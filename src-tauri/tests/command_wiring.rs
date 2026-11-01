@@ -371,6 +371,21 @@ fn probes(sandbox: &Path) -> Vec<Probe> {
             command: "network_list",
             args: json!({}),
         },
+        // Read-only: the backend answers with no adapters while disarmed.
+        Probe {
+            command: "dns_state",
+            args: json!({}),
+        },
+        // Refused: not elevated in a test, and the real backend is disarmed.
+        Probe {
+            command: "dns_apply",
+            args: json!({ "index": 4_294_967_295u32, "preset": "cloudflare" }),
+        },
+        // Refused: nothing is recorded for this adapter.
+        Probe {
+            command: "dns_revert",
+            args: json!({ "index": 4_294_967_295u32 }),
+        },
         // Read-only: HKCU and HKLM environment values are only read.
         Probe {
             command: "env_vars_list",

@@ -366,6 +366,12 @@ pub fn manage_state<R: tauri::Runtime>(
         core::logging::log_dir(app_data_dir),
     )));
 
+    // DNS switcher (#16): PowerShell behind a backend trait; undo list in app data.
+    app.manage(Arc::new(modules::dns::DnsService::new(
+        Arc::new(modules::dns::SystemDns),
+        app_data_dir,
+    )));
+
     // Installed apps (C19): registry reads and lazy signer checks; the
     // launcher only ever opens the Apps settings page.
     app.manage(Arc::new(modules::apps::AppsService::new(
@@ -471,6 +477,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         commands::repair_run,
         commands::repair_cancel,
         commands::network_list,
+        commands::dns_state,
+        commands::dns_apply,
+        commands::dns_revert,
         commands::env_vars_list,
         commands::env_vars_preview,
         commands::env_vars_apply,
