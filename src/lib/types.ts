@@ -1250,6 +1250,7 @@ export type ArchiveOutcome =
   | { outcome: "archived"; entry: ArchiveManifestEntry; manifestWarning: string | null }
   | { outcome: "refused"; reason: string }
   | { outcome: "copyFailed"; reason: string }
+  | { outcome: "cancelled" }
   | { outcome: "quarantineFailed"; archivedPath: string; reason: string };
 
 /** One file of an archive run. */
@@ -1261,6 +1262,7 @@ export interface ArchiveReport {
   manifestPath: string;
   batchId: string;
   items: ArchiveItemReport[];
+  cancelled: boolean;
 }
 
 /* -------------------------------------------------------------------------

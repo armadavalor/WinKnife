@@ -25,7 +25,7 @@
 //! as long as quarantine keeps it.
 
 use std::fs::{self, OpenOptions};
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -33,10 +33,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::brain::{Brain, ProtectedPaths};
+use crate::core::content_hash::full_hash_cancellable;
+#[cfg(test)]
 use crate::core::content_hash::full_hash;
 use crate::core::db::DbAccess;
 use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare::is_inside;
+use crate::core::platform::{SystemVolumes, Volumes};
 use crate::core::quarantine::Quarantine;
 use crate::core::scanner::{self, CancellationToken};
 use crate::core::types::{Finding, FindingKind, Recommendation, RiskBucket};
@@ -329,13 +332,15 @@ pub enum ArchiveOutcome {
         /// Why.
         reason: String,
     },
-    /// The copy failed or did not verify. The original is untouched; a
-    /// half-made copy, if any, stays in the destination and the reason names it.
+    /// The copy failed or did not verify. The original is untouched; any
+    /// half-made destination is removed when possible.
     #[serde(rename_all = "camelCase")]
     CopyFailed {
         /// Why.
         reason: String,
     },
+    /// Cancelled before the source could be quarantined.
+    Cancelled,
     /// The copy verified but the original could not go to quarantine. Both
     /// files exist; nothing was lost.
     #[serde(rename_all = "camelCase")]
@@ -355,16 +360,34 @@ pub fn archive_one(
     batch: Uuid,
     source: &Path,
     dest_dir: &Path,
+    cancel: &CancellationToken,
+) -> ArchiveOutcome {
+    archive_one_with_volumes(quarantine, db, brain, batch, source, dest_dir, cancel, &SystemVolumes)
+}
+
+#[allow(clippy::too_many_arguments)] // The injected volume probe keeps disk-space refusal testable.
+fn archive_one_with_volumes(
+    quarantine: &Quarantine,
+    db: &dyn DbAccess,
+    brain: &Brain,
+    batch: Uuid,
+    source: &Path,
+    dest_dir: &Path,
+    cancel: &CancellationToken,
+    volumes: &dyn Volumes,
 ) -> ArchiveOutcome {
     let refused = |reason: String| ArchiveOutcome::Refused { reason };
+    if cancel.is_cancelled() {
+        return ArchiveOutcome::Cancelled;
+    }
     if let Some(refusal) = brain.path_refusal(source) {
         return refused(refusal.reason);
     }
-    match fs::symlink_metadata(source) {
-        Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() && !is_reparse_point(&meta) => {}
+    let source_size = match fs::symlink_metadata(source) {
+        Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() && !is_reparse_point(&meta) => meta.len(),
         Ok(_) => return refused(format!("`{}` is no longer a plain file", source.display())),
         Err(err) => return refused(format!("`{}` cannot be read: {err}", source.display())),
-    }
+    };
     let Some(name) = source.file_name() else {
         return refused(format!("`{}` has no file name", source.display()));
     };
@@ -376,10 +399,40 @@ pub fn archive_one(
         ));
     }
 
-    let (size_bytes, hash) = match copy_verified(source, &target) {
+    match volumes.for_path(dest_dir) {
+        Some(drive) if drive.free_bytes < source_size => {
+            return refused(format!(
+                "`{}` needs {source_size} bytes, but destination drive `{}` has only {} bytes free",
+                source.display(), drive.root.display(), drive.free_bytes
+            ));
+        }
+        #[cfg(windows)]
+        None => {
+            return refused(format!(
+                "free space on the destination drive for `{}` could not be checked",
+                source.display()
+            ));
+        }
+        _ => {}
+    }
+
+    let (size_bytes, hash) = match copy_verified(source, &target, cancel, quarantine) {
         Ok(facts) => facts,
+        Err(reason) if cancel.is_cancelled() && !target.exists() => {
+            tracing::debug!(path = %source.display(), reason, "archive copy cancelled");
+            return ArchiveOutcome::Cancelled;
+        }
         Err(reason) => return ArchiveOutcome::CopyFailed { reason },
     };
+
+    if cancel.is_cancelled() {
+        if let Err(err) = quarantine.discard_incomplete_archive_copy(&target) {
+            return ArchiveOutcome::CopyFailed {
+                reason: format!("archive cancelled, but `{}` could not be removed: {err}; original untouched", target.display()),
+            };
+        }
+        return ArchiveOutcome::Cancelled;
+    }
 
     let item = match quarantine.take_reporting(db, batch, source) {
         Ok(outcome) => outcome.item,
@@ -409,20 +462,40 @@ pub fn archive_one(
     }
 }
 
-/// Copy `source` to the new file `target` and prove they match. On any failure
-/// the reason is returned. A half-made `target` is left where it is: only
-/// quarantine may remove files (`no_other_module_removes_user_data`).
-fn copy_verified(source: &Path, target: &Path) -> Result<(u64, String), String> {
+/// Copy `source` to the new file `target` and prove they match. On failure,
+/// quarantine removes only the target created by this call.
+fn copy_verified(source: &Path, target: &Path, cancel: &CancellationToken, quarantine: &Quarantine) -> Result<(u64, String), String> {
+    copy_verified_with_hook(source, target, cancel, quarantine, || {})
+}
+
+fn copy_verified_with_hook(
+    source: &Path,
+    target: &Path,
+    cancel: &CancellationToken,
+    quarantine: &Quarantine,
+    mut after_chunk: impl FnMut(),
+) -> Result<(u64, String), String> {
     let mut destination = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(target)
         .map_err(|err| format!("`{}` could not be created: {err}", target.display()))?;
-    let result = (|| {
+    let copied = (|| {
         let mut reader = fs::File::open(source)?;
-        std::io::copy(&mut reader, &mut destination)?;
-        destination.sync_all()?;
-        drop(destination);
+        let mut buffer = [0u8; 128 * 1024];
+        loop {
+            if cancel.is_cancelled() {
+                return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "archive cancelled"));
+            }
+            let count = reader.read(&mut buffer)?;
+            if count == 0 { break; }
+            destination.write_all(&buffer[..count])?;
+            after_chunk();
+        }
+        destination.sync_all()
+    })();
+    drop(destination);
+    let result = copied.and_then(|()| {
         let size = fs::metadata(source)?.len();
         let copied = fs::metadata(target)?.len();
         if size != copied {
@@ -430,22 +503,20 @@ fn copy_verified(source: &Path, target: &Path) -> Result<(u64, String), String> 
                 "the copy is {copied} bytes but the original is {size}"
             )));
         }
-        let hash = full_hash(source)?;
-        if full_hash(target)? != hash {
+        let is_cancelled = || cancel.is_cancelled();
+        let hash = full_hash_cancellable(source, &is_cancelled)?;
+        if full_hash_cancellable(target, &is_cancelled)? != hash {
             return Err(std::io::Error::other("the copy's contents differ from the original"));
         }
+        if cancel.is_cancelled() {
+            return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "archive cancelled"));
+        }
         Ok((size, hash))
-    })();
+    });
     result.map_err(|err| {
-        if target.exists() {
-            tracing::warn!(path = %target.display(), "a failed archive copy was left behind");
-            format!(
-                "copying `{}` failed: {err}. The incomplete copy `{}` was left in place; the original is untouched",
-                source.display(),
-                target.display()
-            )
-        } else {
-            format!("copying `{}` failed: {err}", source.display())
+        match quarantine.discard_incomplete_archive_copy(target) {
+            Ok(()) => format!("copying `{}` failed: {err}; incomplete destination removed, original untouched", source.display()),
+            Err(cleanup) => format!("copying `{}` failed: {err}; incomplete destination `{}` could not be removed: {cleanup}; original untouched", source.display(), target.display()),
         }
     })
 }
@@ -498,6 +569,8 @@ mod tests {
     use crate::core::brain::ProtectedPaths;
     use crate::core::db;
     use crate::core::platform::{AlwaysUnlocked, StubProcessProbe};
+    use crate::core::platform::volume::DriveKind;
+    use crate::core::platform::DriveInfo;
     use crate::core::quarantine::RetentionPolicy;
     use chrono::Duration;
     use std::sync::Arc;
@@ -552,7 +625,7 @@ mod tests {
         fn archive(&self, source: &Path) -> ArchiveOutcome {
             let conn = db::open_in_memory().expect("db");
             let batch = self.quarantine.start_batch();
-            archive_one(&self.quarantine, &conn, &self.brain, batch, source, &self.dest)
+            archive_one(&self.quarantine, &conn, &self.brain, batch, source, &self.dest, &CancellationToken::new())
         }
     }
 
@@ -602,6 +675,68 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_scan_reports_incomplete_results_without_changing_files() {
+        let fx = Fixture::new();
+        let source = fx.write("large.bin", &[7u8; 64]);
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let out = scan(&ScanContext {
+            root: &fx.source_root,
+            protected: fx.brain.protected_paths(),
+            cancel: &cancel,
+            thresholds: SMALL,
+            now: Utc::now() + Duration::days(60),
+        }, None);
+        assert!(out.cancelled);
+        assert!(out.findings.is_empty());
+        assert_eq!(fs::read(source).expect("source"), [7u8; 64]);
+    }
+
+    #[test]
+    fn cancelling_copy_removes_new_target_and_preserves_source() {
+        let fx = Fixture::new();
+        let source = fx.write("large.bin", &[5u8; 256 * 1024]);
+        let target = fx.dest.join("large.bin");
+        let cancel = CancellationToken::new();
+        let reason = copy_verified_with_hook(&source, &target, &cancel, &fx.quarantine, || cancel.cancel())
+            .expect_err("cancelled after the first chunk");
+        assert!(reason.contains("cancelled"), "{reason}");
+        assert!(!target.exists());
+        assert_eq!(fs::metadata(source).expect("source").len(), 256 * 1024);
+    }
+
+    struct LowSpace;
+
+    impl Volumes for LowSpace {
+        fn drives(&self) -> Vec<DriveInfo> { Vec::new() }
+
+        fn for_path(&self, _path: &Path) -> Option<DriveInfo> {
+            Some(DriveInfo {
+                root: PathBuf::from("test-drive"),
+                label: None,
+                total_bytes: 100,
+                free_bytes: 2,
+                kind: DriveKind::Fixed,
+            })
+        }
+    }
+
+    #[test]
+    fn insufficient_destination_space_refuses_each_file_before_copying() {
+        let fx = Fixture::new();
+        let source = fx.write("large.bin", b"larger than two bytes");
+        let conn = db::open_in_memory().expect("db");
+        let outcome = archive_one_with_volumes(
+            &fx.quarantine, &conn, &fx.brain, fx.quarantine.start_batch(),
+            &source, &fx.dest, &CancellationToken::new(), &LowSpace,
+        );
+        let ArchiveOutcome::Refused { reason } = outcome else { panic!("{outcome:?}") };
+        assert!(reason.contains("large.bin") && reason.contains("only 2 bytes free"), "{reason}");
+        assert!(source.exists());
+        assert!(!fx.dest.join("large.bin").exists());
+    }
+
+    #[test]
     fn archive_copies_verifies_then_quarantines() {
         let fx = Fixture::new();
         let source = fx.write("movie.mkv", b"the whole film");
@@ -637,6 +772,7 @@ mod tests {
             fx.quarantine.start_batch(),
             &source,
             &missing,
+            &CancellationToken::new(),
         );
         assert!(matches!(outcome, ArchiveOutcome::CopyFailed { .. }), "{outcome:?}");
         assert_eq!(fs::read(&source).expect("source"), b"the whole film");
@@ -644,15 +780,15 @@ mod tests {
     }
 
     #[test]
-    fn a_copy_that_fails_after_creation_is_reported_not_removed() {
+    fn a_copy_that_fails_after_creation_removes_only_the_target() {
         let fx = Fixture::new();
         let target = fx.dest.join("a.bin");
         // The target gets created, then reading the vanished source fails.
-        let err = copy_verified(&fx.source_root.join("vanished.bin"), &target)
+        let err = copy_verified(&fx.source_root.join("vanished.bin"), &target, &CancellationToken::new(), &fx.quarantine)
             .expect_err("missing source");
         assert!(err.contains("vanished.bin"), "{err}");
-        assert!(target.exists(), "only quarantine removes files");
-        assert!(err.contains("incomplete copy"), "{err}");
+        assert!(!target.exists(), "incomplete destination was removed");
+        assert!(err.contains("incomplete destination removed"), "{err}");
     }
 
     #[test]
