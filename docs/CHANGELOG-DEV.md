@@ -2930,3 +2930,10 @@ decodes on a bounded rayon pool (4 threads) so memory stays flat.
 ## 2026-11-01 — Network: reveal process path (#15)
 
 The Network screen (C14) already listed listening ports and connections with PID, process and path, with filter/search. Added the missing "Show in folder" button per row (reuses `reveal_in_explorer`; EN + TR strings). **Deferred:** per-process traffic (the roadmap's second half) needs ETW or per-connection estats (admin, enable-stats); not attempted here.
+
+## 2026-11-01 — Archiver: cancel during archiving, free-space check
+
+- **Cancel.** The Stop button now works while archiving, not only while scanning. The file being copied stops between chunks; its new, incomplete destination is removed (`Quarantine::discard_incomplete_archive_copy`, only for a file this call created with `create_new`) and the original stays in place. Files already moved stay in the archive. New outcome `cancelled` per item and `cancelled` on `ArchiveReport`; EN+TR strings.
+- **Space.** Before each copy the destination drive's free space is checked; if it is too small, the file is refused before anything is written.
+- Tests: cancel mid-copy keeps the source and drops the target; a copy failure after creation removes only the target; too little space refuses every file; a cancelled scan reports partial results and changes nothing.
+- Local run: 5 symlink tests fail without Developer Mode (loud by design) and `keep_awake` expiry timed out under load; CI decides.

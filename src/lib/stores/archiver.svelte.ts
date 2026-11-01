@@ -34,6 +34,7 @@ class ArchiverStore {
   destination = $state("");
   currentPath = $state<string | null>(null);
   stopping = $state(false);
+  stoppingMove = $state(false);
   report = $state<ArchiveReport | null>(null);
   error = $state<string | null>(null);
 
@@ -115,6 +116,7 @@ class ArchiverStore {
     }
     this.step = "moving";
     this.error = null;
+    this.stoppingMove = false;
     try {
       this.report = await archiveFiles(
         scan.scanId,
@@ -125,6 +127,24 @@ class ArchiverStore {
     } catch (error: unknown) {
       this.error = message(error);
       this.step = "review";
+    } finally {
+      this.stoppingMove = false;
+    }
+  }
+
+  /** Cancel the active copy using the scan id registered by the archive command. */
+  async stopMove(): Promise<void> {
+    if (!this.result) return;
+    this.stoppingMove = true;
+    const scanId = this.result.scanId;
+    try {
+      // The button can be pressed before the command registers its token.
+      for (let attempt = 0; attempt < 20 && this.step === "moving"; attempt++) {
+        if (await cancelScan(scanId)) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    } finally {
+      if (this.step === "moving") this.stoppingMove = false;
     }
   }
 
