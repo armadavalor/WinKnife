@@ -19,7 +19,7 @@ Every finding comes with a reason. Every removal goes to quarantine first.
 
 </div>
 
-**Status:** twenty tools; current release v0.5.0. Interface in English and Turkish.
+**Status:** twenty-one tools; current release v0.6.0. Interface in English and Turkish.
 
 | Tool | What works |
 | --- | --- |
@@ -42,7 +42,8 @@ Every finding comes with a reason. Every removal goes to quarantine first.
 | Scheduled Scan | Runs the read-only cleaner scan on a schedule while the app is open; auto-quarantine is off by default. |
 | Environment Variables | Lists user and system variables; edits user ones with a diff preview and Undo. |
 | Network | Which process listens on or talks to which port; DNS cache flush. Read-only otherwise. |
-| Repair Kit | Windows' own SFC and DISM checks, one click each; the exact command is shown first. |
+| Repair Kit | Windows' own SFC and DISM checks, one click each; the exact command is shown first. Also network stack and Windows Update resets. |
+| DNS switcher | Pick a DNS provider per network adapter; the previous setting is saved and can be restored. |
 
 ## Safety and privacy
 
