@@ -59,7 +59,8 @@ async function pageTarget() {
   while (Date.now() < deadline) {
     try {
       const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-      const page = list.find((t) => t.type === "page" && !t.url.startsWith("about:"));
+      // Only the app's own origin has localStorage; skip about:, data: and error pages.
+      const page = list.find((t) => t.type === "page" && /^https?:/.test(t.url));
       if (page) return page.webSocketDebuggerUrl;
       last = JSON.stringify(list.map((t) => [t.type, t.url]));
     } catch (err) {
@@ -102,13 +103,26 @@ async function evaluate(expression) {
     returnByValue: true,
     awaitPromise: true,
   });
-  if (res.exceptionDetails) throw new Error(res.exceptionDetails.text + ": " + expression);
+  if (res.exceptionDetails) {
+    const detail = res.exceptionDetails.exception?.description ?? res.exceptionDetails.text;
+    throw new Error(detail + ": " + expression);
+  }
   return res.result.value;
 }
 
 // The animated backdrop is on by default and starves a shared CI runner's WebView;
 // the tests are about behaviour, so run them with animations off.
-await evaluate(`localStorage.setItem("winknife.motion", "off")`);
+// The target can appear before the document commits; retry until storage is usable.
+for (let attempt = 1; ; attempt++) {
+  try {
+    await evaluate(`localStorage.setItem("winknife.motion", "off")`);
+    break;
+  } catch (err) {
+    if (attempt >= 30) throw err;
+    console.log(`localStorage not ready (${err.message}), retrying`);
+    await sleep(1000);
+  }
+}
 await cdp.send("Page.reload", {});
 await new Promise((r) => setTimeout(r, 3000));
 
