@@ -18,7 +18,7 @@
   import ListToolbar from "$lib/components/ListToolbar.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatBytes, formatDateTime, truncatePath } from "$lib/format";
-  import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { t, tModuleDescription, tModuleName, tReason } from "$lib/i18n";
   import {
     deselectVisible,
     hiddenSelectedCount,
@@ -506,7 +506,7 @@
           {@const setReason = sharedText(
             set.copies
               .filter((c) => !store.isKeeper(set, c))
-              .map((c) => store.recommendationFor(c)?.reason ?? ""),
+              .map((c) => { const rec = store.recommendationFor(c); return rec ? tReason(rec) : ""; }),
           )}
           <section class="rounded-xl border border-surface-2 bg-surface-1">
             <header class="flex items-center gap-3 px-4 py-3">
@@ -592,9 +592,7 @@
                       <span
                         class="mt-1 block text-xs leading-relaxed text-ink-muted"
                       >
-                        {keeper
-                          ? copy.keeperReason
-                          : (rec?.reason ?? copy.keeperReason)}
+                        {rec ? tReason(rec) : copy.keeperReason}
                       </span>
                     {/if}
                     <span class="mt-1 block text-[0.7rem] text-ink-faint">

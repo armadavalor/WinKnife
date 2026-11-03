@@ -2496,6 +2496,10 @@ mod tests {
             include_str!("../core/brain/protected.rs"),
             include_str!("empty_folders.rs"),
             include_str!("uninstaller.rs"),
+            include_str!("duplicates.rs"),
+            include_str!("duplicates/folders.rs"),
+            include_str!("duplicates/images.rs"),
+            include_str!("tweaks/mod.rs"),
         ];
         let mut emitted: Vec<String> = sources
             .iter()
@@ -2505,9 +2509,13 @@ mod tests {
                     || lit.starts_with("protected.")
                     || lit.starts_with("emptyFolders.")
                     || lit.starts_with("uninstaller.")
+                    || lit.starts_with("duplicates.")
+                    || lit.starts_with("tweaks.")
             })
+            .filter(|lit| !lit.ends_with('.') && *lit != "duplicates.ignoredFolderGroups" && *lit != "tweaks.{}.reason")
             .map(str::to_owned)
             .collect();
+        emitted.extend(crate::modules::tweaks::CATALOG.iter().map(|tweak| format!("tweaks.{}.reason", tweak.id)));
         for pack in rules::load_dir(&repo_rules_dir(), &stock_env()).expect("load") {
             for rule in &pack.spec.rules {
                 let key = rule.reason_key.as_deref();

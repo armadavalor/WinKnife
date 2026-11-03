@@ -18,7 +18,7 @@ use crate::core::executor::TweakControl;
 use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::platform::{Hive, RegValue, Registry};
 use crate::core::types::{
-    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket, MAX_CONFIDENCE,
+    Action, Finding, FindingKind, Justification, ReasonKey, Recommendation, RiskBucket, MAX_CONFIDENCE,
 };
 
 pub mod profile;
@@ -632,6 +632,7 @@ pub fn recommendation(state: &TweakState) -> Option<(Finding, Recommendation)> {
             observed: state.current,
         },
     )
+    .map(|rec| rec.with_reason_key(Some(ReasonKey::plain(format!("tweaks.{}.reason", state.id)))))
     .map_err(|err| tracing::warn!(tweak = state.id.as_str(), %err, "tweak recommendation rejected"))
     .ok()?;
     Some((finding, recommendation))
@@ -943,6 +944,7 @@ mod tests {
         let (_, rec) = recommendation(&states[1]).expect("hidden files offered");
         assert_eq!(rec.action, Action::ApplyTweak);
         assert!(!rec.reason.is_empty());
+        assert_eq!(rec.reason_key.as_deref(), Some("tweaks.show-hidden-files.reason"));
     }
 
     #[test]

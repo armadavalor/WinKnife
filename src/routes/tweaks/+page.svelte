@@ -12,7 +12,7 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
-  import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { t, tDynamic, tModuleDescription, tModuleName } from "$lib/i18n";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import { tweaksUpdateStatus } from "$lib/api";
   import { tweaksStore } from "$lib/stores/tweaks.svelte";
@@ -192,7 +192,7 @@
               <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
                 {t("tweaks.why")}
               </summary>
-              <p class="mt-1 text-xs leading-relaxed text-ink-muted">{tweak.reason}</p>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">{tDynamic(`tweaks.${tweak.id}.reason`, tweak.reason)}</p>
               <!-- No opener plugin: the link is selectable text, never a navigation. -->
               <p class="mt-1 text-xs text-ink-faint">
                 {t("tweaks.appliesTo")}: {tweak.appliesTo}

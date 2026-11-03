@@ -2981,3 +2981,9 @@ The Network screen (C14) already listed listening ports and connections with PID
 
 - Added EN/TR `reasonKey` text for both modules' recommendations and all eight rules. The English `reason` remains the fallback; risk and actions are unchanged.
 - Extended the Rust dictionary coverage test to both modules and their rule packs.
+
+## 2026-11-03 — K-037: duplicate and tweak reasons
+
+- Added EN/TR reason keys for duplicate files, folders, similar images, and every catalog tweak. Path refusal keys pass through; lock reasons use the existing brain keys. The original English reasons remain filled and unchanged.
+- Keeper score notes use eight complete sentence variants instead of nested note fragments; copy, folder, and image counts use nested keys for natural plural wording. The empty-folders, uninstaller, duplicates, and tweaks pages now translate recommendation reasons.
+- Extended the Rust English dictionary coverage test and added recommendation key assertions in all four modules.
