@@ -2987,3 +2987,8 @@ The Network screen (C14) already listed listening ports and connections with PID
 - Added EN/TR reason keys for duplicate files, folders, similar images, and every catalog tweak. Path refusal keys pass through; lock reasons use the existing brain keys. The original English reasons remain filled and unchanged.
 - Keeper score notes use eight complete sentence variants instead of nested note fragments; copy, folder, and image counts use nested keys for natural plural wording. The empty-folders, uninstaller, duplicates, and tweaks pages now translate recommendation reasons.
 - Extended the Rust English dictionary coverage test and added recommendation key assertions in all four modules.
+
+## 2026-11-03 — K-037: archiver, context menu and treemap reasons
+
+- Added EN/TR `reasonKey` text for archiver advice, context-menu entries and treemap tagged files. Context-menu owner and signature explanations use nested `who`/`why` keys; English `reason` stays the fallback.
+- Archiver and context-menu pages render reasons through `tReason`; the existing treemap "Tagged" label moved to `treemap.taggedLabel` without changing its text. The Rust dictionary coverage test includes the new modules. Archive outcomes, tagged refusals and error text remain unchanged.

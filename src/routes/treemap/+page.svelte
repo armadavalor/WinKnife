@@ -664,7 +664,7 @@
                 · {t("treemap.foldedNote", { count: hovered.itemCount })}
               {/if}
               {#if taggedPaths.has(hovered.path)}
-                · {t("treemap.tagged")}
+                · {t("treemap.taggedLabel")}
               {/if}
             </p>
           </div>

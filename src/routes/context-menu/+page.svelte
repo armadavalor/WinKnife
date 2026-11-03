@@ -11,7 +11,7 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
-  import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { t, tModuleDescription, tModuleName, tReason } from "$lib/i18n";
   import { contextMenuStore } from "$lib/stores/context-menu.svelte";
   import { moduleStore } from "$lib/stores/modules.svelte";
   import type { ContextMenuEntry } from "$lib/types";
@@ -119,7 +119,7 @@
               <summary class="cursor-pointer text-xs text-ink-faint hover:text-ink">
                 {t("contextMenu.why")}
               </summary>
-              <p class="mt-1 text-xs leading-relaxed text-ink-muted">{entry.reason}</p>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">{tReason(entry)}</p>
               {#if entry.target}
                 <p class="mt-1 select-text break-all font-mono text-[0.7rem] text-ink-faint">
                   {entry.target}
