@@ -57,7 +57,7 @@ use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, To
 use crate::core::path_compare::CanonicalPath;
 use crate::core::scanner::{self, CancellationToken, WalkOptions};
 use crate::core::types::{
-    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+    Action, Finding, FindingKind, Justification, ReasonKey, Recommendation, RiskBucket,
 };
 
 /// Module id, also the `module` of every finding [`propose`] makes.
@@ -1062,7 +1062,8 @@ fn tagged_file(
             modified: item.modified,
         },
     )
-    .map_err(|err| err.to_string())?;
+    .map_err(|err| err.to_string())?
+    .with_reason_key(Some(ReasonKey::plain("treemap.tagged")));
     Ok((finding, recommendation))
 }
 
@@ -1745,6 +1746,7 @@ mod tests {
         assert_eq!(rec.action, Action::Quarantine);
         assert_eq!(rec.risk, RiskBucket::NeedsReview);
         assert!(!rec.reason.is_empty());
+        assert_eq!(rec.reason_key.as_deref(), Some("treemap.tagged"));
         assert!(matches!(
             rec.justification,
             Justification::UserTagged { size_bytes: 1_234, .. }

@@ -6,6 +6,7 @@
 //! Machine-wide (`HKLM`) entries are shown but never written: changing them
 //! needs elevation, and this module does not ask for it.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -20,7 +21,8 @@ use crate::core::platform::{
     Hive, RegValue, Registry, Signature, SignatureProbe, REG_TYPE_SZ,
 };
 use crate::core::types::{
-    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket, MAX_CONFIDENCE,
+    Action, Finding, FindingKind, Justification, ReasonKey, ReasonParam, Recommendation,
+    RiskBucket, MAX_CONFIDENCE,
 };
 
 /// Prefix that marks a tweak id as belonging to this module (see [`TweakRouter`]).
@@ -91,19 +93,24 @@ pub struct ContextMenuEntry {
     /// An open undo record exists for this entry.
     pub undoable: bool,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_key: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub reason_params: BTreeMap<String, ReasonParam>,
 }
 
 /// The owner of an entry, as far as its file's signature shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Owner {
     Known { publisher: String },
-    Unknown { why: String },
+    Unknown { why: String, why_key: ReasonKey },
 }
 
 fn classify_owner(file: Option<&Path>, signature: Option<&Signature>) -> Owner {
     let Some(file) = file else {
         return Owner::Unknown {
             why: "the file it runs could not be found".to_owned(),
+            why_key: ReasonKey::plain("contextMenu.why.notFound"),
         };
     };
     match signature {
@@ -114,15 +121,24 @@ fn classify_owner(file: Option<&Path>, signature: Option<&Signature>) -> Owner {
         },
         Some(Signature::Signed { .. }) => Owner::Unknown {
             why: format!("{} is signed but names no publisher", file.display()),
+            why_key: ReasonKey::plain("contextMenu.why.signedNoPublisher")
+                .with("file", file.display().to_string()),
         },
         Some(Signature::Unsigned) => Owner::Unknown {
             why: format!("{} is not signed", file.display()),
+            why_key: ReasonKey::plain("contextMenu.why.unsigned")
+                .with("file", file.display().to_string()),
         },
         Some(Signature::Unknown { reason }) => Owner::Unknown {
             why: format!("the signature of {} could not be checked: {reason}", file.display()),
+            why_key: ReasonKey::plain("contextMenu.why.unchecked")
+                .with("file", file.display().to_string())
+                .with("reason", reason.clone()),
         },
         None => Owner::Unknown {
             why: format!("the signature of {} was not checked", file.display()),
+            why_key: ReasonKey::plain("contextMenu.why.notChecked")
+                .with("file", file.display().to_string()),
         },
     }
 }
@@ -138,13 +154,31 @@ fn entry_reason(owner: &Owner, file: Option<&Path>, editable: bool) -> String {
             format!("Added by {publisher} ({}).", file_name(file))
         }
         (Owner::Known { publisher }, None) => format!("Added by {publisher}."),
-        (Owner::Unknown { why }, _) => format!("Owner unknown: {why}. Needs review."),
+        (Owner::Unknown { why, .. }, _) => format!("Owner unknown: {why}. Needs review."),
     };
     if editable {
         format!("{who} Disabling hides it from the right-click menu; Undo brings it back.")
     } else {
         format!("{who} {NEEDS_ADMIN}")
     }
+}
+
+fn entry_reason_key(owner: &Owner, file: Option<&Path>, editable: bool) -> ReasonKey {
+    let who = match (owner, file) {
+        (Owner::Known { publisher }, Some(file)) => ReasonKey::plain("contextMenu.who.known")
+            .with("publisher", publisher.clone())
+            .with("file", file_name(file)),
+        (Owner::Known { publisher }, None) => ReasonKey::plain("contextMenu.who.knownNoFile")
+            .with("publisher", publisher.clone()),
+        (Owner::Unknown { why_key, .. }, _) => ReasonKey::plain("contextMenu.who.unknown")
+            .with("why", why_key.clone()),
+    };
+    ReasonKey::plain(if editable {
+        "contextMenu.entry.editable"
+    } else {
+        "contextMenu.entry.needsAdmin"
+    })
+    .with("who", who)
 }
 
 fn classes(scope: &str) -> String {
@@ -267,8 +301,11 @@ impl ContextMenuService {
         let owner = classify_owner(file.as_deref(), signature.as_ref());
         let editable = raw.hive == Hive::CurrentUser;
         let undoable = open_row(conn, &tweak_id_of(&raw.id))?.is_some();
+        let reason_key = entry_reason_key(&owner, file.as_deref(), editable);
         Ok(ContextMenuEntry {
             reason: entry_reason(&owner, file.as_deref(), editable),
+            reason_key: Some(reason_key.key),
+            reason_params: reason_key.params,
             path: format!("{}\\{}", raw.hive.short_name(), entry_key(&raw)),
             publisher: match owner {
                 Owner::Known { publisher } => Some(publisher),
@@ -594,6 +631,10 @@ pub fn recommendation(entry: &ContextMenuEntry) -> Option<(Finding, Recommendati
             observed: Some(OBSERVED_ENABLED),
         },
     )
+    .map(|rec| rec.with_reason_key(entry.reason_key.as_ref().map(|key| ReasonKey {
+        key: key.clone(),
+        params: entry.reason_params.clone(),
+    })))
     .map_err(|err| tracing::warn!(entry = entry.id.as_str(), error = %err, "context-menu recommendation rejected"))
     .ok()?;
     Some((finding, recommendation))
@@ -767,6 +808,12 @@ mod tests {
         let verb = only(&entries, EntryKind::Verb);
         assert_eq!(verb.publisher.as_deref(), Some("Contoso Ltd"));
         assert!(verb.reason.starts_with("Added by Contoso Ltd (tool.exe)."), "{}", verb.reason);
+        assert_eq!(verb.reason_key.as_deref(), Some("contextMenu.entry.editable"));
+        assert_eq!(verb.reason_params["who"], ReasonParam::Reason(
+            ReasonKey::plain("contextMenu.who.known")
+                .with("publisher", "Contoso Ltd")
+                .with("file", "tool.exe"),
+        ));
         assert!(verb.editable && !verb.disabled);
 
         let handler = only(&entries, EntryKind::Handler);
@@ -789,6 +836,7 @@ mod tests {
             panic!("not a tweak");
         };
         assert_eq!(rec.risk, RiskBucket::NeedsReview);
+        assert_eq!(rec.reason_key.as_deref(), Some("contextMenu.entry.editable"));
         assert_eq!(service.refusal(tweak_id, *observed), None);
 
         service.apply(&conn, tweak_id).expect("apply");

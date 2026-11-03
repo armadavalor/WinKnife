@@ -2500,6 +2500,9 @@ mod tests {
             include_str!("duplicates/folders.rs"),
             include_str!("duplicates/images.rs"),
             include_str!("tweaks/mod.rs"),
+            include_str!("archiver.rs"),
+            include_str!("context_menu.rs"),
+            include_str!("treemap.rs"),
         ];
         let mut emitted: Vec<String> = sources
             .iter()
@@ -2511,6 +2514,9 @@ mod tests {
                     || lit.starts_with("uninstaller.")
                     || lit.starts_with("duplicates.")
                     || lit.starts_with("tweaks.")
+                    || lit.starts_with("archiver.")
+                    || lit.starts_with("contextMenu.")
+                    || lit.starts_with("treemap.")
             })
             .filter(|lit| !lit.ends_with('.') && *lit != "duplicates.ignoredFolderGroups" && *lit != "tweaks.{}.reason")
             .map(str::to_owned)

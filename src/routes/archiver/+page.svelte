@@ -15,7 +15,7 @@
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { pickFolder } from "$lib/api";
   import { formatBytes, formatCount, truncatePath } from "$lib/format";
-  import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { t, tModuleDescription, tModuleName, tReason } from "$lib/i18n";
   import {
     deselectVisible,
     hiddenSelectedCount,
@@ -278,7 +278,7 @@
               </span>
               {#if rec}
                 <span class="mt-1 block text-xs leading-relaxed text-ink-muted">
-                  {rec.reason}
+                  {tReason(rec)}
                 </span>
               {/if}
             </span>

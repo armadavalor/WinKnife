@@ -42,7 +42,7 @@ use crate::core::path_compare::is_inside;
 use crate::core::platform::{SystemVolumes, Volumes};
 use crate::core::quarantine::Quarantine;
 use crate::core::scanner::{self, CancellationToken};
-use crate::core::types::{Finding, FindingKind, Recommendation, RiskBucket};
+use crate::core::types::{Finding, FindingKind, ReasonKey, Recommendation, RiskBucket};
 
 /// Module id, also the UI route.
 pub const MODULE_ID: &str = "archiver";
@@ -217,7 +217,8 @@ fn recommend(finding: &Finding, brain: &Brain) -> crate::core::error::Result<Rec
             GATE_CONFIDENCE,
             refusal.reason,
             0,
-        );
+        )
+        .map(|rec| rec.with_reason_key(refusal.reason_key));
     }
     let age_days = finding
         .meta
@@ -236,6 +237,11 @@ fn recommend(finding: &Finding, brain: &Brain) -> crate::core::error::Result<Rec
         reason,
         finding.size_bytes,
     )
+    .map(|rec| rec.with_reason_key(Some(
+        ReasonKey::plain("archiver.advice")
+            .with("gb", format!("{:.1}", finding.size_bytes as f64 / BYTES_PER_GIB))
+            .with("days", age_days),
+    )))
 }
 
 /// Check the folder the user picked as an archive destination.
@@ -672,6 +678,7 @@ mod tests {
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].risk, RiskBucket::NeedsReview);
         assert!(recs[0].reason.contains("days"), "{}", recs[0].reason);
+        assert_eq!(recs[0].reason_key.as_deref(), Some("archiver.advice"));
     }
 
     #[test]
@@ -815,6 +822,14 @@ mod tests {
         let finding = Finding::new(MODULE_ID, &source, FindingKind::File);
         let recs = analyze(&[finding], &fx.brain);
         assert_eq!(recs[0].risk, RiskBucket::DoNotDelete);
+        assert_eq!(recs[0].reason_key, fx.brain.path_refusal(&source).expect("refusal").reason_key.map(|key| key.key));
+    }
+
+    #[test]
+    fn an_unjudgeable_path_keeps_the_brain_refusal_key() {
+        let finding = Finding::new(MODULE_ID, "relative/file", FindingKind::File);
+        let rec = recommend(&finding, &Brain::new()).expect("informational");
+        assert_eq!(rec.reason_key.as_deref(), Some("brain.protected"));
     }
 
     #[test]

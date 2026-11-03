@@ -815,6 +815,8 @@ export interface ContextMenuEntry {
   /** WinKnife disabled it and can put it back. */
   undoable: boolean;
   reason: string;
+  reasonKey?: string;
+  reasonParams?: Record<string, ReasonParam>;
 }
 
 /** What `context_menu_scan` hands back. */
