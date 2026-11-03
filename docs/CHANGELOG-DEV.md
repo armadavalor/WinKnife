@@ -2976,3 +2976,8 @@ The Network screen (C14) already listed listening ports and connections with PID
 - **UI.** `src/lib/reason.ts` resolves a key tree; any unknown key (top or nested) falls back to the English `reason`, never to an empty string. `tReason` in `i18n.ts`; `FindingList` uses it. 37 EN + TR entries.
 - **Tests.** `reason.test.ts` (fallbacks); Rust `every_brain_and_cleaner_reason_key_has_an_english_text` checks every emitted key and every rule's `reasonKey` against the `en` table.
 - **Deferred.** Other modules' texts, manifest names, `ExecItemResult` errors and `AppError` codes (DECISIONS-NEEDED, K-022).
+
+## 2026-11-03 — K-037: empty folders and uninstaller reasons
+
+- Added EN/TR `reasonKey` text for both modules' recommendations and all eight rules. The English `reason` remains the fallback; risk and actions are unchanged.
+- Extended the Rust dictionary coverage test to both modules and their rule packs.

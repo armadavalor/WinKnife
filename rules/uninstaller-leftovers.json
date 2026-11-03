@@ -12,6 +12,7 @@
       "paths": ["%APPDATA%\\*", "%LOCALAPPDATA%\\*"],
       "score": { "base": 60, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.uninstaller-leftovers.app-data",
       "reason": "No program in the Windows list of installed apps has a name that matches this folder, so it is probably left over from an app you removed. Names do not always match, so check before moving it to quarantine."
     }
   ]
