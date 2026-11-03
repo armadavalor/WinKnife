@@ -17,7 +17,7 @@
   import ListToolbar from "$lib/components/ListToolbar.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import { formatCount, truncatePath } from "$lib/format";
-  import { t, tModuleDescription, tModuleName } from "$lib/i18n";
+  import { t, tModuleDescription, tModuleName, tReason } from "$lib/i18n";
   import {
     deselectVisible,
     hiddenSelectedCount,
@@ -76,7 +76,7 @@
   // One reason on every row is said once, above the list.
   const sharedReason = $derived(
     sharedText(
-      visibleFindings.map((f) => store.recommendationFor(f)?.reason ?? ""),
+      visibleFindings.map((f) => { const rec = store.recommendationFor(f); return rec ? tReason(rec) : ""; }),
     ) || null,
   );
 
@@ -283,7 +283,7 @@
               </span>
               {#if rec && !(sharedReason && visibleFindings.length > 1)}
                 <span class="mt-1 block text-xs leading-relaxed text-ink-muted">
-                  {rec.reason}
+                  {tReason(rec)}
                 </span>
               {/if}
               {#if nested > 0}

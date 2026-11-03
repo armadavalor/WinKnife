@@ -31,9 +31,10 @@ use super::{
 use super::is_hidden_or_system;
 use crate::core::brain::Brain;
 use crate::core::content_hash::full_hash_cancellable;
+use crate::core::platform::LockState;
 use crate::core::scanner::{self, WalkOptions};
 use crate::core::types::{
-    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+    Action, Finding, FindingKind, Justification, ReasonKey, Recommendation, RiskBucket,
 };
 
 /// Largest Hamming distance (of 64 bits) still called "similar": 87.5 %.
@@ -499,16 +500,28 @@ fn analyze_group(
     let mut recommendations = Vec::new();
     for (index, member) in members.iter().enumerate() {
         let similar = similarity(member.dhash, members[keeper].dhash);
-        let refusal = brain.path_refusal(&member.path).map(|r| r.reason).or_else(|| {
+        let refusal = brain.path_refusal(&member.path).map(|r| (r.reason, r.reason_key)).or_else(|| {
             let lock = brain.lock_state(&member.path);
-            (!lock.is_free()).then(|| format!("left alone: {}", lock.reason()))
+            (!lock.is_free()).then(|| (format!("left alone: {}", lock.reason()), Some(ReasonKey::plain(match lock {
+                LockState::InUse => "brain.leftAlone.inUse",
+                _ => "brain.leftAlone.inaccessible",
+            }))))
         });
-        let (risk, action, reason) = match (&refusal, index == keeper) {
-            (Some(why), _) => (RiskBucket::DoNotDelete, Action::InfoOnly, why.clone()),
+        let (risk, action, reason, reason_key) = match (&refusal, index == keeper) {
+            (Some((why, key)), _) => (RiskBucket::DoNotDelete, Action::InfoOnly, why.clone(), key.clone()),
             (None, true) => (
                 RiskBucket::NeedsReview,
                 Action::InfoOnly,
                 format!("{keep_reason} {others} like it."),
+                Some(ReasonKey::plain(if preferred.is_some_and(|p| crate::core::path_compare::same_path(p, &keeper_path)) {
+                    "duplicates.images.keeperChosen"
+                } else {
+                    "duplicates.images.keeperPixels"
+                }).with("others", ReasonKey::plain(if members.len() == 2 {
+                    "duplicates.images.other.one"
+                } else {
+                    "duplicates.images.other.many"
+                }).with("count", (members.len() - 1) as i64))),
             ),
             (None, false) => (
                 RiskBucket::NeedsReview,
@@ -520,6 +533,11 @@ fn analyze_group(
                     members[keeper].meta.width,
                     members[keeper].meta.height,
                 ),
+                Some(ReasonKey::plain("duplicates.images.similarReason")
+                    .with("similarity", i64::from(similar))
+                    .with("keeper", keeper_path.display().to_string())
+                    .with("width", i64::from(members[keeper].meta.width))
+                    .with("height", i64::from(members[keeper].meta.height))),
             ),
         };
         let rec = Recommendation::new(
@@ -534,6 +552,7 @@ fn analyze_group(
                 keeper_path: keeper_path.clone(),
             },
         )
+        .map(|rec| rec.with_reason_key(reason_key))
         .map_err(|err| {
             tracing::error!(path = %member.path.display(), error = %err, "dropped a similar-image recommendation");
         })
@@ -638,6 +657,7 @@ mod tests {
         };
         assert!(keeper_path.ends_with("big.png"));
         assert!(movers[0].reason.contains('%'), "the reason shows the similarity");
+        assert_eq!(movers[0].reason_key.as_deref(), Some("duplicates.images.similarReason"));
     }
 
     #[test]

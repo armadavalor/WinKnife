@@ -29,14 +29,15 @@ use super::{
     is_hidden_or_system, plural, resolve_root, DuplicateContext, DuplicateProgress, ProgressSink,
     Stage, DUPLICATE_CONFIDENCE,
 };
-use crate::core::brain::Brain;
+use crate::core::brain::{Brain, PathRefusal};
 use crate::core::content_hash::full_hash_cancellable;
 use crate::core::error::Result;
 use crate::core::path_compare;
+use crate::core::platform::LockState;
 use crate::core::scanner::{self, WalkOptions};
 use crate::core::settings;
 use crate::core::types::{
-    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+    Action, Finding, FindingKind, Justification, ReasonKey, Recommendation, RiskBucket,
 };
 
 /// Settings key of the ignored group ids (`Vec<String>`).
@@ -505,6 +506,7 @@ struct Planned {
     risk: RiskBucket,
     action: Action,
     reason: String,
+    reason_key: Option<ReasonKey>,
 }
 
 /// Turn folder findings into groups and per-file recommendations. Never Safe.
@@ -563,9 +565,9 @@ fn analyze_group(
 ) -> (FolderGroup, Vec<Recommendation>) {
     let (keeper, keep_reason) = pick_keeper(&members, &rule);
     let keeper_path = members[keeper].path.clone();
-    let refusals: Vec<Option<String>> = members
+    let refusals: Vec<Option<PathRefusal>> = members
         .iter()
-        .map(|m| brain.path_refusal(&m.path).map(|r| r.reason))
+        .map(|m| brain.path_refusal(&m.path))
         .collect();
 
     let others = plural(members.len() - 1, "folder holds", "folders hold");
@@ -576,19 +578,33 @@ fn analyze_group(
             member.files.iter().map(move |file| (index, file))
         })
         .map(|(index, file)| {
-            let (risk, action, reason) = if let Some(why) = refusals[index]
+            let (risk, action, reason, reason_key) = if let Some(why) = refusals[index]
                 .clone()
-                .or_else(|| brain.path_refusal(&file.path).map(|r| r.reason))
+                .or_else(|| brain.path_refusal(&file.path))
             {
-                (RiskBucket::DoNotDelete, Action::InfoOnly, why)
+                (RiskBucket::DoNotDelete, Action::InfoOnly, why.reason, why.reason_key)
             } else if !brain.lock_state(&file.path).is_free() {
                 let lock = brain.lock_state(&file.path);
-                (RiskBucket::DoNotDelete, Action::InfoOnly, format!("left alone: {}", lock.reason()))
+                (RiskBucket::DoNotDelete, Action::InfoOnly, format!("left alone: {}", lock.reason()), Some(ReasonKey::plain(match lock {
+                    LockState::InUse => "brain.leftAlone.inUse",
+                    _ => "brain.leftAlone.inaccessible",
+                })))
             } else if index == keeper {
+                let key = match &rule {
+                    KeepRule::Oldest => ReasonKey::plain("duplicates.folders.keeperOldest"),
+                    KeepRule::Newest => ReasonKey::plain("duplicates.folders.keeperNewest"),
+                    KeepRule::PreferredFolder(folder) if path_compare::same_path(folder, &keeper_path) || path_compare::is_inside(folder, &keeper_path) => ReasonKey::plain("duplicates.folders.keeperPreferred").with("folder", folder.display().to_string()),
+                    KeepRule::PreferredFolder(folder) => ReasonKey::plain("duplicates.folders.keeperPreferredMissing").with("folder", folder.display().to_string()),
+                };
                 (
                     RiskBucket::NeedsReview,
                     Action::InfoOnly,
                     format!("{keep_reason} The other {others} the same files."),
+                    Some(key.with("others", ReasonKey::plain(if members.len() == 2 {
+                        "duplicates.folders.other.one"
+                    } else {
+                        "duplicates.folders.other.many"
+                    }).with("count", (members.len() - 1) as i64))),
                 )
             } else {
                 (
@@ -600,9 +616,12 @@ fn analyze_group(
                         keeper_path.display(),
                         keeper_path.join(&file.rel).display()
                     ),
+                    Some(ReasonKey::plain("duplicates.folders.copy")
+                        .with("keeper", keeper_path.display().to_string())
+                        .with("sameFile", keeper_path.join(&file.rel).display().to_string())),
                 )
             };
-            Planned { member: index, file: file.clone(), risk, action, reason }
+            Planned { member: index, file: file.clone(), risk, action, reason, reason_key }
         })
         .collect();
     let plan = keep_at_least_one(plan);
@@ -635,6 +654,7 @@ fn keep_at_least_one(plan: Vec<Planned>) -> Vec<Planned> {
                     reason: "Left alone: every copy of this file would have been quarantined, \
                              and one copy always stays."
                         .to_owned(),
+                    reason_key: Some(ReasonKey::plain("duplicates.folders.keepOne")),
                     ..planned
                 }
             }
@@ -662,6 +682,7 @@ fn to_recommendation(planned: &Planned, keeper: usize, keeper_path: &Path) -> Op
         savings,
         justification,
     )
+    .map(|rec| rec.with_reason_key(planned.reason_key.clone()))
     .map_err(|err| {
         tracing::error!(
             path = %planned.file.path.display(),
@@ -678,7 +699,7 @@ fn build_group(
     members: &[Draft],
     keeper: usize,
     keep_reason: &str,
-    refusals: &[Option<String>],
+    refusals: &[Option<PathRefusal>],
     recommendations: &[Recommendation],
 ) -> FolderGroup {
     let size_bytes: u64 = members[keeper].files.iter().map(|f| f.size).sum();
@@ -689,7 +710,7 @@ fn build_group(
         .map(|(index, member)| {
             let finding_ids: Vec<Uuid> = member.files.iter().map(|f| f.finding_id).collect();
             let reason = match (&refusals[index], index == keeper) {
-                (Some(why), _) => why.clone(),
+                (Some(why), _) => why.reason.clone(),
                 (None, true) => keep_reason.to_owned(),
                 (None, false) => format!(
                     "Identical to `{}`; its files go to quarantine and can be restored.",
@@ -953,8 +974,10 @@ mod tests {
                 assert_ne!(rec.risk, RiskBucket::Safe);
                 if keeper.recommendation_ids.contains(&rec.id) {
                     assert_eq!(rec.action, Action::InfoOnly);
+                    assert!(rec.reason_key.as_deref().is_some_and(|key| key.starts_with("duplicates.folders.keeper")));
                 } else {
                     assert_eq!(rec.action, Action::Quarantine, "{}", rec.reason);
+                    assert_eq!(rec.reason_key.as_deref(), Some("duplicates.folders.copy"));
                 }
                 assert!(!rec.reason.trim().is_empty());
             }
@@ -977,6 +1000,7 @@ mod tests {
             risk: RiskBucket::NeedsReview,
             action,
             reason: "x".to_owned(),
+            reason_key: None,
         };
         let plan = vec![
             planned(0, "a", Action::Quarantine),

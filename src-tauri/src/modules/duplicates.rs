@@ -51,10 +51,10 @@ use crate::core::brain::{self, Brain, GateVerdict, ProtectedPaths};
 use crate::core::content_hash::full_hash_cancellable;
 use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare;
-use crate::core::platform::{file_identity, EnvResolver, FileId};
+use crate::core::platform::{file_identity, EnvResolver, FileId, LockState};
 use crate::core::scanner::{self, CancellationToken};
 use crate::core::types::{
-    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+    Action, Finding, FindingKind, Justification, ReasonKey, Recommendation, RiskBucket,
 };
 
 pub mod folders;
@@ -776,13 +776,17 @@ pub fn analyze(scan: &DuplicateScan, brain: &Brain) -> Vec<Recommendation> {
             let refusal = brain.path_refusal(&copy.path);
             let lock = brain.lock_state(&copy.path);
 
-            let (risk, action, reason) = if let Some(refusal) = refusal {
-                (RiskBucket::DoNotDelete, Action::InfoOnly, refusal.reason)
+            let (risk, action, reason, reason_key) = if let Some(refusal) = refusal {
+                (RiskBucket::DoNotDelete, Action::InfoOnly, refusal.reason, refusal.reason_key)
             } else if !lock.is_free() {
                 (
                     RiskBucket::DoNotDelete,
                     Action::InfoOnly,
                     format!("left alone: {}", lock.reason()),
+                    Some(ReasonKey::plain(match lock {
+                        LockState::InUse => "brain.leftAlone.inUse",
+                        _ => "brain.leftAlone.inaccessible",
+                    })),
                 )
             } else if copy.keeper {
                 (
@@ -793,6 +797,9 @@ pub fn analyze(scan: &DuplicateScan, brain: &Brain) -> Vec<Recommendation> {
                         copy.keeper_reason,
                         plural(set.copies.len() - 1, "copy", "copies"),
                     ),
+                    Some(keeper_reason_key(&copy.keeper_reason).with("others", ReasonKey::plain(
+                        if set.copies.len() == 2 { "duplicates.otherCopy.one" } else { "duplicates.otherCopy.many" }
+                    ).with("count", (set.copies.len() - 1) as i64))),
                 )
             } else {
                 (
@@ -809,6 +816,13 @@ pub fn analyze(scan: &DuplicateScan, brain: &Brain) -> Vec<Recommendation> {
                                 .display()
                                 .to_string()),
                     ),
+                    Some(ReasonKey::plain("duplicates.copy").with(
+                        "keeper",
+                        set.copies
+                            .iter()
+                            .find(|c| c.keeper)
+                            .map_or_else(|| "the other copy".to_owned(), |c| c.path.display().to_string()),
+                    )),
                 )
             };
 
@@ -842,7 +856,7 @@ pub fn analyze(scan: &DuplicateScan, brain: &Brain) -> Vec<Recommendation> {
                 savings,
                 justification,
             ) {
-                Ok(rec) => recommendations.push(rec),
+                Ok(rec) => recommendations.push(rec.with_reason_key(reason_key)),
                 Err(err) => tracing::error!(
                     path = %copy.path.display(),
                     error = %err,
@@ -853,6 +867,23 @@ pub fn analyze(scan: &DuplicateScan, brain: &Brain) -> Vec<Recommendation> {
     }
 
     recommendations
+}
+
+/// The keeper sentence has eight fixed combinations of its three optional notes.
+fn keeper_reason_key(reason: &str) -> ReasonKey {
+    let named = reason.contains("its name has no \"copy\" marker");
+    let deliberate = reason.contains("it is filed somewhere deliberate");
+    let oldest = reason.contains("it is the oldest copy");
+    ReasonKey::plain(match (named, deliberate, oldest) {
+        (false, false, false) => "duplicates.keeper.transient",
+        (false, false, true) => "duplicates.keeper.transientOldest",
+        (false, true, false) => "duplicates.keeper.filed",
+        (false, true, true) => "duplicates.keeper.filedOldest",
+        (true, false, false) => "duplicates.keeper.namedTransient",
+        (true, false, true) => "duplicates.keeper.namedTransientOldest",
+        (true, true, false) => "duplicates.keeper.namedFiled",
+        (true, true, true) => "duplicates.keeper.namedFiledOldest",
+    })
 }
 
 /// Confidence reported for a duplicate.
@@ -1488,6 +1519,7 @@ mod tests {
         let recommendations = analyze(&scan, &brain());
 
         assert_eq!(recommendations.len(), 3);
+        assert!(recommendations.iter().any(|rec| rec.reason_key.as_deref().is_some_and(|key| key.starts_with("duplicates.keeper."))));
         for rec in &recommendations {
             assert_ne!(rec.risk, RiskBucket::Safe, "a duplicate went green");
             assert!(!rec.reason.trim().is_empty());
@@ -1502,6 +1534,7 @@ mod tests {
             assert_eq!(rec.risk, RiskBucket::NeedsReview);
             assert_eq!(rec.savings_bytes, 64 * 1024);
             assert!(rec.reason.contains("never removed automatically"));
+            assert_eq!(rec.reason_key.as_deref(), Some("duplicates.copy"));
         }
     }
 
