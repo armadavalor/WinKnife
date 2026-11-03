@@ -34,14 +34,14 @@ use std::path::{Component, Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::core::brain::{Brain, ProtectedPaths, Signals};
+use crate::core::brain::{protected, Brain, ProtectedPaths, Signals};
 use crate::core::error::Result;
 use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare::{same_path, CanonicalPath};
 use crate::core::platform::{EnvResolver, Hive, Registry};
 use crate::core::scanner::CancellationToken;
 use crate::core::types::{
-    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+    Action, Finding, FindingKind, Justification, ReasonKey, Recommendation, RiskBucket,
 };
 
 /// Module id, also the pack's `module` value and the UI route.
@@ -360,13 +360,20 @@ fn under_program_files(path: &Path) -> bool {
 }
 
 /// A protected location at or beneath `path` makes `path` an ancestor of it.
-fn protected_below(path: &Path, protected: &ProtectedPaths) -> Option<String> {
+fn protected_below(path: &Path, protected: &ProtectedPaths) -> Option<(String, Option<ReasonKey>)> {
     let outer = CanonicalPath::lexical(path);
     protected
         .entries()
         .iter()
         .find(|entry| CanonicalPath::lexical(&entry.path).is_within(&outer))
-        .map(|entry| format!("this folder contains a protected location: {}", entry.reason))
+        .map(|entry| {
+            (
+                format!("this folder contains a protected location: {}", entry.reason),
+                protected::reason_key(&entry.reason).map(|why| {
+                    ReasonKey::plain("uninstaller.containsProtected").with("why", why)
+                }),
+            )
+        })
 }
 
 /// The folders a leftover may sit directly in: `%APPDATA%`, `%LOCALAPPDATA%`,
@@ -395,14 +402,19 @@ fn is_top_level(path: &Path, env: &dyn EnvResolver) -> bool {
 
 /// The hard gates `analyze` and [`recheck_refusal`] share.
 fn gate_refusal(path: &Path, brain: &Brain) -> Option<String> {
+    gate_refusal_with_key(path, brain).map(|(reason, _)| reason)
+}
+
+fn gate_refusal_with_key(path: &Path, brain: &Brain) -> Option<(String, Option<ReasonKey>)> {
     if under_program_files(path) {
-        return Some(
+        return Some((
             "Folders under Program Files are shown for information only; remove them with the app's own uninstaller."
                 .to_owned(),
-        );
+            Some(ReasonKey::plain("uninstaller.programFiles")),
+        ));
     }
     if let Some(refusal) = brain.path_refusal(path) {
-        return Some(refusal.reason);
+        return Some((refusal.reason, refusal.reason_key));
     }
     protected_below(path, brain.protected_paths())
 }
@@ -476,7 +488,7 @@ pub fn analyze(findings: &[Finding], brain: &Brain) -> Vec<Recommendation> {
 }
 
 fn recommend(finding: &Finding, brain: &Brain) -> Result<Recommendation> {
-    let blocked = |reason: String| {
+    let blocked = |reason: String, reason_key: Option<ReasonKey>| {
         Recommendation::new(
             vec![finding.id],
             RiskBucket::DoNotDelete,
@@ -486,25 +498,28 @@ fn recommend(finding: &Finding, brain: &Brain) -> Result<Recommendation> {
             0,
             Justification::Informational,
         )
+        .map(|rec| rec.with_reason_key(reason_key))
     };
 
     // Hard gates first; no rule can talk its way past them.
-    if let Some(reason) = gate_refusal(&finding.path, brain) {
-        return blocked(reason);
+    if let Some((reason, reason_key)) = gate_refusal_with_key(&finding.path, brain) {
+        return blocked(reason, reason_key);
     }
     let meta: Option<LeftoverMeta> = serde_json::from_value(finding.meta.clone()).ok();
     match meta {
-        None => return blocked("This folder's contents were not recorded.".to_owned()),
+        None => return blocked("This folder's contents were not recorded.".to_owned(), Some(ReasonKey::plain("uninstaller.contentsNotRecorded"))),
         Some(meta) if meta.has_reparse => {
             return blocked(
                 "This folder holds a link or a cloud placeholder, so it is shown for information only."
                     .to_owned(),
+                Some(ReasonKey::plain("uninstaller.linkOrPlaceholder")),
             )
         }
         Some(meta) if meta.incomplete => {
             return blocked(
                 "Part of this folder could not be read, so it is shown for information only."
                     .to_owned(),
+                Some(ReasonKey::plain("uninstaller.incomplete")),
             )
         }
         Some(_) => {}
@@ -516,11 +531,12 @@ fn recommend(finding: &Finding, brain: &Brain) -> Result<Recommendation> {
         return blocked(
             "No installed app matches this folder, but it is outside your own app data, so it is shown for information only."
                 .to_owned(),
+            Some(ReasonKey::plain("uninstaller.outsideAppData")),
         );
     };
     let verdict = brain.classify_finding_with(finding, Some(rule), &Signals::unknown());
     let Some((pack_id, rule_id)) = verdict.rule.clone() else {
-        return blocked(verdict.reason);
+        return blocked(verdict.reason, verdict.reason_key);
     };
     // Never green: a name match is a guess, so a human always decides.
     let bucket = match verdict.bucket {
@@ -537,6 +553,7 @@ fn recommend(finding: &Finding, brain: &Brain) -> Result<Recommendation> {
     } else {
         0
     };
+    let reason_key = verdict.reason_key;
     Recommendation::new(
         vec![finding.id],
         bucket,
@@ -546,6 +563,7 @@ fn recommend(finding: &Finding, brain: &Brain) -> Result<Recommendation> {
         savings,
         Justification::Rule { pack_id, rule_id },
     )
+    .map(|rec| rec.with_reason_key(reason_key))
 }
 
 /// Registry entry. The commands in `commands.rs` drive the scan.
@@ -782,6 +800,7 @@ mod tests {
         assert_eq!(recs[0].risk, RiskBucket::NeedsReview);
         assert_eq!(recs[0].action, Action::Quarantine);
         assert!(!recs[0].reason.is_empty());
+        assert_eq!(recs[0].reason_key.as_deref(), Some("rule.uninstaller-leftovers.app-data"));
         assert_ne!(recs[0].risk, RiskBucket::Safe);
     }
 

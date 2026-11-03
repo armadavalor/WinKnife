@@ -33,12 +33,12 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::core::brain::{Brain, ProtectedPaths, Signals};
+use crate::core::brain::{protected, Brain, ProtectedPaths, Signals};
 use crate::core::module::{ModuleCapabilities, ModuleCategory, ModuleManifest, ToolModule};
 use crate::core::path_compare::CanonicalPath;
 use crate::core::scanner::CancellationToken;
 use crate::core::types::{
-    Action, Finding, FindingKind, Justification, Recommendation, RiskBucket,
+    Action, Finding, FindingKind, Justification, ReasonKey, Recommendation, RiskBucket,
 };
 
 /// Module id, also the pack's `module` value and the UI route.
@@ -297,7 +297,7 @@ fn recommend(
     brain: &Brain,
     now: DateTime<Utc>,
 ) -> crate::core::error::Result<Recommendation> {
-    let blocked = |reason: String| {
+    let blocked = |reason: String, reason_key: Option<ReasonKey>| {
         Recommendation::new(
             vec![finding.id],
             RiskBucket::DoNotDelete,
@@ -307,19 +307,21 @@ fn recommend(
             0,
             Justification::Informational,
         )
+        .map(|rec| rec.with_reason_key(reason_key))
     };
 
     // Hard gates first; no rule can talk its way past them.
     if let Some(refusal) = brain.path_refusal(&finding.path) {
-        return blocked(refusal.reason);
+        return blocked(refusal.reason, refusal.reason_key);
     }
-    if let Some(reason) = protected_below(&finding.path, brain.protected_paths()) {
-        return blocked(reason);
+    if let Some((reason, reason_key)) = protected_below(&finding.path, brain.protected_paths()) {
+        return blocked(reason, reason_key);
     }
     if meta_flag(finding, "system") {
         return blocked(
             "Windows marks this as a system folder, so it is left alone even though it is empty."
                 .to_owned(),
+            Some(ReasonKey::plain("emptyFolders.systemFolder")),
         );
     }
 
@@ -337,6 +339,7 @@ fn recommend(
         },
         None => Justification::Informational,
     };
+    let reason_key = verdict.reason_key;
     Recommendation::new(
         vec![finding.id],
         verdict.bucket,
@@ -346,16 +349,24 @@ fn recommend(
         0,
         justification,
     )
+    .map(|rec| rec.with_reason_key(reason_key))
 }
 
 /// A protected location at or beneath `path` makes `path` an ancestor of it.
-fn protected_below(path: &Path, protected: &ProtectedPaths) -> Option<String> {
+fn protected_below(path: &Path, protected: &ProtectedPaths) -> Option<(String, Option<ReasonKey>)> {
     let outer = CanonicalPath::lexical(path);
     protected
         .entries()
         .iter()
         .find(|entry| CanonicalPath::lexical(&entry.path).is_within(&outer))
-        .map(|entry| format!("this folder contains a protected location: {}", entry.reason))
+        .map(|entry| {
+            (
+                format!("this folder contains a protected location: {}", entry.reason),
+                protected::reason_key(&entry.reason).map(|why| {
+                    ReasonKey::plain("emptyFolders.containsProtected").with("why", why)
+                }),
+            )
+        })
 }
 
 fn meta_flag(finding: &Finding, key: &str) -> bool {
@@ -692,6 +703,7 @@ mod tests {
 
         assert_eq!(recs[0].risk, RiskBucket::DoNotDelete);
         assert!(recs[0].reason.contains("system folder"));
+        assert_eq!(recs[0].reason_key.as_deref(), Some("emptyFolders.systemFolder"));
     }
 
     fn rate(p: &Profile, brain: &Brain, rel: &str, age_hours: u64) -> (RiskBucket, Action) {
@@ -823,6 +835,7 @@ mod tests {
         assert_eq!(found(&out, &base), vec!["old"]);
         let recs = analyze(&out.findings, &brain);
         assert_eq!(recs[0].action, Action::Quarantine, "{recs:?}");
+        assert_eq!(recs[0].reason_key.as_deref(), Some("rule.empty-folders.temp-old"));
 
         let rig = rig();
         let report = run_one(&rig, &brain, &recs[0], &out.findings[0]);

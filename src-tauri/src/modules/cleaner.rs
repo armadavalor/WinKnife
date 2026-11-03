@@ -2494,18 +2494,21 @@ mod tests {
         let sources = [
             include_str!("../core/brain/mod.rs"),
             include_str!("../core/brain/protected.rs"),
+            include_str!("empty_folders.rs"),
+            include_str!("uninstaller.rs"),
         ];
         let mut emitted: Vec<String> = sources
             .iter()
             .flat_map(|src| src.split('"').skip(1).step_by(2))
-            .filter(|lit| lit.starts_with("brain.") || lit.starts_with("protected."))
+            .filter(|lit| {
+                lit.starts_with("brain.")
+                    || lit.starts_with("protected.")
+                    || lit.starts_with("emptyFolders.")
+                    || lit.starts_with("uninstaller.")
+            })
             .map(str::to_owned)
             .collect();
         for pack in rules::load_dir(&repo_rules_dir(), &stock_env()).expect("load") {
-            // Packs of other modules: not translated in this round (K-037).
-            if matches!(pack.spec.id.as_str(), "empty-folders" | "uninstaller-leftovers") {
-                continue;
-            }
             for rule in &pack.spec.rules {
                 let key = rule.reason_key.as_deref();
                 assert!(key.is_some(), "rule {}.{} has no reasonKey", pack.spec.id, rule.id);

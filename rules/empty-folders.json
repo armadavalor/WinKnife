@@ -20,6 +20,7 @@
       ],
       "score": { "base": 0, "max_bucket": "do_not_delete" },
       "action": "info_only",
+      "reasonKey": "rule.empty-folders.shell-folders",
       "reason": "Windows and your apps expect this standard folder to exist, even when it is empty, so it is left alone."
     },
     {
@@ -28,6 +29,7 @@
       "match": { "min_age_hours": 168 },
       "score": { "base": 90, "max_bucket": "safe" },
       "action": "quarantine",
+      "reasonKey": "rule.empty-folders.temp-old",
       "reason": "Empty folder in your temp folder, untouched for more than 7 days; programs recreate these when they need them."
     },
     {
@@ -35,6 +37,7 @@
       "paths": ["%TEMP%\\**", "%LOCALAPPDATA%\\Temp\\**"],
       "score": { "base": 60, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.empty-folders.temp-recent",
       "reason": "Empty folder in your temp folder, but it changed within the last 7 days, so a running program may still be about to use it."
     },
     {
@@ -50,6 +53,7 @@
       ],
       "score": { "base": 60, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.empty-folders.shell-folder-children",
       "reason": "Empty folder inside one of your personal folders. You may have created it on purpose, so check before removing it."
     },
     {
@@ -57,6 +61,7 @@
       "paths": ["%APPDATA%\\**", "%LOCALAPPDATA%\\**"],
       "score": { "base": 60, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.empty-folders.app-data",
       "reason": "Empty folder in application data. An app may expect this folder to exist, so check before removing it."
     },
     {
@@ -64,6 +69,7 @@
       "paths": ["%PROGRAMDATA%\\**"],
       "score": { "base": 60, "max_bucket": "do_not_delete" },
       "action": "info_only",
+      "reasonKey": "rule.empty-folders.program-data",
       "reason": "Empty folder in shared application data. An app may expect this folder to exist, so it is shown for information and never offered for removal.",
       "requires_admin": true
     },
@@ -72,6 +78,7 @@
       "paths": ["**"],
       "score": { "base": 60, "max_bucket": "needs_review" },
       "action": "quarantine",
+      "reasonKey": "rule.empty-folders.anything-else",
       "reason": "This folder holds no files at any depth. It may be a leftover, or it may be a placeholder you made on purpose.",
       "requires_admin": true
     }
